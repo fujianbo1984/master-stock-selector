@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}大师选股{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css?v=20260807-global-hierarchy-v2">
+</head>
+<body class="app-body">
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <main class="shell" id="main-content">
+    {% block body %}{% endblock %}
+  </main>
+  <script>
+    document.querySelectorAll("table[data-sortable='true']").forEach((table) => {
+      const headers = Array.from(table.querySelectorAll("thead th"));
+      const sortRows = (th, index, direction) => {
+        const tbody = table.querySelector("tbody");
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        table.querySelectorAll("th").forEach(item => { delete item.dataset.direction; item.setAttribute("aria-sort", "none"); });
+        th.dataset.direction = direction;
+        th.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
+        rows.sort((a, b) => {
+          const av = a.children[index]?.dataset.sort || a.children[index]?.textContent.trim() || "";
+          const bv = b.children[index]?.dataset.sort || b.children[index]?.textContent.trim() || "";
+          const an = Number(String(av).replace(/[%亿,]/g, ""));
+          const bn = Number(String(bv).replace(/[%亿,]/g, ""));
+          const result = Number.isFinite(an) && Number.isFinite(bn)
+            ? an - bn
+            : String(av).localeCompare(String(bv), "zh-Hans-CN");
+          return direction === "asc" ? result : -result;
+        });
+        rows.forEach(row => tbody.appendChild(row));
+      };
+
+      headers.forEach((th, index) => {
+        th.tabIndex = 0;
+        th.setAttribute("role", "button");
+        th.setAttribute("aria-sort", "none");
+        th.setAttribute("aria-label", `按${th.textContent.trim()}排序`);
+        const sort = () => {
+          const direction = th.dataset.direction === "asc" ? "desc" : "asc";
+          sortRows(th, index, direction);
+        };
+        th.addEventListener("click", sort);
+        th.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); sort(); }
+        });
+      });
+
+      const defaultIndex = Number(table.dataset.defaultSort);
+      if (Number.isInteger(defaultIndex) && headers[defaultIndex]) {
+        const defaultDirection = table.dataset.defaultDirection === "asc" ? "asc" : "desc";
+        sortRows(headers[defaultIndex], defaultIndex, defaultDirection);
+      }
+    });
+
+    document.querySelectorAll("[data-daily-tabs]").forEach((tabs) => {
+      const tabList = tabs.querySelector("[role='tablist']");
+      if (!tabList) return;
+      const buttons = Array.from(tabList.querySelectorAll("[role='tab']"));
+      const panels = buttons
+        .map(button => document.getElementById(button.getAttribute("aria-controls")))
+        .filter(Boolean);
+      const knownTargets = new Set(panels.map(panel => panel.id));
+
+      const activate = (target, updateHash = false, moveFocus = false) => {
+        const selectedTarget = knownTargets.has(target) ? target : panels[0]?.id;
+        if (!selectedTarget) return;
+        buttons.forEach((button) => {
+          const selected = button.getAttribute("aria-controls") === selectedTarget;
+          button.setAttribute("aria-selected", selected ? "true" : "false");
+          button.tabIndex = selected ? 0 : -1;
+          if (selected && moveFocus) button.focus();
+        });
+        panels.forEach((panel) => { panel.hidden = panel.id !== selectedTarget; });
+        if (updateHash) {
+          const nextUrl = `${window.location.pathname}${window.location.search}#${selectedTarget}`;
+          window.history.replaceState(null, "", nextUrl);
+        }
+      };
+
+      buttons.forEach((button, index) => {
+        button.addEventListener("click", () => {
+          activate(button.getAttribute("aria-controls"), true);
+        });
+        button.addEventListener("keydown", (event) => {
+          let nextIndex = null;
+          if (event.key === "ArrowRight") nextIndex = (index + 1) % buttons.length;
+          if (event.key === "ArrowLeft") nextIndex = (index - 1 + buttons.length) % buttons.length;
+          if (event.key === "Home") nextIndex = 0;
+          if (event.key === "End") nextIndex = buttons.length - 1;
+          if (nextIndex === null) return;
+          event.preventDefault();
+          activate(buttons[nextIndex].getAttribute("aria-controls"), true, true);
+        });
+      });
+
+      const hashTarget = window.location.hash.slice(1);
+      activate(hashTarget || panels[0]?.id);
+      window.addEventListener("hashchange", () => activate(window.location.hash.slice(1)));
+    });
+
+    const tradingViewSymbols = (groupId) => {
+      const group = document.getElementById(groupId);
+      return group
+        ? Array.from(group.querySelectorAll("[data-tradingview-symbol]"), link => link.dataset.tradingviewSymbol)
+            .filter(Boolean)
+        : [];
+    };
+
+    document.querySelectorAll("[data-download-tradingview-list]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const symbols = tradingViewSymbols(button.dataset.downloadTradingviewList);
+        if (!symbols.length) { button.textContent = "本组没有可导出的代码"; return; }
+        const file = new Blob([symbols.join(",")], { type: "text/plain;charset=utf-8" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(file);
+        link.download = "tradingview-watchlist.txt";
+        link.click();
+        URL.revokeObjectURL(link.href);
+      });
+    });
+
+    document.querySelectorAll("[data-copy-tradingview-list]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const symbols = tradingViewSymbols(button.dataset.copyTradingviewList);
+        if (!symbols.length || !navigator.clipboard) { button.textContent = "复制不可用"; return; }
+        try {
+          await navigator.clipboard.writeText(symbols.join(","));
+          button.textContent = `已复制 ${symbols.length} 个代码`;
+        } catch (_) {
+          button.textContent = "复制被浏览器阻止";
+        }
+      });
+    });
+
+  </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+{% extends "market.html" %}
+{% block heading %}四指数判断{% endblock %}
+{% block subtitle %}Weinstein 完整阶段 + Minervini Stage 2 是/否 · 数据截至 {{ query_date }}{% endblock %}
+{% block content %}
+<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">TWO INDEPENDENT METHODS</p><h2>四指数独立判断</h2></div><span class="muted">{{ weinstein_policy_version }}<br>{{ minervini_policy_version }}</span></div>
+  <p class="reading-note">Weinstein 只使用已结束的完整交易周；Minervini 只回答是否处于 Stage 2。四指数不投票、不加权，也不直接决定个股能否进入观察池。</p>
+  {% if indices %}
+  <div class="index-detail-grid">
+    {% for row in indices %}
+    <article class="panel index-detail-card stage-{{ row.stage|lower }}">
+      <div class="section-heading"><div><h3><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在 TradingView 中文版打开 {{ row.index_name }} K线">{{ row.index_name }}</a></h3><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.index_symbol }}">{{ row.index_symbol }}</a></div><div class="index-stage-status"><small>Weinstein</small><span class="status-marker status-{{ 'pass' if row.stage == 'STAGE_2' else 'unknown' if row.stage in ['UNKNOWN','TRANSITION'] else 'fail' }}">{{ row.stage_label }}</span></div></div>
+      <dl class="evidence-grid">
+        <div><dt>有效周结束</dt><dd>{{ row.effective_date }}</dd></div>
+        <div><dt>阶段开始</dt><dd>{{ row.stage_started_on }}</dd></div>
+        <div><dt>持续</dt><dd>{{ row.duration_weeks }} 周</dd></div>
+        <div><dt>周收盘</dt><dd>{{ row.metrics.close if row.metrics.close is not none else '暂无' }}</dd></div>
+        <div><dt>30周均线</dt><dd>{{ row.metrics.ma30 if row.metrics.ma30 is not none else '暂无' }}</dd></div>
+        <div><dt>30周线4周斜率</dt><dd>{{ row.metrics.ma30_slope_4w_pct if row.metrics.ma30_slope_4w_pct is not none else '暂无' }}{% if row.metrics.ma30_slope_4w_pct is not none %}%{% endif %}</dd></div>
+        <div><dt>近13周</dt><dd>{{ row.metrics.return_13w_pct if row.metrics.return_13w_pct is not none else '暂无' }}{% if row.metrics.return_13w_pct is not none %}%{% endif %}</dd></div>
+        <div><dt>价格位置</dt><dd>{{ '30周线上方' if row.metrics.close_above_ma30 else '30周线下方' if row.metrics.close_above_ma30 is not none else '暂无' }}</dd></div>
+      </dl>
+      {% if row.stage == 'UNKNOWN' %}<p class="muted">历史不足，不能强行判定阶段。</p>{% elif row.stage == 'TRANSITION' %}<p class="muted">当前证据冲突，保留为转换期。</p>{% endif %}
+      <div class="index-minervini-panel">
+        <div><span>Minervini Stage 2</span><strong class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</strong></div>
+        <small>日线趋势模板 · {{ row.minervini.as_of_date }} · 不使用个股横截面 RS 排名</small>
+        {% if row.minervini.result == 'FAIL' %}<small>未通过 {{ row.minervini.failed_check_count }} 项趋势条件。</small>{% elif row.minervini.result == 'UNKNOWN' %}<small>历史或当日指数数据不足，不强行判定。</small>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">暂无指数阶段事实。请先运行 <code>masterstock watchlist</code>。</div>{% endif %}
+</section>
+
+<section class="section panel notes-panel">
+  <h2>判定原则</h2>
+  <p>Stage 2 要求价格位于上升的30周均线上方且中期回报为正；Stage 4 为价格位于下降的30周均线下方且中期回报为负。均线走平时必须结合此前路径区分 Stage 1 与 Stage 3，无法唯一判断时输出转换期。</p>
+  <p>Minervini 指数 Stage 2 使用50日、150日、200日均线关系、200日线方向与52周价格位置。因对象是指数，不把四个指数互相排名来代替个股横截面相对强度条件；结果只是“是”“否”或“数据不足”。</p>
+</section>
+{% endblock %}

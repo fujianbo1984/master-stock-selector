@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=9.0
+mypy>=1.15,<2
+ruff>=0.11,<1
+setuptools>=75,<83
+wheel>=0.45,<1

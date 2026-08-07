@@ -1,0 +1,41 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block heading %}行业聚集观察{% endblock %}
+{% block subtitle %}SW2021 申万三级行业 · Weinstein 与 Minervini 独立事实 · {{ query_date }}{% endblock %}
+{% block content %}
+<section class="section daily-hero watchlist-hero">
+  <div><p class="eyebrow">INDUSTRY OBSERVATION</p><h1>看入选股在哪些行业聚集</h1><p class="muted">行业层只提供人工分析线索；不计分、不判定“主线”、不修改任何个股方法结论。</p></div>
+  <form class="form-row daily-filter" method="get" action="/a/industries">
+    <label class="filter-date">日期 <input name="date" value="{{ query_date }}" type="date"></label>
+    <label>方法 <select name="method">{% for value, label in [('all','全部'),('weinstein','Weinstein 有入选'),('minervini','Minervini 有入选'),('both','两法有交集')] %}<option value="{{ value }}" {% if filters.method == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>最小成员数 <input name="min_members" type="number" min="1" value="{{ filters.min_members }}"></label>
+    <label class="filter-search">搜索 <input name="q" value="{{ filters.q }}" placeholder="行业代码或名称"></label>
+    <button class="button filter-submit" type="submit">筛选</button>
+  </form>
+</section>
+
+<section class="section grid kpi-grid watchlist-summary industry-summary-grid">
+  <div class="kpi kpi-accent"><span>申万三级行业</span><strong>{{ summary.industries }}</strong></div>
+  <div class="kpi"><span>当日有入选股</span><strong>{{ summary.active }}</strong></div>
+  <div class="kpi"><span>成员映射覆盖</span><strong>{{ summary.coverage if summary.coverage is not none else '—' }}%</strong></div>
+  <div class="kpi"><span>小样本行业</span><strong>{{ summary.small_sample }}</strong></div>
+  <div class="kpi"><span>来源不足</span><strong>{{ summary.unknown }}</strong></div>
+</section>
+
+<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">FACT TABLE</p><h2>行业方法宽度</h2></div><span class="muted">显示 {{ rows|length }} 条 · 按入选数量排列，非行业排名</span></div>
+  {% if rows %}<div class="table-wrap"><table class="industry-observation-table" data-sortable="true"><thead><tr><th>行业</th><th>成员</th><th>Weinstein 符合</th><th>W 新入/重进</th><th>W 退出/中断</th><th>Minervini 符合</th><th>M 新入/重进</th><th>M 退出/中断</th><th>两法同时</th><th>并集</th><th>质量</th></tr></thead><tbody>
+  {% for row in rows %}<tr>
+    <td><a href="/a/industries/{{ row.industry_code }}/chart?date={{ query_date }}" title="打开 {{ row.industry_name }} 行业K线"><strong>{{ row.industry_name }}</strong><small>{{ row.industry_code }} · SW2021-L3</small></a></td>
+    <td data-sort="{{ row.eligible_member_count }}">{{ row.eligible_member_count }}</td>
+    <td data-sort="{{ row.weinstein_pass_count }}"><strong>{{ row.weinstein_pass_count }}</strong> / {{ row.weinstein_evaluable_count }}{% if row.weinstein_pass_rate_pct is not none %}<small>{{ row.weinstein_pass_rate_pct }}%</small>{% endif %}</td>
+    <td>{{ row.w_entered_count + row.w_reentered_count }}</td><td>{{ row.w_exited_count + row.w_data_gap_count }}</td>
+    <td data-sort="{{ row.minervini_pass_count }}"><strong>{{ row.minervini_pass_count }}</strong> / {{ row.minervini_evaluable_count }}{% if row.minervini_pass_rate_pct is not none %}<small>{{ row.minervini_pass_rate_pct }}%</small>{% endif %}</td>
+    <td>{{ row.m_entered_count + row.m_reentered_count }}</td><td>{{ row.m_exited_count + row.m_data_gap_count }}</td>
+    <td data-sort="{{ row.both_pass_count }}"><strong>{{ row.both_pass_count }}</strong></td><td>{{ row.union_pass_count }}</td>
+    <td><span class="tag tag-{{ 'risk' if row.quality_state == 'UNKNOWN' else 'muted' if row.quality_state == 'SMALL_SAMPLE' else 'pass' }}">{{ row.quality_label }}</span></td>
+  </tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">该日期没有符合当前筛选条件的行业事实。</div>{% endif %}
+</section>
+
+<section class="section panel notes-panel"><div class="section-heading"><div><p class="eyebrow">BOUNDARY</p><h2>解读边界</h2></div><a class="text-link" href="/a/daily?date={{ query_date }}">返回大师观察池 →</a></div><p>成员少于 5 只的行业标记为小样本，比率不用于跨行业排名。成员映射覆盖低于 95% 或存在重复归属时，行业层标记来源不足，但个股观察池继续独立工作。</p></section>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block heading %}{{ stock.identity.name or stock.symbol }}{% endblock %}
+{% block subtitle %}{{ stock.symbol }} · {{ stock.industry.industry_name or '行业待补' }} · 两种方法独立证据{% endblock %}
+{% block content %}
+<section class="section stock-identity-card">
+  <div><p class="eyebrow">STOCK REVIEW</p><h1>{% if stock.external_urls.tradingview_url %}<a href="{{ stock.external_urls.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在 TradingView 中文版打开 {{ stock.identity.name }} K线">{{ stock.identity.name or '名称待补' }}</a>{% else %}{{ stock.identity.name or '名称待补' }}{% endif %} <small>{% if stock.external_urls.tonghuashun_url %}<a href="{{ stock.external_urls.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ stock.symbol }}">{{ stock.symbol }}</a>{% else %}{{ stock.symbol }}{% endif %}</small></h1><p class="muted">上市：{{ stock.identity.list_date or '暂无' }}{% if stock.industry.industry_code %} · 行业：<a href="/a/industries/{{ stock.industry.industry_code }}/chart?date={{ query_date }}" title="打开 {{ stock.industry.industry_name }} 行业K线">{{ stock.industry.industry_name }}（SW2021-L3）</a>{% endif %}{% if stock.identity.is_st %} · ST风险{% endif %}{% if stock.identity.is_suspended %} · 当前停牌{% endif %}</p>
+  {% if stock.market_metrics.total_market_cap_yi is defined and stock.market_metrics.total_market_cap_yi is not none %}<div class="stock-market-strip"><span>总市值 <strong>{{ stock.market_metrics.total_market_cap_yi }}亿</strong></span><span>流通市值 <strong>{{ stock.market_metrics.float_market_cap_yi }}亿</strong></span><span>20日成交中位 <strong>{{ stock.market_metrics.median_amount_20d_yi }}亿</strong></span>{% if stock.market_metrics.total_market_cap_yi < 50 %}<span class="tag tag-caution">小市值</span>{% endif %}</div>{% endif %}</div>
+  <div class="chart-hero-actions"><a class="button button-secondary" href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.query }}">站内日线图</a><a class="button button-secondary" href="/a/daily?date={{ query_date }}">返回观察池</a></div>
+</section>
+
+{% if navigation.total %}
+<nav class="section list-stock-navigation" aria-label="{{ navigation.section_label }}快速切换">
+  <span class="muted">{{ navigation.section_label }} · {{ navigation.position }} / {{ navigation.total }}</span>
+  {% if navigation.previous %}<a class="button button-secondary button-compact" href="/a/stocks/{{ navigation.previous.symbol }}?{{ navigation.query }}">← {{ navigation.previous.name }}</a>{% endif %}
+  {% if navigation.next %}<a class="button button-secondary button-compact" href="/a/stocks/{{ navigation.next.symbol }}?{{ navigation.query }}">{{ navigation.next.name }} →</a>{% endif %}
+</nav>
+{% endif %}
+
+{% if stock.industry_confirmation %}
+<section class="section panel industry-stock-context">
+  <div class="section-heading"><div><p class="eyebrow">INDUSTRY CONTEXT</p><h2>行业背景（仅人工参考）</h2></div><a class="text-link" href="/a/industries/{{ stock.industry.industry_code }}/chart?date={{ query_date }}">查看行业确认 →</a></div>
+  <p class="reading-note"><strong>{{ stock.industry.industry_name }}：</strong>{{ stock.industry_confirmation.summary }}</p>
+  <div class="quality-strip"><span>{{ stock.industry_confirmation.stage_label }}</span><span>30周斜率：{% if stock.industry_confirmation.metrics and stock.industry_confirmation.metrics.ma30_slope_4w_pct is not none %}{{ stock.industry_confirmation.metrics.ma30_slope_4w_pct }}%{% else %}暂无{% endif %}</span><span>W 宽度：{{ stock.industry_confirmation.weinstein_pass_count }} / {{ stock.industry_confirmation.weinstein_evaluable_count }}</span><span>新进/重进：{{ stock.industry_confirmation.weinstein_entered_count }}</span><span>价格覆盖：{{ stock.industry_confirmation.price_coverage_pct_label }}</span></div>
+  <p class="muted">行业代理不参与 {{ stock.symbol }} 的 Weinstein 或 Minervini 结论。</p>
+</section>
+{% endif %}
+
+<section class="section panel manual-review-panel">
+  <div class="section-heading"><div><p class="eyebrow">HUMAN REVIEW</p><h2>人工观察记录</h2></div><span class="manual-state manual-{{ stock.manual.manual_state|lower }}">{{ stock.manual_label }}</span></div>
+  <form method="post" action="/a/stocks/{{ stock.symbol }}/review" class="review-form">
+    <label>状态
+      <select name="manual_state">{% for value, label in manual_labels.items() %}<option value="{{ value }}" {% if stock.manual.manual_state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    </label>
+    <label class="review-note">分析备注<textarea name="note" rows="3" placeholder="记录公司、行业、图表和风险判断；不要把系统入选当成买入理由。">{{ stock.manual.note }}</textarea></label>
+    <button class="button" type="submit">保存人工记录</button>
+  </form>
+  {% if stock.manual.reviewed_at %}<p class="muted">最后复核：{{ stock.manual.reviewed_at }}</p>{% endif %}
+</section>
+
+<section class="section method-evidence-grid">
+  {% for method_key, label in [('weinstein','Weinstein'),('minervini','Minervini')] %}
+  {% set row = stock.latest.get(method_key) %}
+  <article class="panel method-evidence-card">
+    <div class="section-heading"><div><p class="eyebrow">{{ label|upper }}</p><h2>{{ label }}</h2></div>{% if row %}<span class="status-marker status-{{ 'pass' if row.result == 'PASS' else 'unknown' if row.result in ['UNKNOWN','TRANSITION'] else 'fail' }}">{{ row.result_label }}</span>{% endif %}</div>
+    {% if row %}
+    <div class="quality-strip"><span>日期：{{ row.as_of_date }}</span><span>变化：{{ row.state_label }}</span><span>来源：{{ row.origin }}</span></div>
+    {% if method_key == 'weinstein' %}
+      <dl class="evidence-grid"><div><dt>阶段</dt><dd>{{ row.stage_label or row.profile.stage }}</dd></div><div><dt>有效周</dt><dd>{{ row.profile.effective_week_end or '暂无' }}</dd></div><div><dt>阶段开始</dt><dd>{{ row.profile.stage_started_on or '暂无' }}</dd></div><div><dt>持续</dt><dd>{{ row.profile.duration_weeks or 0 }} 周</dd></div><div><dt>30周线</dt><dd>{{ row.profile.metrics.ma30 if row.profile.metrics else '暂无' }}</dd></div><div><dt>4周斜率</dt><dd>{{ row.profile.metrics.ma30_slope_4w_pct if row.profile.metrics else '暂无' }}%</dd></div></dl>
+    {% else %}
+      <dl class="evidence-grid">{% for key, value in row.profile.metrics.items() %}<div><dt>{{ minervini_metric_labels.get(key, key) }}</dt><dd>{{ value if value is not none else '暂无' }}</dd></div>{% endfor %}</dl>
+      <div class="rule-checks">{% for key, passed in row.profile.checks.items() %}<span class="tag {{ 'tag-pass' if passed else 'tag-risk' }}">{{ '✓' if passed else '×' }} {{ minervini_check_labels.get(key, key) }}</span>{% endfor %}</div>
+    {% endif %}
+    <p class="muted">规则版本：{{ row.policy_version }} · 首次符合：{{ row.first_qualified_on or '尚未符合' }} · 本轮开始：{{ row.streak_started_on or '—' }} · 连续 {{ row.consecutive_sessions or 0 }} 个交易日</p>
+    {% else %}<div class="empty">暂无该方法事实。</div>{% endif %}
+  </article>
+  {% endfor %}
+</section>
+
+<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">HISTORY</p><h2>方法事实与变化历史</h2></div><span class="muted">显示最近事实及进入、退出、重进变化 {{ stock.visible_history|length }} 条；库内共 {{ stock.history_total }} 条</span></div>
+  <div class="table-wrap"><table data-sortable="true"><thead><tr><th>日期</th><th>方法</th><th>结论</th><th>变化</th><th>本轮开始</th><th>连续交易日</th><th>来源</th></tr></thead><tbody>{% for row in stock.visible_history %}<tr><td>{{ row.as_of_date }}</td><td>{{ row.method_label }}</td><td>{{ row.result_label }}</td><td>{{ row.state_label or '—' }}</td><td>{{ row.streak_started_on or '—' }}</td><td>{{ row.consecutive_sessions or 0 }}</td><td>{{ row.origin }}</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

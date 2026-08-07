@@ -1,0 +1,52 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block heading %}{{ stock_name }} 日线图{% endblock %}
+{% block subtitle %}{{ symbol }} · 前复权 · 数据截至 {{ query_date }}{% endblock %}
+{% block content %}
+<section id="stock-chart" class="section panel stock-chart-panel chart-workbench" data-stock-chart data-symbol="{{ symbol }}" data-date="{{ query_date }}" tabindex="-1">
+  <header class="chart-workbench-header">
+  <div class="chart-workbench-title"><h1>{% if external_urls.tradingview_url %}<a href="{{ external_urls.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在 TradingView 打开 {{ stock_name }}">{{ stock_name }}</a>{% else %}{{ stock_name }}{% endif %} <small>{% if external_urls.tonghuashun_url %}<a href="{{ external_urls.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ symbol }}">{{ symbol }}</a>{% else %}{{ symbol }}{% endif %}</small></h1><p>本地图表只用于人工复核，不产生买卖指令。</p></div>
+  <div class="chart-hero-actions">
+    <div class="chart-method-status" aria-label="{{ query_date }} 两位大师模板状态">
+      <span class="chart-observation {% if is_observation_today %}is-observation{% else %}is-not-observation{% endif %}">{% if is_observation_today %}今日观察名单{% else %}非今日观察名单{% endif %}</span>
+      {% for item in chart_methods %}<span class="chart-method-pill method-{{ item.result|lower }}">{{ item.label }}：{{ item.result_label }}</span>{% endfor %}
+    </div>
+    {% if navigation.total %}
+    <nav class="list-stock-navigation chart-list-navigation" aria-label="{{ navigation.section_label }}快速切换">
+      <span class="chart-navigation-context">{{ navigation.section_label }} <b>{{ navigation.position }} / {{ navigation.total }}</b></span>
+      {% if navigation.previous %}<a class="button button-secondary button-compact" data-chart-previous href="/a/stocks/{{ navigation.previous.symbol }}/chart?{{ navigation.query }}#stock-chart">← 上一只：{{ navigation.previous.name }}</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">← 已是第一只</span>{% endif %}
+      {% if navigation.next %}<a class="button button-compact" data-chart-next href="/a/stocks/{{ navigation.next.symbol }}/chart?{{ navigation.query }}#stock-chart">下一只：{{ navigation.next.name }} →</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">已是最后一只 →</span>{% endif %}
+    </nav>
+    {% endif %}
+    <form method="post" action="/a/stocks/{{ symbol }}/review" class="chart-review-control" aria-label="人工观察记录">
+      <input type="hidden" name="return_to" value="/a/stocks/{{ symbol }}/chart?{{ navigation.query }}#stock-chart">
+      <input type="hidden" name="nav_position" value="{{ navigation.position }}"><input type="hidden" name="nav_total" value="{{ navigation.total }}">{% if navigation.previous %}<input type="hidden" name="nav_previous" value="{{ navigation.previous.symbol }}">{% endif %}{% if navigation.next %}<input type="hidden" name="nav_next" value="{{ navigation.next.symbol }}">{% endif %}
+      <span>人工观察</span><select name="manual_state" aria-label="人工观察状态" title="变更后自动保存">{% for value, label in manual_labels.items() %}<option value="{{ value }}" {% if stock.manual.manual_state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="chart-review-autosave">自动保存</span>
+    </form>
+    <a class="button button-secondary" href="{{ back_url }}">返回个股证据</a><a class="text-link" href="/a/daily?date={{ query_date }}">返回观察池 →</a>
+  </div>
+  </header>
+  <div class="chart-toolbar" aria-label="图表设置">
+    <div class="chart-periods" role="group" aria-label="显示区间"><button class="button button-secondary button-compact" type="button" data-chart-limit="50" aria-pressed="false">1月</button><button class="button button-secondary button-compact" type="button" data-chart-limit="100" aria-pressed="false">3月</button><button class="button button-secondary button-compact" type="button" data-chart-limit="180" aria-pressed="false">6月</button><button class="button button-secondary button-compact" type="button" data-chart-limit="260" aria-pressed="true">1年</button><button class="button button-secondary button-compact" type="button" data-chart-limit="320" aria-pressed="false">全部</button></div>
+    <div class="drawing-tool-group" role="group" aria-label="画线工具"><span class="chart-tool-label">画图</span><button class="button button-secondary button-compact" type="button" data-draw-tool="browse" aria-pressed="true">浏览</button><button class="button button-secondary button-compact" type="button" data-draw-tool="select" aria-pressed="false">选择</button><button class="button button-secondary button-compact" type="button" data-draw-tool="trendline" aria-pressed="false">趋势线</button><button class="button button-secondary button-compact" type="button" data-draw-tool="horizontal" aria-pressed="false">水平线</button></div>
+    <span class="drawing-hint" data-drawing-hint>选择工具后在图上点击</span><span class="drawing-destructive-actions" data-drawing-actions hidden><button class="text-button" type="button" data-delete-selected disabled>删除选中</button><button class="text-button" type="button" data-clear-drawings>清空全部</button></span>
+    <details class="kc-settings">
+      <summary><span data-kc-summary>KC：EMA20 · ATR10 · ×2.25 · 收盘价</span><b>设置</b></summary>
+      <div class="kc-settings-panel">
+        <label>KC 基准<select data-kc-ma><option value="ema" selected>EMA</option><option value="sma">SMA</option></select></label>
+        <label>通道<select data-kc-style><option value="atr" selected>ATR</option><option value="tr">True Range</option><option value="range">Range</option></select></label>
+        <label>MA <input data-kc-length type="number" min="1" max="250" value="20"></label>
+        <label>ATR <input data-kc-atr-length type="number" min="1" max="250" value="10"></label>
+        <label>倍数 <input data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="2.25"></label>
+        <label>来源<select data-kc-source><option value="close" selected>收盘价</option><option value="open">开盘价</option><option value="high">最高价</option><option value="low">最低价</option></select></label>
+      </div>
+    </details>
+    <output class="chart-range-status" data-chart-status>正在加载本地日线…</output>
+  </div>
+  <div class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>Keltner Channel <span>图表由 <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a> 提供</span></div>
+  <div class="stock-chart-stage"><div class="stock-chart-canvas" data-chart-canvas></div><canvas class="drawing-overlay" data-drawing-overlay aria-label="趋势线与水平线绘图区"></canvas></div>
+  <p class="muted chart-boundary">画线仅保存为个人观察标注，并绑定当前前复权尺度；若本地复权尺度不一致，系统不会加载或套用旧标注。</p>
+</section>
+<script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
+<script src="/static/stock-chart.js?v=20260807-stock-chart-v10"></script>
+{% endblock %}

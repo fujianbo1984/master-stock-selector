@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=75,<83", "wheel>=0.45,<1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "master-stock-selector"
+version = "0.1.0"
+description = "Two-method A-share master watchlist for human review."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "httpx2>=0.28",
+  "jinja2>=3.1",
+  "uvicorn>=0.30",
+]
+
+[project.scripts]
+masterstock = "master_stock_selector.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+  "integration: temporary SQLite, CLI, or FastAPI integration checks",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+  "src/master_stock_selector/cli.py",
+  "src/master_stock_selector/commands",
+  "src/master_stock_selector/watchlist",
+  "src/master_stock_selector/web/app.py",
+  "src/master_stock_selector/web/routers/watchlist.py",
+  "tests",
+]
+mypy_path = "src"
+warn_unused_configs = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+explicit_package_bases = true
+ignore_missing_imports = true
+show_error_codes = true

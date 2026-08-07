@@ -1,0 +1,13 @@
+{% extends "market.html" %}
+{% block heading %}运行凭证{% endblock %}
+{% block subtitle %}查看“行情采集 → 方法计算”的最近闭环凭证{% endblock %}
+{% block content %}
+<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">COLLECTION RECEIPTS</p><h2>行情采集</h2></div><span class="muted">质量门通过才会写入</span></div>
+  {% if collections %}<div class="table-wrap"><table data-sortable="true"><thead><tr><th>采集时间</th><th>交易日</th><th>数据源</th><th>完整股票</th><th>证券总数</th><th>覆盖率</th><th>市值数据</th><th>指数</th><th>复权重算</th><th>状态</th></tr></thead><tbody>{% for row in collections %}<tr><td>{{ row.started_at }}</td><td>{{ row.trade_date }}</td><td>{{ row.provider }}</td><td>{{ row.stock_count }}</td><td>{{ row.expected_universe_count }}</td><td>{{ "%.2f%%"|format(row.coverage_ratio * 100) }}</td><td>{{ row.metrics_count }}</td><td>{{ row.index_count }}/4</td><td>{{ row.rescaled_symbol_count }}</td><td>{{ row.status }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">尚无新闭环采集凭证；现有历史行情仍可用于查看已生成结果。</div>{% endif %}
+</section>
+<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">SELECTION RECEIPTS</p><h2>方法计算</h2></div><span class="muted">运维入口，不参与选股</span></div>
+  {% if runs %}<div class="table-wrap"><table data-sortable="true"><thead><tr><th>运行时间</th><th>数据日期</th><th>范围起点</th><th>来源性质</th><th>股票事实</th><th>Minervini符合</th><th>Weinstein符合</th><th>状态</th></tr></thead><tbody>{% for row in runs %}<tr><td>{{ row.started_at }}</td><td>{{ row.as_of_date }}</td><td>{{ row.from_date }}</td><td>{{ row.origin }}</td><td>{{ row.counts.stock_facts or 0 }}</td><td>{{ row.counts.minervini_pass or 0 }}</td><td>{{ row.counts.weinstein_pass or 0 }}</td><td>{{ row.status }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">尚无运行凭证。</div>{% endif %}
+</section>
+{% endblock %}

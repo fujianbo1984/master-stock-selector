@@ -1,0 +1,153 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% set market = "a" %}
+{% block heading %}大师观察池{% endblock %}
+{% block subtitle %}Weinstein 与 Minervini 独立筛选 · {{ query_date or '暂无事实日期' }}{% endblock %}
+{% block content %}
+<section class="section daily-hero watchlist-hero">
+  <div>
+    <p class="eyebrow">MASTER WATCHLIST</p>
+    <h1>程序缩小范围，最终判断由你完成</h1>
+    <p class="muted watchlist-hero-summary">指数保留 Weinstein 完整阶段，并增加 Minervini Stage 2 是/否判断；个股只看两种方法的独立结果。不合成总分。</p>
+  </div>
+  <form class="form-row daily-filter" method="get" action="/a/daily">
+    <label class="filter-date">日期 <input name="date" value="{{ query_date }}" type="date"></label>
+    <label>方法
+      <select name="method">
+        <option value="all" {% if filters.method == 'all' %}selected{% endif %}>全部</option>
+        <option value="weinstein" {% if filters.method == 'weinstein' %}selected{% endif %}>Weinstein</option>
+        <option value="minervini" {% if filters.method == 'minervini' %}selected{% endif %}>Minervini</option>
+        <option value="both" {% if filters.method == 'both' %}selected{% endif %}>同时符合</option>
+      </select>
+    </label>
+    <label>变化
+      <select name="state">
+        <option value="all">全部</option>
+        {% for value, label in [('PASSING','当前仍符合'),('NEW','新进入 / 重新进入'),('STABLE','持续符合'),('EXIT','退出 / 数据中断'),('ENTERED','仅新进入'),('REENTERED','仅重新进入'),('EXITED','仅退出'),('DATA_GAP','仅数据中断')] %}<option value="{{ value }}" {% if filters.state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>人工状态
+      <select name="manual">
+        {% for value, label in [('all','全部'),('UNREVIEWED','未分析'),('WATCH','观察'),('FOCUS','重点观察'),('DROPPED','放弃')] %}<option value="{{ value }}" {% if filters.manual == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>总市值
+      <select name="min_cap">
+        {% for value, label in [(50,'≥50亿（默认）'),(0,'不限'),(30,'≥30亿'),(100,'≥100亿')] %}<option value="{{ value }}" {% if filters.min_cap == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    {% if filters.industry %}<input type="hidden" name="industry" value="{{ filters.industry }}">{% endif %}
+    <label class="filter-search">搜索 <input name="q" value="{{ filters.q }}" placeholder="代码、名称或行业"></label>
+    <button class="button filter-submit" type="submit">筛选</button>
+  </form>
+</section>
+
+{% if summary.reconstructed %}
+<div class="notice" role="status">当前结果含历史重建事实（RECONSTRUCTED），表示依据现有本地行情重算，不冒充当日曾实际保存的观察结果。</div>
+{% endif %}
+<div class="eligibility-note" role="note">
+  <strong>观察资格：</strong>已按 {{ query_date }} 当日风险标识排除 ST/*ST {{ summary.excluded_st }} 只；市值不参与 Weinstein 或 Minervini 判定。
+  非 ST 入选股中，低于 50 亿 {{ summary.small_cap }} 只；默认仅展示总市值不低于 50 亿的股票，且市值缺失不展示。
+  市值只影响展示，不参与 Weinstein 或 Minervini 判定。{% if filters.min_cap and summary.missing_market_cap %}市值缺失的 {{ summary.missing_market_cap }} 只在当前门槛下不显示。{% endif %}
+</div>
+
+<section class="section panel index-stage-strip">
+  <details class="index-stage-disclosure">
+  <summary><span><b>市场上下文</b><small>四指数判断不参与个股筛选或评分</small></span><span>展开四指数判断</span></summary>
+  <div class="section-heading"><div><p class="eyebrow">WEINSTEIN + MINERVINI STAGE 2</p><h2>四指数判断</h2></div><a class="text-link" href="/a/indices?date={{ query_date }}">查看完整证据 →</a></div>
+  {% if indices %}
+  <div class="index-stage-grid">
+    {% for row in indices %}
+    <article class="index-stage-card stage-{{ row.stage|lower }}">
+      <span class="index-instrument-links"><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在 TradingView 中文版打开 {{ row.index_name }} K线">{{ row.index_name }}</a><a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.index_symbol }}">{{ row.index_symbol }}</a></span>
+      <div class="index-method-result"><span>Weinstein</span><strong>{{ row.stage_label }}</strong></div>
+      <small>{{ row.effective_date }} · 已持续 {{ row.duration_weeks }} 周</small>
+      <div class="index-method-result index-minervini-result"><span>Minervini Stage 2</span><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">暂无四指数方法事实，请先运行大师观察池计算。</div>{% endif %}
+  </details>
+</section>
+
+<section class="section grid kpi-grid watchlist-summary">
+  <a class="kpi kpi-accent kpi-link" href="/a/daily?date={{ query_date }}&method={{ filters.method }}&state=PASSING&manual={{ filters.manual }}&min_cap={{ filters.min_cap }}{% if filters.industry %}&industry={{ filters.industry }}{% endif %}{% if filters.q %}&q={{ filters.q|urlencode }}{% endif %}#new-candidates" aria-label="查看当前仍符合的 {{ summary.total }} 只股票"><span>当前仍符合</span><strong>{{ summary.total }}</strong></a>
+  <a class="kpi kpi-link" href="/a/daily?date={{ query_date }}&method={{ filters.method }}&state=NEW&manual={{ filters.manual }}&min_cap={{ filters.min_cap }}{% if filters.industry %}&industry={{ filters.industry }}{% endif %}{% if filters.q %}&q={{ filters.q|urlencode }}{% endif %}#new-candidates" aria-label="查看新进入或重新进入的 {{ summary.new }} 只股票"><span>新进入 / 重进</span><strong>{{ summary.new }}</strong></a>
+  <a class="kpi kpi-link" href="/a/daily?date={{ query_date }}&method={{ filters.method }}&state=STABLE&manual={{ filters.manual }}&min_cap={{ filters.min_cap }}{% if filters.industry %}&industry={{ filters.industry }}{% endif %}{% if filters.q %}&q={{ filters.q|urlencode }}{% endif %}#continuing-candidates" aria-label="查看持续符合的 {{ summary.continuing }} 只股票"><span>持续符合</span><strong>{{ summary.continuing }}</strong></a>
+  <a class="kpi kpi-link" href="/a/daily?date={{ query_date }}&method={{ filters.method }}&state=EXIT&manual={{ filters.manual }}&min_cap={{ filters.min_cap }}{% if filters.industry %}&industry={{ filters.industry }}{% endif %}{% if filters.q %}&q={{ filters.q|urlencode }}{% endif %}#exit-candidates" aria-label="查看今日退出或数据中断的 {{ summary.exited }} 只股票"><span>今日退出 / 中断</span><strong>{{ summary.exited }}</strong></a>
+  <a class="kpi kpi-link" href="/a/daily?date={{ query_date }}&method=both&state=PASSING&manual={{ filters.manual }}&min_cap={{ filters.min_cap }}{% if filters.industry %}&industry={{ filters.industry }}{% endif %}{% if filters.q %}&q={{ filters.q|urlencode }}{% endif %}#new-candidates" aria-label="查看两法同时符合的 {{ summary.both }} 只股票"><span>两法同时符合</span><strong>{{ summary.both }}</strong></a>
+  <a class="kpi kpi-link" href="/a/daily?date={{ query_date }}&method={{ filters.method }}&state=all&manual=FOCUS&min_cap={{ filters.min_cap }}{% if filters.industry %}&industry={{ filters.industry }}{% endif %}{% if filters.q %}&q={{ filters.q|urlencode }}{% endif %}#focus-candidates" aria-label="查看我的重点观察 {{ summary.focus }} 只股票"><span>我的重点</span><strong>{{ summary.focus }}</strong></a>
+</section>
+
+<div data-daily-tabs>
+  <nav class="section daily-jumpbar" aria-label="观察池内容页签">
+    <span>分类查看</span>
+    <div class="daily-tablist" role="tablist" aria-label="观察池分类">
+      <button id="tab-new-candidates" role="tab" type="button" aria-selected="true" aria-controls="new-candidates">{% if filters.state == 'PASSING' %}当前仍符合 <strong>{{ summary.total }}</strong>{% else %}新进 / 重进 <strong>{{ section_totals.new }}</strong>{% endif %}</button>
+      <button id="tab-continuing-candidates" role="tab" type="button" aria-selected="false" aria-controls="continuing-candidates" tabindex="-1">持续符合 <strong>{{ section_totals.continuing }}</strong></button>
+      <button id="tab-exit-candidates" role="tab" type="button" aria-selected="false" aria-controls="exit-candidates" tabindex="-1">退出 / 中断 <strong>{{ section_totals.exited }}</strong></button>
+      <button id="tab-industry-observation" role="tab" type="button" aria-selected="false" aria-controls="industry-observation" tabindex="-1">行业聚集</button>
+    </div>
+  </nav>
+
+  <section class="section panel watchlist-section" id="new-candidates" role="tabpanel" aria-labelledby="tab-new-candidates" tabindex="0">
+    {% if filters.state == 'PASSING' %}
+    <div class="section-heading"><div><p class="eyebrow">CURRENT / PASSING</p><h2>当前仍符合</h2></div><div class="section-actions"><span class="muted">显示 {{ rows|length }} / {{ summary.total }}</span><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="new-candidates">下载 TradingView 列表（{{ rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="new-candidates">复制代码</button></div></div>
+    {% set navigation_section = 'new-candidates' %}{% set section_rows = rows %}{% include "ashare/_watchlist_table.html" %}
+    {% else %}
+    <div class="section-heading"><div><p class="eyebrow">01 / CHANGE</p><h2>今日新进入与重新进入</h2></div><div class="section-actions"><span class="muted">显示 {{ new_rows|length }} / {{ section_totals.new }} · <a href="/a/daily?date={{ query_date }}&state=ENTERED&min_cap={{ filters.min_cap }}">新进入</a> / <a href="/a/daily?date={{ query_date }}&state=REENTERED&min_cap={{ filters.min_cap }}">重新进入</a></span><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="new-candidates">下载 TradingView 列表（{{ new_rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="new-candidates">复制代码</button></div></div>
+    {% set navigation_section = 'new-candidates' %}{% set section_rows = new_rows %}{% include "ashare/_watchlist_table.html" %}
+    {% endif %}
+  </section>
+
+  <section class="section panel watchlist-section" id="continuing-candidates" role="tabpanel" aria-labelledby="tab-continuing-candidates" tabindex="0" hidden>
+    <div class="section-heading"><div><p class="eyebrow">02 / CONTINUING</p><h2>持续符合</h2></div><div class="section-actions"><span class="muted">显示 {{ continuing_rows|length }} / {{ section_totals.continuing }} · <a href="/a/daily?date={{ query_date }}&state=STABLE&min_cap={{ filters.min_cap }}#continuing-candidates">查看全部</a></span><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="continuing-candidates">下载 TradingView 列表（{{ continuing_rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="continuing-candidates">复制代码</button></div></div>
+    {% set navigation_section = 'continuing-candidates' %}{% set section_rows = continuing_rows %}{% include "ashare/_watchlist_table.html" %}
+  </section>
+
+  <section class="section panel watchlist-section" id="exit-candidates" role="tabpanel" aria-labelledby="tab-exit-candidates" tabindex="0" hidden>
+    <div class="section-heading"><div><p class="eyebrow">03 / EXIT</p><h2>今日退出与数据中断</h2></div><div class="section-actions"><span class="muted">显示 {{ exit_rows|length }} / {{ section_totals.exited }} · <a href="/a/daily?date={{ query_date }}&state=EXITED&min_cap={{ filters.min_cap }}">查看全部</a></span><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="exit-candidates">下载 TradingView 列表（{{ exit_rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="exit-candidates">复制代码</button></div></div>
+    {% set navigation_section = 'exit-candidates' %}{% set section_rows = exit_rows %}{% include "ashare/_watchlist_table.html" %}
+  </section>
+
+  <section class="section panel industry-observation-panel" id="industry-observation" role="tabpanel" aria-labelledby="tab-industry-observation" tabindex="0" hidden>
+    <div class="section-heading">
+      <div><p class="eyebrow">SW2021-L3 / OBSERVATION</p><h2>行业聚集观察</h2></div>
+      <a class="text-link" href="/a/industries?date={{ query_date }}">查看全部行业 →</a>
+    </div>
+    <p class="muted">只汇总两种方法的独立入选事实，按符合股票数量展示前 10；点击行业进入该行业成分股等权代理K线，不生成行业评分。</p>
+    {% if industry_rows %}
+    <div class="table-wrap"><table class="industry-observation-table"><thead><tr><th>申万三级行业</th><th>成员数</th><th>Weinstein</th><th>Minervini</th><th>两法同时</th><th>今日变化</th><th>质量</th></tr></thead><tbody>
+      {% for row in industry_rows %}<tr>
+        <td><a href="/a/industries/{{ row.industry_code }}/chart?date={{ query_date }}" title="打开 {{ row.industry_name }} 行业K线"><strong>{{ row.industry_name }}</strong><small>{{ row.industry_code }}</small></a></td>
+        <td>{{ row.eligible_member_count }}</td>
+        <td><strong>{{ row.weinstein_pass_count }}</strong> / {{ row.weinstein_evaluable_count }}{% if row.weinstein_pass_rate_pct is not none %}<small>{{ row.weinstein_pass_rate_pct }}%</small>{% endif %}</td>
+        <td><strong>{{ row.minervini_pass_count }}</strong> / {{ row.minervini_evaluable_count }}{% if row.minervini_pass_rate_pct is not none %}<small>{{ row.minervini_pass_rate_pct }}%</small>{% endif %}</td>
+        <td><strong>{{ row.both_pass_count }}</strong></td>
+        <td><small>W +{{ row.w_entered_count + row.w_reentered_count }} / -{{ row.w_exited_count + row.w_data_gap_count }}</small><small>M +{{ row.m_entered_count + row.m_reentered_count }} / -{{ row.m_exited_count + row.m_data_gap_count }}</small></td>
+        <td><span class="tag tag-{{ 'risk' if row.quality_state == 'UNKNOWN' else 'muted' if row.quality_state == 'SMALL_SAMPLE' else 'pass' }}">{{ row.quality_label }}</span></td>
+      </tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty">该日期没有可用的 SW2021 三级行业观察事实；个股观察池不受影响。</div>{% endif %}
+  </section>
+</div>
+
+{% if filters.manual == 'FOCUS' or focus_rows %}
+<section class="section panel watchlist-section" id="focus-candidates">
+  <div class="section-heading"><div><p class="eyebrow">04 / HUMAN REVIEW</p><h2>我的重点观察</h2></div><div class="section-actions"><span class="muted">人工状态不改变系统事实</span><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="focus-candidates">下载 TradingView 列表（{{ focus_rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="focus-candidates">复制代码</button></div></div>
+  {% set navigation_section = 'focus-candidates' %}{% set section_rows = focus_rows %}{% include "ashare/_watchlist_table.html" %}
+</section>
+{% endif %}
+
+{% if available_dates %}
+<section class="section snapshot-bar" aria-label="历史事实日期">
+  <span class="muted">最近事实</span>
+  {% for item in available_dates|reverse %}<a class="snapshot-link {% if item == query_date %}active{% endif %}" href="/a/daily?date={{ item }}&min_cap={{ filters.min_cap }}">{{ item }}</a>{% endfor %}
+</section>
+{% endif %}
+
+<section class="section panel notes-panel">
+  <div class="section-heading"><div><p class="eyebrow">BOUNDARY</p><h2>使用边界</h2></div><a class="text-link" href="/a/runs">查看运行凭证 →</a></div>
+  <p>“同时符合”只是两个独立事实的交集，不生成跨方法总分。系统不输出核心目标、买点或交易指令；进入重点观察前仍需阅读公司、行业、图表和风险。</p>
+</section>
+{% endblock %}

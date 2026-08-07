@@ -1,0 +1,79 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block heading %}{{ observation.industry_name }} 行业K线{% endblock %}
+{% block subtitle %}{{ observation.industry_code }} · SW2021-L3 · 数据截至 {{ query_date }}{% endblock %}
+{% block content %}
+<section class="section daily-hero industry-chart-hero">
+  <div>
+    <p class="eyebrow">INDUSTRY K-LINE / EQUAL WEIGHT</p>
+    <h1>{{ observation.industry_name }} <small>{{ observation.industry_code }}</small></h1>
+    <p class="muted">使用 {{ observation.membership_snapshot_date }} 日申万成员快照，由成分股前复权日线等权合成；起始点为 1000。</p>
+  </div>
+  <div class="chart-hero-actions">
+    <a class="button button-secondary" href="/a/daily?date={{ query_date }}&industry={{ observation.industry_code }}">查看本行业入选股</a>
+    <a class="text-link" href="/a/industries?date={{ query_date }}">返回行业观察 →</a>
+  </div>
+</section>
+
+<div class="notice industry-proxy-notice" role="note"><strong>口径边界：</strong>这是用于人工观察行业趋势的成分股等权代理K线，<strong>不是申万官方行业指数</strong>，也不参与 Weinstein 或 Minervini 个股判定。</div>
+
+<section class="section panel industry-confirmation-panel">
+  <div class="section-heading"><div><p class="eyebrow">WEINSTEIN INDUSTRY CONTEXT</p><h2>行业技术确认</h2></div><span class="status-marker status-{{ 'pass' if confirmation.stage == 'STAGE_2' else 'unknown' if confirmation.stage in ['UNKNOWN','TRANSITION','STAGE_1'] else 'fail' }}">{{ confirmation.stage_label }}</span></div>
+  <p class="reading-note">{{ confirmation.summary }}</p>
+  <dl class="evidence-grid">
+    <div><dt>完整周</dt><dd>{{ confirmation.completed_week_count }} 周</dd></div><div><dt>有效周结束</dt><dd>{{ confirmation.effective_week_end or '暂无' }}</dd></div><div><dt>阶段开始</dt><dd>{{ confirmation.stage_started_on or '暂无' }}</dd></div><div><dt>持续</dt><dd>{{ confirmation.duration_weeks }} 周</dd></div>
+    <div><dt>30周线</dt><dd>{{ confirmation.metrics.ma30 if confirmation.metrics else '暂无' }}</dd></div><div><dt>4周斜率</dt><dd>{% if confirmation.metrics and confirmation.metrics.ma30_slope_4w_pct is not none %}{{ confirmation.metrics.ma30_slope_4w_pct }}%{% else %}暂无{% endif %}</dd></div><div><dt>距30周线</dt><dd>{% if confirmation.metrics and confirmation.metrics.distance_from_ma30_pct is not none %}{{ confirmation.metrics.distance_from_ma30_pct }}%{% else %}暂无{% endif %}</dd></div><div><dt>13周变化</dt><dd>{% if confirmation.metrics and confirmation.metrics.return_13w_pct is not none %}{{ confirmation.metrics.return_13w_pct }}%{% else %}暂无{% endif %}</dd></div>
+  </dl>
+  <div class="quality-strip"><span>Weinstein 宽度：{{ confirmation.weinstein_pass_count }} / {{ confirmation.weinstein_evaluable_count }}</span><span>新进/重进：{{ confirmation.weinstein_entered_count }}</span><span>持续：{{ confirmation.weinstein_continuing_count }}</span><span>退出/中断：{{ confirmation.weinstein_exited_count }}</span><span>价格覆盖：{{ confirmation.priced_member_count }} / {{ confirmation.mapped_member_count }}（{{ confirmation.price_coverage_pct_label }}）</span></div>
+  <p class="muted">代理周线按所选日期成员快照和前复权日线即时计算；{{ confirmation.policy_version }} · {{ confirmation.reason }}。仅供人工复核，不改变任何个股方法结论。</p>
+</section>
+
+{% if chart %}
+<section class="section grid industry-chart-kpis">
+  <div class="kpi kpi-accent"><span>最新代理点位</span><strong>{{ chart.latest.close }}</strong></div>
+  <div class="kpi"><span>当日开 / 高 / 低</span><strong class="kpi-compact">{{ chart.latest.open }} / {{ chart.latest.high }} / {{ chart.latest.low }}</strong></div>
+  <div class="kpi"><span>图中区间变化</span><strong class="{{ 'positive' if chart.latest.period_return_pct >= 0 else 'negative' }}">{{ '+' if chart.latest.period_return_pct >= 0 else '' }}{{ chart.latest.period_return_pct }}%</strong></div>
+  <div class="kpi"><span>最新有效成员</span><strong>{{ chart.latest.member_count }}</strong></div>
+</section>
+
+<section class="section panel industry-kline-panel">
+  <div class="section-heading">
+    <div><p class="eyebrow">DAILY OHLC</p><h2>近 {{ bars|length }} 个交易日</h2></div>
+    <span class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-ma20"></i>MA20 <i class="legend-ma50"></i>MA50</span>
+  </div>
+  <div class="industry-chart-wrap">
+    <svg class="industry-kline" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-labelledby="industry-chart-title industry-chart-description">
+      <title id="industry-chart-title">{{ observation.industry_name }}成分股等权代理K线</title>
+      <desc id="industry-chart-description">{{ chart.first_date }} 至 {{ chart.last_date }}，共 {{ bars|length }} 个交易日。</desc>
+      {% for tick in chart.price_ticks %}
+      <line class="chart-grid-line" x1="{{ chart.plot_left }}" x2="{{ chart.plot_right }}" y1="{{ tick.y }}" y2="{{ tick.y }}"></line>
+      <text class="chart-axis-label" x="{{ chart.plot_left - 8 }}" y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.label }}</text>
+      {% endfor %}
+      {% for candle in chart.candles %}
+      <g class="candle candle-{{ candle.direction }}">
+        <line x1="{{ candle.x }}" x2="{{ candle.x }}" y1="{{ candle.high_y }}" y2="{{ candle.low_y }}"><title>{{ candle.date }}</title></line>
+        <rect x="{{ candle.body_x }}" y="{{ candle.body_y }}" width="{{ candle.body_width }}" height="{{ candle.body_height }}"></rect>
+      </g>
+      {% endfor %}
+      {% if chart.ma20_points %}<polyline class="ma-line ma20-line" points="{{ chart.ma20_points }}"></polyline>{% endif %}
+      {% if chart.ma50_points %}<polyline class="ma-line ma50-line" points="{{ chart.ma50_points }}"></polyline>{% endif %}
+      {% for tick in chart.date_ticks %}<text class="chart-axis-label" x="{{ tick.x }}" y="{{ chart.plot_bottom + 25 }}" text-anchor="middle">{{ tick.label }}</text>{% endfor %}
+    </svg>
+  </div>
+</section>
+{% else %}
+<section class="section panel"><div class="empty">当前市场库没有足够的该行业成分股 OHLC 日线，不生成代理K线。</div></section>
+{% endif %}
+
+<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">CONSTITUENTS</p><h2>当期成员与入选事实</h2></div><span class="muted">{{ members|length }} 只 · 点名称进 TradingView，点代码进同花顺</span></div>
+  <div class="table-wrap"><table data-sortable="true"><thead><tr><th>股票</th><th>Weinstein</th><th>Minervini</th><th>站内分析</th></tr></thead><tbody>
+    {% for row in members %}<tr>
+      <td data-sort="{{ row.symbol }}"><div class="stock-primary-link">{% if row.tradingview_url %}<a class="instrument-name-link" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}<span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a></span></div></td>
+      <td><span class="status-marker status-{{ 'pass' if row.weinstein_result == 'PASS' else 'fail' if row.weinstein_result == 'FAIL' else 'unknown' }}">{{ row.weinstein_result_label }}</span>{% if row.weinstein_state_label %}<small class="table-subline">{{ row.weinstein_state_label }}</small>{% endif %}</td>
+      <td><span class="status-marker status-{{ 'pass' if row.minervini_result == 'PASS' else 'fail' if row.minervini_result == 'FAIL' else 'unknown' }}">{{ row.minervini_result_label }}</span>{% if row.minervini_state_label %}<small class="table-subline">{{ row.minervini_state_label }}</small>{% endif %}</td>
+      <td>{% if row.weinstein_result or row.minervini_result %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}">查看详情</a>{% else %}<span class="muted">当日未入选</span>{% endif %}</td>
+    </tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
