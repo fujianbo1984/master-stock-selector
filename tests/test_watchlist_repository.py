@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from master_stock_selector.watchlist.methods import MINERVINI_POLICY_VERSION
 from master_stock_selector.watchlist.repository import MarketDataReader, WatchlistRepository
 
@@ -72,6 +74,80 @@ def test_repository_keeps_system_facts_immutable_but_allows_manual_review(tmp_pa
     assert detail["manual"]["note"] == "继续观察"
 
 
+def test_trade_review_matches_fifo_costs_and_rejects_oversell(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    repository.record_trade(
+        traded_on="2026-07-01", symbol="000001.SZ", side="BUY", quantity=100,
+        price=10.0, fee=5.0, method="WEINSTEIN", stop_price=8.0,
+        rationale="突破", invalidation="跌破止损",
+    )
+    repository.record_trade(
+        traded_on="2026-07-03", symbol="000001.SZ", side="SELL", quantity=40,
+        price=12.0, fee=4.0, method="WEINSTEIN", exit_reason="计划止盈",
+    )
+
+    review = repository.trade_review()
+
+    assert review["summary"]["count"] == 1
+    assert review["closed"][0]["pnl"] == 74.0
+    assert review["closed"][0]["holding_days"] == 2
+    assert review["open_positions"][0]["symbol"] == "000001.SZ"
+    assert review["open_positions"][0]["quantity"] == 60
+    assert review["open_positions"][0]["cost"] == 603.0
+    assert review["open_positions"][0]["setup_label"] == "回调"
+    assert review["closed"][0]["stop_price"] == 8.0
+    assert review["closed"][0]["entry_price"] == 10.0
+    assert review["closed"][0]["exit_price"] == 12.0
+    with pytest.raises(ValueError, match="超过可复盘持仓"):
+        repository.record_trade(
+            traded_on="2026-07-04", symbol="000001.SZ", side="SELL", quantity=61,
+            price=11.0, fee=0.0, method="WEINSTEIN",
+        )
+    with pytest.raises(ValueError, match="低于买入成交价"):
+        repository.record_trade(
+            traded_on="2026-07-04", symbol="000002.SZ", side="BUY", quantity=1,
+            price=10.0, fee=0.0, method="WEINSTEIN", stop_price=10.0,
+        )
+
+
+def test_trade_review_retains_authorized_unmatched_historical_sell(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+
+    repository.record_trade(
+        traded_on="2026-08-05", symbol="603259.SH", side="SELL", quantity=100,
+        price=147.26, fee=0.0, method="MANUAL", permit_unmatched_sell=True,
+    )
+
+    review = repository.trade_review()
+
+    assert review["summary"]["count"] == 0
+    unmatched = review["unmatched_sells"]
+    assert len(unmatched) == 1
+    assert unmatched[0]["symbol"] == "603259.SH"
+    assert unmatched[0]["quantity"] == 100
+    assert unmatched[0]["setup_label"] == "回调"
+
+
+def test_trade_update_preserves_fifo_validation_and_refreshes_fields(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    execution_id = repository.record_trade(
+        traded_on="2026-07-01", traded_at="09:30:00", symbol="000001.SZ", side="BUY",
+        quantity=100, price=10.0, fee=0.0, method="MANUAL",
+    )
+    repository.record_trade(
+        traded_on="2026-07-02", symbol="000001.SZ", side="SELL", quantity=100,
+        price=12.0, fee=0.0, method="MANUAL",
+    )
+
+    repository.update_trade(
+        execution_id, traded_on="2026-07-01", traded_at="09:31:00", side="BUY",
+        quantity=100, price=11.0, fee=0.0, method="MANUAL", rationale="修正后的依据",
+    )
+
+    assert repository.trade_execution(execution_id)["traded_at"] == "09:31:00"
+    assert repository.trade_review()["closed"][0]["pnl"] == 100.0
+
+
 def test_market_reader_builds_disclosed_equal_weight_industry_proxy(tmp_path):
     path = tmp_path / "market.sqlite3"
     with sqlite3.connect(path) as connection:
@@ -94,6 +170,13 @@ def test_market_reader_builds_disclosed_equal_weight_industry_proxy(tmp_path):
                 ("000002.SZ", "2026-07-31", 21.0, 22.0, 20.0, 21.0),
             ),
         )
+        connection.executemany(
+            "INSERT INTO daily_bars VALUES ('ashare', ?, ?, ?, ?, ?, ?, 'raw')",
+            (
+                ("000001.SZ", "2026-07-30", 10.0, 10.0, 10.0, 10.0),
+                ("000001.SZ", "2026-07-31", 10.0, 12.0, 9.0, 11.0),
+            ),
+        )
 
     bars = MarketDataReader(path).industry_proxy_bars(
         ["000001.SZ", "000002.SZ"],
@@ -111,3 +194,4 @@ def test_market_reader_builds_disclosed_equal_weight_industry_proxy(tmp_path):
             "member_count": 2,
         }
     ]
+    assert MarketDataReader(path).trade_drawdown_low("000001.SZ", "2026-07-30", "2026-07-31") == 9.0

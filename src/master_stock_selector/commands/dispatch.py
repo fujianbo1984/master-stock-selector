@@ -12,6 +12,7 @@ Handler = Callable[[argparse.Namespace, argparse.ArgumentParser], int]
 # not imported until their command is dispatched.
 COMMAND_HANDLERS: dict[str, str] = {
     "daily": "daily",
+    "market-backfill": "backfill",
     "watchlist": "watchlist",
     "web": "web",
 }

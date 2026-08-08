@@ -259,15 +259,44 @@ def _seed_chart_market(path) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE daily_adjustment_factors (
+                market TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
+                adj_factor REAL NOT NULL,
+                PRIMARY KEY (market, symbol, trade_date)
+            )
+            """
+        )
+        qfq_rows = [("2026-05-31", 99.0, 99.0, 99.0, 99.0, "2026-05-31", "")] + [
+            (f"2026-06-{day:02d}", 10 + day / 10, 11 + day / 10, 9 + day / 10, 10.5 + day / 10, f"2026-06-{day:02d}", "qfq-scale-v1")
+            for day in range(1, 31)
+        ]
         connection.executemany(
             """
             INSERT INTO daily_bars VALUES ('ashare', '000001.SZ', ?, ?, ?, ?, ?, 1000, 2000,
                                            'qfq', ?, 'qfq-scale-v1')
             """,
-            [
-                (f"2026-06-{day:02d}", 10 + day / 10, 11 + day / 10, 9 + day / 10, 10.5 + day / 10, f"2026-06-{day:02d}")
-                for day in range(1, 31)
-            ],
+            [row[:6] for row in qfq_rows],
+        )
+        connection.executemany(
+            """
+            UPDATE daily_bars SET price_scale_id=?
+            WHERE market='ashare' AND symbol='000001.SZ' AND trade_date=? AND adj_type='qfq'
+            """,
+            [(row[6], row[0]) for row in qfq_rows],
+        )
+        raw_rows = [("2026-05-31", 9.9, 10.9, 8.9, 10.4, "2026-05-31")] + [row[:6] for row in qfq_rows[1:]]
+        connection.executemany(
+            """
+            INSERT INTO daily_bars VALUES ('ashare', '000001.SZ', ?, ?, ?, ?, ?, 1000, 2000,
+                                           'raw', ?, '')
+            """,
+            raw_rows,
+        )
+        connection.executemany(
+            "INSERT INTO daily_adjustment_factors VALUES ('ashare', '000001.SZ', ?, 1.0)",
+            [(row[0],) for row in qfq_rows],
         )
 
 
@@ -382,6 +411,8 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     )
     assert client.get("/").history[0].headers["location"] == "/a/daily"
     assert client.get("/a/dashboard").history[0].headers["location"] == "/a/daily"
+    focus = client.get("/a/focus", follow_redirects=True)
+    assert 'aria-current="page" href="/a/focus?date=2026-07-31">我的重点</a>' in focus.text
     for state in ("PASSING", "NEW", "STABLE", "EXIT"):
         filtered = client.get(f"/a/daily?date=2026-07-31&state={state}&min_cap=0")
         assert filtered.status_code == 200
@@ -436,9 +467,11 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "两种方法独立证据" in detail.text
     assert "30周线" in detail.text
     assert "股份制银行III（SW2021-L3）" in detail.text
-    assert detail.text.index("manual-review-panel") < detail.text.index(
-        "method-evidence-grid"
+    assert detail.text.index("method-evidence-grid") < detail.text.index(
+        "manual-review-panel"
     )
+    assert "两种方法逐项对照" in detail.text
+    assert '<details class="section stock-disclosure trade-journal-panel"' in detail.text
     assert saved.status_code == 200
     assert "重点观察" in saved.text
     assert "等待年报后人工复核" in saved.text
@@ -539,9 +572,45 @@ def test_stock_industry_context_is_optional_and_does_not_replace_method_evidence
 
     assert page.status_code == 200
     assert "Weinstein" in page.text
-    assert "Minervini" in page.text
+    assert "交易方法" in page.text
+    assert "回调" in page.text
     assert "行业背景（仅人工参考）" in page.text
     assert "行业代理不参与 000001.SZ 的 Weinstein 或 Minervini 结论。" in page.text
+
+
+def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_path):
+    client = _client(tmp_path)
+
+    bought = client.post(
+        "/a/stocks/000001.SZ/trades",
+        data={
+            "traded_on": "2026-07-31", "side": "BUY", "quantity": "100",
+                "price": "12.5", "fee": "5", "setup_method": "BREAKOUT", "stop_price": "12.0",
+            "rationale": "突破", "invalidation": "跌破止损", "market_context": "指数 Stage 2",
+        },
+        follow_redirects=False,
+    )
+    sold = client.post(
+        "/a/stocks/000001.SZ/trades",
+        data={
+            "traded_on": "2026-08-03", "side": "SELL", "quantity": "100",
+                "price": "13.0", "fee": "5", "setup_method": "BREAKOUT", "exit_reason": "计划止盈",
+        },
+        follow_redirects=False,
+    )
+    page = client.get("/a/review")
+
+    assert bought.status_code == sold.status_code == 303
+    assert page.status_code == 200
+    assert "实际成交的描述统计，不生成买卖指令" in page.text
+    assert "已完成交易" in page.text
+    assert "突破" in page.text
+    assert "平安银行" in page.text
+    assert "000001.SZ" in page.text
+    assert "计划盈亏比" in page.text
+    assert "1.0R" in page.text
+    assert ">修改</a>" in page.text
+    assert "2026-07-31" in page.text
 
 
 def test_legacy_product_pages_are_not_mounted(tmp_path):
@@ -616,25 +685,48 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     market_path = tmp_path / "market.sqlite3"
     _seed_watchlist(watchlist_path)
     _seed_chart_market(market_path)
+    repository = WatchlistRepository(watchlist_path)
+    buy_id = repository.record_trade(
+        traded_on="2026-06-10", symbol="000001.SZ", side="BUY", quantity=100,
+        price=11.5, fee=0.0, method="MANUAL", stop_price=10.5,
+    )
+    repository.record_trade(
+        traded_on="2026-06-20", symbol="000001.SZ", side="SELL", quantity=100,
+        price=12.5, fee=0.0, method="MANUAL",
+    )
     client = TestClient(create_app(market_database=market_path, watchlist_database=watchlist_path))
 
     page = client.get("/a/stocks/000001.SZ/chart?date=2026-06-30")
     chart = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30")
 
     assert page.status_code == 200
-    assert "本地图表只用于人工复核" in page.text
+    assert "行业：股份制银行III" in page.text
     assert "lightweight-charts-5.1.0.js" in page.text
     assert 'class="chart-workbench-title"' in page.text
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in page.text
     assert "https://stockpage.10jqka.com.cn/000001/" in page.text
     assert 'data-kc-source' in page.text
+    assert 'data-chart-limit="all"' in page.text
     assert chart.status_code == 200
     payload = chart.json()
     assert payload["status"] == "OK"
     assert payload["adjustment"] == "qfq"
     assert payload["price_scale_id"] == "qfq-scale-v1"
     assert len(payload["bars"]) == 30
+    all_payload = client.get(
+        "/api/a/stocks/000001.SZ/chart?date=2026-06-30"
+    ).json()
+    assert len(all_payload["bars"]) > len(payload["bars"])
+    assert all_payload["bars"][0]["trade_date"] == "2026-05-31"
+    assert all_payload["bars"][0]["close"] == 10.4
     assert payload["keltner"][-1]["upper"] is not None
+    assert payload["trade_overlay"]["executions"][0]["execution_id"] == buy_id
+    assert payload["trade_overlay"]["executions"][0]["stop_price"] == 10.5
+    weekly = client.get(
+        "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&interval=week"
+    ).json()
+    assert weekly["interval"] == "week"
+    assert len(weekly["bars"]) < len(payload["bars"])
     open_source = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&source=open"
     ).json()
@@ -647,7 +739,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
             "tool": "trendline",
             "anchors": [
                 {"date": "2026-06-10", "price": 11.5},
-                {"logical": 34.5, "price": 12.5},
+                {"logical_from_end": 5.5, "price": 12.5},
             ],
         },
     )
@@ -655,11 +747,14 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     drawings = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30"
     ).json()["drawings"]
-    assert drawings[0]["anchors"][1]["logical"] == 34.5
+    assert drawings[0]["anchors"][1]["logical_from_end"] == 5.5
     deleted = client.delete(
         "/api/a/stocks/000001.SZ/chart/drawings/line-1?price_scale_id=qfq-scale-v1"
     )
     assert deleted.json() == {"deleted": True}
+    prefilled = client.get("/a/stocks/000001.SZ?traded_on=2026-06-10&trade_price=11.5")
+    assert 'name="traded_on" type="date" value="2026-06-10"' in prefilled.text
+    assert 'name="price" type="number" min="0.001" step="0.001" value="11.5"' in prefilled.text
 
 
 def test_daily_context_cache_invalidates_after_manual_review_and_exposes_timing(tmp_path):

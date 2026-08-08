@@ -10,9 +10,10 @@ def test_cli_exposes_only_current_product_commands(capsys) -> None:
     assert main(["--help"]) == 0
     output = capsys.readouterr().out
 
-    assert set(COMMAND_HANDLERS) == {"daily", "watchlist", "web"}
+    assert set(COMMAND_HANDLERS) == {"daily", "market-backfill", "watchlist", "web"}
     assert "daily" in output
     assert "watchlist" in output
+    assert "market-backfill" in output
     assert "web" in output
     assert "vcp" not in output.lower()
     assert "etf" not in output.lower()

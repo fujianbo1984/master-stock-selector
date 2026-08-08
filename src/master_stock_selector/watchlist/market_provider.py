@@ -124,6 +124,33 @@ class TushareMarketProvider:
                 result[symbol] = parsed[symbol]
         return result
 
+    def index_daily_bars_range(
+        self,
+        start_date: str,
+        end_date: str,
+        index_symbols: tuple[str, ...],
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        result: dict[str, dict[str, dict[str, Any]]] = {}
+        for symbol in index_symbols:
+            rows = self._paged_rows(
+                "index_daily",
+                {
+                    "ts_code": symbol,
+                    "start_date": _compact_date(start_date),
+                    "end_date": _compact_date(end_date),
+                },
+                "ts_code,trade_date,open,high,low,close,pre_close,pct_chg,vol,amount",
+            )
+            for row in rows:
+                trade_date = _normalize_date(str(row.get("trade_date") or ""))
+                if not trade_date or not start_date <= trade_date <= end_date:
+                    raise TushareError("Tushare index_daily 返回超出请求区间的日期")
+                result.setdefault(trade_date, {})[symbol] = {
+                    **row,
+                    "trade_date": trade_date,
+                }
+        return result
+
     def _paged_rows(
         self,
         api_name: str,

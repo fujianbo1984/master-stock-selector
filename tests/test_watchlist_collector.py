@@ -6,6 +6,10 @@ import sqlite3
 import pytest
 
 from master_stock_selector.watchlist.collector import CollectionConfig, collect_market_data
+from master_stock_selector.watchlist.historical_backfill import (
+    HistoricalBackfillConfig,
+    backfill_market_history,
+)
 
 MARKET_SCHEMA = """
 CREATE TABLE daily_bars (
@@ -325,3 +329,83 @@ def test_collector_skips_exchange_closed_date_without_writes(tmp_path) -> None:
     assert result["status"] == "SKIPPED"
     assert result["collection_state"] == "NON_TRADING_DAY"
     assert provider.request_count == 1
+
+
+class BackfillFakeProvider(FakeProvider):
+    def trade_calendar(self, start_date: str, end_date: str) -> list[str]:
+        self.request_count += 1
+        return ["2026-07-31", "2026-08-03"]
+
+
+def test_historical_backfill_plans_then_fills_only_missing_market_rows(tmp_path) -> None:
+    path = tmp_path / "market.sqlite3"
+    _seed_market(path)
+    with sqlite3.connect(path) as connection:
+        for symbol, close in (("000001.SZ", 12.0), ("600001.SH", 22.0)):
+            connection.execute(
+                """
+                INSERT INTO daily_bars (
+                    market,symbol,trade_date,open,high,low,close,volume,amount,
+                    adj_type,data_source,source_version,batch_id,run_id,
+                    data_as_of_date,input_hash,fetched_at,price_scale_id
+                ) VALUES ('ashare', ?, '2026-08-03', ?, ?, ?, ?, 1000, 2000,
+                          'raw', 'tushare_daily', 'fake-v1', 'old', 'old',
+                          '2026-08-03', 'old-hash', '2026-08-03T16:00:00+08:00', '')
+                """,
+                (symbol, close - 1, close + 1, close - 2, close),
+            )
+            connection.execute(
+                """
+                INSERT INTO daily_metrics (
+                    market,symbol,trade_date,turnover_rate,total_mv,circ_mv,
+                    data_source,source_version,batch_id,run_id,data_as_of_date,
+                    input_hash,fetched_at
+                ) VALUES ('ashare', ?, '2026-07-31', 1, 10, 9,
+                          'tushare_daily_basic','fake-v1','old','old',
+                          '2026-07-31','old','2026-07-31T16:00:00+08:00')
+                """,
+                (symbol,),
+            )
+        for index, symbol in enumerate(("000300.SH", "000852.SH", "399006.SZ", "000688.SH")):
+            connection.execute(
+                """
+                INSERT INTO market_index_daily_bars (
+                    batch_id,run_id,market,index_symbol,trade_date,open,high,low,close,
+                    volume,amount,provider,source_version,fetched_at
+                ) VALUES ('old', 'old', 'ashare', ?, '2026-07-31', ?, ?, ?, ?,
+                          1000,2000,'FakeTushare','fake-v1','2026-07-31T16:00:00+08:00')
+                """,
+                (symbol, 999 + index, 1001 + index, 998 + index, 1000 + index),
+            )
+
+    config = HistoricalBackfillConfig(
+        market_database=path,
+        from_date="2026-07-31",
+        to_date="2026-08-03",
+        minimum_stock_count=2,
+        minimum_coverage_ratio=1.0,
+    )
+    dry_run = backfill_market_history(config, apply=False)
+
+    assert dry_run["status"] == "DRY_RUN"
+    assert dry_run["plan"]["factor_dates"] == ["2026-08-03"]
+    assert dry_run["plan"]["metric_dates"] == ["2026-08-03"]
+    assert dry_run["plan"]["index_dates"] == ["2026-08-03"]
+
+    result = backfill_market_history(config, apply=True, provider=BackfillFakeProvider())
+
+    assert result["status"] == "SUCCESS"
+    assert result["inserted"] == {"factors": 2, "metrics": 2, "indices": 4}
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM daily_adjustment_factors WHERE trade_date='2026-08-03'"
+        ).fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT COUNT(*) FROM daily_metrics WHERE trade_date='2026-08-03'"
+        ).fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT COUNT(*) FROM market_index_daily_bars WHERE trade_date='2026-08-03'"
+        ).fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM market_history_backfill_receipt"
+        ).fetchone()[0] == 1

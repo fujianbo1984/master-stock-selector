@@ -12,6 +12,7 @@ class CommandPolicy:
 
 COMMAND_POLICIES: dict[str, CommandPolicy] = {
     "daily": CommandPolicy("market_and_master_watchlist_fact", requires_apply=True),
+    "market-backfill": CommandPolicy("market_history_fact"),
     "watchlist": CommandPolicy("master_watchlist_fact", requires_apply=True),
     "web": CommandPolicy("read_only_product_surface"),
 }

@@ -12,12 +12,15 @@
   const symbol = root.dataset.symbol;
   const date = root.dataset.date;
   let limit = 260;
+  let interval = "day";
   let payload = null;
   let drawings = [];
   let activeTool = "browse";
   let pendingAnchor = null;
   let previewAnchor = null;
   let selectedDrawingId = null;
+  let recordMode = false;
+  const canonicalDrawingAnchors = new Map();
   const chart = LightweightCharts.createChart(chartNode, {
     layout: { background: { color: "#fffdfa" }, textColor: "#142d4c" },
     grid: { vertLines: { color: "#eee8de" }, horzLines: { color: "#eee8de" } },
@@ -31,6 +34,13 @@
   const upper = chart.addSeries(LightweightCharts.LineSeries, { color: "#a9b0b7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
   const basis = chart.addSeries(LightweightCharts.LineSeries, { color: "#b9bec4", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
   const lower = chart.addSeries(LightweightCharts.LineSeries, { color: "#a9b0b7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const ma20 = chart.addSeries(LightweightCharts.LineSeries, { color: "#d28b18", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const ma50 = chart.addSeries(LightweightCharts.LineSeries, { color: "#5b6fc7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const volumePane = chart.addPane();
+  volumePane.setHeight(132);
+  const volume = chart.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, base: 0 }, volumePane.paneIndex());
+  volume.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0 } });
+  const markersApi = LightweightCharts.createSeriesMarkers(candles, []);
 
   const settings = () => ({
     length: root.querySelector("[data-kc-length]").value,
@@ -39,7 +49,8 @@
     use_ema: root.querySelector("[data-kc-ma]").value === "ema",
     band_style: root.querySelector("[data-kc-style]").value,
     atr_length: root.querySelector("[data-kc-atr-length]").value,
-    limit,
+    ...(limit === null ? {} : { limit }),
+    interval,
   });
   const updateKcSummary = () => {
     const source = root.querySelector("[data-kc-source]").selectedOptions[0].text;
@@ -53,6 +64,7 @@
     deleteSelectedButton.disabled = !selectedDrawing();
   };
   const setActiveTool = (tool) => {
+    recordMode = false;
     activeTool = tool;
     pendingAnchor = null;
     previewAnchor = null;
@@ -64,34 +76,65 @@
   };
   const resize = () => {
     const rect = chartNode.getBoundingClientRect();
-    chart.applyOptions({ width: Math.max(320, Math.floor(rect.width)), height: 520 });
+    const drawingHeight = 508;
+    chart.applyOptions({ width: Math.max(320, Math.floor(rect.width)), height: 640 });
+    volumePane.setHeight(132);
     const ratio = window.devicePixelRatio || 1;
-    overlay.width = Math.floor(rect.width * ratio); overlay.height = Math.floor(520 * ratio);
-    overlay.style.width = `${rect.width}px`; overlay.style.height = "520px";
+    overlay.width = Math.floor(rect.width * ratio); overlay.height = Math.floor(drawingHeight * ratio);
+    overlay.style.width = `${rect.width}px`; overlay.style.height = `${drawingHeight}px`;
     context.setTransform(ratio, 0, 0, ratio, 0, 0); renderDrawings();
   };
+  const fitBarsToViewport = () => {
+    if (!payload?.bars?.length) return;
+    const width = Math.max(320, chartNode.getBoundingClientRect().width);
+    const padding = 10;
+    chart.timeScale().applyOptions({
+      barSpacing: Math.max(2, Math.min(10, width / (payload.bars.length + padding * 2))),
+      rightOffset: padding,
+    });
+    chart.timeScale().setVisibleLogicalRange({ from: -padding, to: payload.bars.length + padding });
+  };
+  const logicalForAnchor = (anchor) => {
+    if (typeof anchor.logical_from_end === "number") return payload.bars.length - 1 + anchor.logical_from_end;
+    if (typeof anchor.logical_from_start === "number") return anchor.logical_from_start;
+    return anchor.logical;
+  };
   const coord = (anchor) => ({
-    x: typeof anchor.logical === "number"
-      ? chart.timeScale().logicalToCoordinate(anchor.logical)
-      : chart.timeScale().timeToCoordinate(anchor.date),
+    x: anchor.date
+      ? chart.timeScale().timeToCoordinate(anchor.date)
+      : chart.timeScale().logicalToCoordinate(logicalForAnchor(anchor)),
     y: candles.priceToCoordinate(anchor.price),
   });
+  const canonicalizeDrawing = (drawing) => {
+    const cached = canonicalDrawingAnchors.get(drawing.drawing_id);
+    if (cached) return { ...drawing, anchors: cached };
+    const lastLogical = payload.bars.length - 1;
+    const anchors = drawing.anchors.map((anchor) => {
+      if (anchor.date || typeof anchor.logical !== "number") return anchor;
+      if (anchor.logical > lastLogical) return { logical_from_end: Number((anchor.logical - lastLogical).toFixed(4)), price: anchor.price };
+      if (anchor.logical < 0) return { logical_from_start: anchor.logical, price: anchor.price };
+      return anchor;
+    });
+    canonicalDrawingAnchors.set(drawing.drawing_id, anchors);
+    return { ...drawing, anchors };
+  };
   const drawOne = (drawing, highlight = false) => {
     const anchors = drawing.anchors.map(coord);
     if (anchors.some(point => point.x === null || point.y === null)) return;
     const stroke = () => {
       context.beginPath();
-      if (drawing.tool === "horizontal") { context.moveTo(0, anchors[0].y); context.lineTo(overlay.clientWidth, anchors[0].y); }
+      if (drawing.tool !== "trendline") { context.moveTo(0, anchors[0].y); context.lineTo(overlay.clientWidth, anchors[0].y); }
       else { context.moveTo(anchors[0].x, anchors[0].y); context.lineTo(anchors[1].x, anchors[1].y); }
       context.stroke();
     };
     context.save();
+    const styles = { horizontal: ["#8d6c31", [5, 4]] };
     if (highlight) {
       context.strokeStyle = "#fffdfa"; context.lineWidth = 7; context.setLineDash([]); stroke();
-      context.strokeStyle = "#c83b2b"; context.lineWidth = 3; context.setLineDash(drawing.tool === "horizontal" ? [7, 4] : []); stroke();
+      context.strokeStyle = "#c83b2b"; context.lineWidth = 3; context.setLineDash(drawing.tool !== "trendline" ? [7, 4] : []); stroke();
       anchors.forEach(point => { context.beginPath(); context.fillStyle = "#fffdfa"; context.strokeStyle = "#c83b2b"; context.lineWidth = 2; context.arc(point.x, point.y, 5, 0, Math.PI * 2); context.fill(); context.stroke(); });
     } else {
-      context.strokeStyle = "#8d6c31"; context.lineWidth = 1.5; context.setLineDash(drawing.tool === "horizontal" ? [5, 4] : []); stroke();
+      context.strokeStyle = (styles[drawing.tool] || ["#8d6c31"])[0]; context.lineWidth = 1.5; context.setLineDash((styles[drawing.tool] || [null, []])[1] || []); stroke();
     }
     context.restore();
   };
@@ -116,15 +159,24 @@
     candles.setData(payload.bars.map(row => ({ time: row.trade_date, open: row.open, high: row.high, low: row.low, close: row.close })));
     const values = (key) => payload.keltner.filter(row => row[key] !== null).map(row => ({ time: row.date, value: row[key] }));
     upper.setData(values("upper")); basis.setData(values("basis")); lower.setData(values("lower"));
-    drawings = payload.drawings;
+    const simpleMa = (length) => payload.bars.map((row, index, rows) => {
+      if (index + 1 < length) return null;
+      const window = rows.slice(index + 1 - length, index + 1);
+      return { time: row.trade_date, value: window.reduce((sum, item) => sum + item.close, 0) / length };
+    }).filter(Boolean);
+    ma20.setData(root.querySelector('[data-ma="20"]').checked ? simpleMa(20) : []);
+    ma50.setData(root.querySelector('[data-ma="50"]').checked ? simpleMa(50) : []);
+    volume.setData(root.querySelector('[data-volume]').checked ? payload.bars.map(row => ({ time: row.trade_date, value: row.volume || 0, color: row.close >= row.open ? "rgba(201,78,71,.48)" : "rgba(37,132,96,.48)" })) : []);
+    markersApi.setMarkers((payload.trade_overlay?.executions || []).map(item => ({
+      id: item.execution_id, time: item.traded_on,
+      position: item.side === "BUY" ? "belowBar" : "aboveBar",
+      shape: item.side === "BUY" ? "arrowUp" : "arrowDown",
+      color: item.side === "BUY" ? "#c94e47" : "#258460",
+      text: `${item.side === "BUY" ? "买" : "卖"} ${item.price} ×${item.quantity}`,
+    })));
+    drawings = payload.drawings.map(canonicalizeDrawing);
     if (!selectedDrawing()) selectedDrawingId = null;
-    updateDrawingActions(); chart.timeScale().fitContent();
-    const visibleRange = chart.timeScale().getVisibleLogicalRange();
-    if (visibleRange) {
-      const rightPadding = Math.max(8, Math.min(20, Math.ceil(payload.bars.length * 0.08)));
-      chart.timeScale().setVisibleLogicalRange({ from: visibleRange.from, to: visibleRange.to + rightPadding });
-    }
-    resize();
+    updateDrawingActions(); resize(); fitBarsToViewport();
     status.textContent = `前复权 · ${payload.bars[0].trade_date} 至 ${payload.bars.at(-1).trade_date} · ${payload.bars.length} 日`;
   };
   const request = async () => {
@@ -166,12 +218,17 @@
         price: Number(price.toFixed(6)),
       };
     }
-    return typeof logical === "number" ? { logical: Number(logical.toFixed(4)), price: Number(price.toFixed(6)) } : null;
+    if (typeof logical !== "number") return null;
+    const lastLogical = payload.bars.length - 1;
+    if (logical > lastLogical) return { logical_from_end: Number((logical - lastLogical).toFixed(4)), price: Number(price.toFixed(6)) };
+    if (logical < 0) return { logical_from_start: Number(logical.toFixed(4)), price: Number(price.toFixed(6)) };
+    return { logical: Number(logical.toFixed(4)), price: Number(price.toFixed(6)) };
   };
   const saveDrawing = async (drawing) => {
     const response = await fetch(`/api/a/stocks/${encodeURIComponent(symbol)}/chart/drawings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...drawing, price_scale_id: payload.price_scale_id }) });
     if (!response.ok) throw new Error("保存画线失败");
     const saved = await response.json();
+    canonicalDrawingAnchors.set(saved.drawing_id, saved.anchors);
     drawings.push(saved);
     selectedDrawingId = saved.drawing_id;
     updateDrawingActions(); renderDrawings();
@@ -180,12 +237,13 @@
     const response = await fetch(`/api/a/stocks/${encodeURIComponent(symbol)}/chart/drawings/${encodeURIComponent(drawing.drawing_id)}?price_scale_id=${encodeURIComponent(payload.price_scale_id)}`, { method: "DELETE" });
     if (!response.ok) throw new Error("删除画线失败");
     drawings = drawings.filter(item => item.drawing_id !== drawing.drawing_id);
+    canonicalDrawingAnchors.delete(drawing.drawing_id);
     if (selectedDrawingId === drawing.drawing_id) selectedDrawingId = null;
     updateDrawingActions(); renderDrawings();
   };
   const nearestDrawing = (event) => {
     const rect = overlay.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top;
-    return drawings.find((drawing) => { const points = drawing.anchors.map(coord); if (points.some(point => point.x === null || point.y === null)) return false; if (drawing.tool === "horizontal") return Math.abs(y - points[0].y) < 8; const [a, b] = points; const distance = Math.abs((b.y - a.y) * x - (b.x - a.x) * y + b.x * a.y - b.y * a.x) / Math.hypot(b.y - a.y, b.x - a.x); return distance < 8; });
+    return drawings.find((drawing) => { const points = drawing.anchors.map(coord); if (points.some(point => point.x === null || point.y === null)) return false; if (drawing.tool !== "trendline") return Math.abs(y - points[0].y) < 8; const [a, b] = points; const distance = Math.abs((b.y - a.y) * x - (b.x - a.x) * y + b.x * a.y - b.y * a.x) / Math.hypot(b.y - a.y, b.x - a.x); return distance < 8; });
   };
   const selectDrawingAt = (event) => {
     const drawing = nearestDrawing(event);
@@ -204,7 +262,7 @@
     if (activeTool === "select") { selectDrawingAt(event); return; }
     const point = pointFromEvent(event); if (!point) return;
     try {
-      if (activeTool === "horizontal") { await saveDrawing({ tool: "horizontal", anchors: [point] }); setActiveTool("select"); drawingHint.textContent = "水平线已保存，已切换至选择"; return; }
+      if (activeTool === "horizontal") { await saveDrawing({ tool: activeTool, anchors: [point] }); setActiveTool("select"); drawingHint.textContent = "水平线已保存，已切换至选择"; return; }
       if (!pendingAnchor) { pendingAnchor = point; previewAnchor = point; drawingHint.textContent = "已选起点，移动鼠标预览，点击终点"; renderDrawings(); }
       else { const first = pendingAnchor; pendingAnchor = null; previewAnchor = null; await saveDrawing({ tool: "trendline", anchors: [first, point] }); setActiveTool("select"); drawingHint.textContent = "趋势线已保存，已切换至选择"; }
     } catch (_) { drawingHint.textContent = "保存失败，请重试"; }
@@ -222,6 +280,22 @@
     try { await removeDrawing(selectedDrawing()); drawingHint.textContent = "已删除选中画线"; } catch (_) { drawingHint.textContent = "删除失败，请重试"; }
   });
   root.querySelectorAll("[data-draw-tool]").forEach(button => button.addEventListener("click", () => setActiveTool(button.dataset.drawTool)));
+  const recordButton = root.querySelector("[data-chart-record]");
+  recordButton?.addEventListener("click", () => {
+    const nextRecordMode = !recordMode; setActiveTool("browse"); recordMode = nextRecordMode;
+    recordButton.setAttribute("aria-pressed", String(recordMode));
+    drawingHint.textContent = recordMode ? "点击K线预填成交日与价格；保存前仍可修改" : "拖拽缩放或查看价格";
+  });
+  root.querySelectorAll("[data-ma], [data-volume]").forEach(input => input.addEventListener("change", () => { if (payload) drawPayload(payload); }));
+  chart.subscribeClick((param) => {
+    if (!payload || !param.time) return;
+    const chartDate = typeof param.time === "string" ? param.time : `${param.time.year}-${String(param.time.month).padStart(2, "0")}-${String(param.time.day).padStart(2, "0")}`;
+    const matches = (payload.trade_overlay?.executions || []).filter(item => item.traded_on === chartDate);
+    if (matches.length && !recordMode) { window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?edit_trade=${encodeURIComponent(matches[0].execution_id)}#trade-journal`); return; }
+    if (!recordMode || !param.point) return;
+    const price = candles.coordinateToPrice(param.point.y);
+    if (price) window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?traded_on=${encodeURIComponent(chartDate)}&trade_price=${encodeURIComponent(price.toFixed(3))}#trade-journal`);
+  });
   deleteSelectedButton.addEventListener("click", async () => { const drawing = selectedDrawing(); if (!drawing) return; try { await removeDrawing(drawing); drawingHint.textContent = "已删除选中画线"; } catch (_) { drawingHint.textContent = "删除失败，请重试"; } });
   root.querySelector("[data-clear-drawings]").addEventListener("click", async () => { if (!payload || !drawings.length || !window.confirm("清空当前复权尺度下的全部个人画线？")) return; for (const drawing of [...drawings]) await removeDrawing(drawing); });
   const chartReviewForm = document.querySelector(".chart-review-control");
@@ -235,7 +309,8 @@
     event.preventDefault();
     window.location.assign(target.href);
   });
-  root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = Number(button.dataset.chartLimit); root.querySelectorAll("[data-chart-limit]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); request(); }));
+  root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); root.querySelectorAll("[data-chart-limit]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); request(); }));
+  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { interval = button.dataset.chartInterval; root.querySelectorAll("[data-chart-interval]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); request(); }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
   chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); resize(); request();
   if ("requestIdleCallback" in window) window.requestIdleCallback(prefetchAdjacentCharts, { timeout: 1200 });

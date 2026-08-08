@@ -3,9 +3,9 @@
 {% block heading %}{{ observation.industry_name }} 行业K线{% endblock %}
 {% block subtitle %}{{ observation.industry_code }} · SW2021-L3 · 数据截至 {{ query_date }}{% endblock %}
 {% block content %}
-<section class="section daily-hero industry-chart-hero">
+<section class="section daily-hero industry-chart-hero page-ledger-hero">
   <div>
-    <p class="eyebrow">INDUSTRY K-LINE / EQUAL WEIGHT</p>
+    <p class="eyebrow">行业等权代理K线</p>
     <h1>{{ observation.industry_name }} <small>{{ observation.industry_code }}</small></h1>
     <p class="muted">使用 {{ observation.membership_snapshot_date }} 日申万成员快照，由成分股前复权日线等权合成；起始点为 1000。</p>
   </div>
@@ -38,7 +38,7 @@
 
 <section class="section panel industry-kline-panel">
   <div class="section-heading">
-    <div><p class="eyebrow">DAILY OHLC</p><h2>近 {{ bars|length }} 个交易日</h2></div>
+    <div><p class="eyebrow">日线 OHLC</p><h2>近 {{ bars|length }} 个交易日</h2></div>
     <span class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-ma20"></i>MA20 <i class="legend-ma50"></i>MA50</span>
   </div>
   <div class="industry-chart-wrap">
@@ -66,7 +66,7 @@
 {% endif %}
 
 <section class="section panel">
-  <div class="section-heading"><div><p class="eyebrow">CONSTITUENTS</p><h2>当期成员与入选事实</h2></div><span class="muted">{{ members|length }} 只 · 点名称进 TradingView，点代码进同花顺</span></div>
+  <div class="section-heading"><div><p class="eyebrow">行业成员</p><h2>当期成员与入选事实</h2></div><span class="muted">{{ members|length }} 只 · 点名称进 TradingView，点代码进同花顺</span></div>
   <div class="table-wrap"><table data-sortable="true"><thead><tr><th>股票</th><th>Weinstein</th><th>Minervini</th><th>站内分析</th></tr></thead><tbody>
     {% for row in members %}<tr>
       <td data-sort="{{ row.symbol }}"><div class="stock-primary-link">{% if row.tradingview_url %}<a class="instrument-name-link" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}<span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a></span></div></td>

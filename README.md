@@ -6,6 +6,14 @@
 
 系统不寻找唯一的“核心目标”，不合成大师总分，也不输出自动交易指令。
 
+这是“龙场悟道”的开源版本，采用 [MIT License](LICENSE)。仓库不包含 Tushare token、运行数据库、行情缓存、个人成交记录或原始参考资料。
+
+## 本版更新
+
+- 增加“交易复盘”页面：记录实际成交、持仓、已实现盈亏及描述性统计；方法事实会按成交日快照保存，不能改写当时观察结论。
+- 增加 `market-backfill`：仅补齐本地已有原始日线日期缺失的复权因子、市值指标和四指数数据；先输出计划，只有显式 `--apply` 才写入。
+- 优化观察池、指数、行业与个股证据页的桌面和窄屏阅读体验。
+
 ## 当前产品
 
 | 对象 | 方法 | 系统输出 |
@@ -16,6 +24,7 @@
 | 沪深 A 股普通股票 | Minervini | 当前是否通过趋势模板，以及进入、持续、退出状态 |
 | 申万三级行业 | SW2021-L3 | 两种方法的入选数量、交集、宽度、当日变化及成分股等权代理K线 |
 | 人工复核 | 用户 | 未分析、观察、重点观察、放弃及备注 |
+| 交易复盘 | 用户 | 实际成交、持仓、已实现结果与描述性统计 |
 
 Weinstein 与 Minervini 的事实始终独立保存。“两法同时符合”只是集合交集，不是新策略或综合评分。行业观察使用同一当日非 ST 基础池，只用于发现入选股票的聚集现象，不评选“主线”，也不改变任何个股的方法结论。
 
@@ -84,7 +93,7 @@ Tushare交易日确认
 
 ```text
 src/master_stock_selector/
-├── commands/       # daily、watchlist 与 web 三个 CLI 入口
+├── commands/       # daily、market-backfill、watchlist 与 web CLI 入口
 ├── watchlist/      # Tushare采集、两种方法、行业观察及 SQLite 仓储
 └── web/            # FastAPI 路由、模板和样式
 scripts/
@@ -98,8 +107,9 @@ data/
 ├── market.sqlite3
 ├── master_watchlist.sqlite3
 └── backups/
-参考资料/            # Weinstein 与 Minervini 原始资料
 ```
+
+`data/`、日志、运行缓存和本地 `参考资料/` 仅保留在使用者机器上，均不属于开源仓库内容。
 
 ## 安装
 
@@ -116,6 +126,7 @@ uv pip install --python .venv/bin/python -e .
 ```bash
 .venv/bin/masterstock --help
 .venv/bin/masterstock daily --help
+.venv/bin/masterstock market-backfill --help
 .venv/bin/masterstock watchlist --help
 .venv/bin/masterstock web --help
 ```
@@ -163,6 +174,22 @@ scripts/run_master_watchlist.sh --reconstruct-from 2025-09-15
 
 历史重建仍只读取本地行情，不触发 Tushare 采集，也不冒充当日观察结果。
 
+## 补齐历史行情缺口
+
+当本地已有原始股票日线，但缺少复权因子、市值指标或四指数日线时，可先查看补采计划：
+
+```bash
+.venv/bin/masterstock market-backfill --from 2026-01-01
+```
+
+确认计划后才允许写入：
+
+```bash
+.venv/bin/masterstock market-backfill --from 2026-01-01 --apply
+```
+
+该命令只处理本地已有原始日线覆盖的交易日，并对每项补采执行日期、股票覆盖和四指数质量门；完成后会写入不可变凭证。它不用于回测、不重写观察池事实，也不会把事后数据标记为 `OBSERVED`。
+
 ## 启用交易日定时运行
 
 确认 `.env` 中已有 token、手工闭环至少成功一次后，再安装当前用户的 macOS LaunchAgent：
@@ -194,6 +221,7 @@ scripts/restart_web.sh
 - `/a/industries`：申万三级行业聚集观察
 - `/a/industries/{industry_code}/chart`：申万三级行业成分股等权代理K线
 - `/a/focus`：人工重点观察
+- `/a/review`：实际成交与交易复盘
 - `/a/stocks/{symbol}`：个股方法证据与人工备注
 - `/a/runs`：观察池运行凭证
 

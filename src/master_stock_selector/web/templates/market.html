@@ -1,35 +1,35 @@
 {% extends "base.html" %}
 {% block body %}
 <header class="research-header">
-  <a class="research-brand" href="/" aria-label="返回大师选股首页">
-    <span class="research-brand-name">大师选股</span>
-    <span class="research-seal">选</span>
+  <a class="research-brand" href="/" aria-label="返回龙场悟道首页">
+    <span class="research-brand-name">龙场悟道</span>
+    <span class="research-seal" aria-hidden="true">悟</span>
   </a>
   <div class="research-context">
-    <strong>两位大师 · 独立方法观察池</strong>
+    <strong>大师选股 · 两位大师独立方法观察池</strong>
     <span class="research-subtitle">{% block subtitle %}{% endblock %}</span>
   </div>
+  <nav class="research-nav" aria-label="龙场悟道导航">
+    {% for group in a_nav_groups %}
+    <div class="research-nav-group">
+      <span class="research-nav-label">{{ group.label }}</span>
+      <div class="research-nav-items">
+        {% for label, href in group["items"] %}
+        <a class="{% if active == label %}active{% endif %}" {% if active == label %}aria-current="page"{% endif %} href="{{ href }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ label }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </nav>
   <div class="research-date">
     <strong>{{ latest_date or query_date or today }}</strong>
     <span>数据截至 {{ (v2.market_date if v2 is defined else None) or latest_date or query_date or today }} · 收盘后复盘</span>
   </div>
 </header>
-<nav class="research-nav" aria-label="大师选股导航">
-  {% for group in a_nav_groups %}
-  <div class="research-nav-group">
-    <span class="research-nav-label">{{ group.label }}</span>
-    <div class="research-nav-items">
-      {% for label, href in group["items"] %}
-      <a class="{% if active == label %}active{% endif %}" {% if active == label %}aria-current="page"{% endif %} href="{{ href }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ label }}</a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endfor %}
-</nav>
 {% if not suppress_page_intro %}
 <section class="page-intro" aria-labelledby="page-title">
   <div>
-    <span class="section-label">A 股 · 大师观察池</span>
+    <span class="section-label">龙场悟道 · A 股大师观察池</span>
     <h1 id="page-title">{{ self.heading() }}</h1>
   </div>
   <p>{{ self.subtitle() }}</p>

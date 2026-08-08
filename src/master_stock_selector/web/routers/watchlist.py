@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date as calendar_date
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode
@@ -12,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from ...watchlist.charting import keltner_channels
 from ...watchlist.industry import INDUSTRY_POLICY_VERSION
 from ...watchlist.industry_confirmation import build_industry_weinstein_confirmation
-from ...watchlist.repository import MarketDataReader, WatchlistRepository
+from ...watchlist.repository import TRADE_SETUP_LABELS, MarketDataReader, WatchlistRepository
 
 METHOD_LABELS = {"minervini": "Minervini", "weinstein": "Weinstein"}
 RESULT_LABELS = {
@@ -228,7 +229,7 @@ def build_watchlist_router(
             request,
             "ashare/watchlist.html",
             {
-                "active": "大师观察池",
+                "active": "我的重点" if manual == "FOCUS" else "大师观察池",
                 "query_date": query_date,
                 "latest_date": repository.latest_fact_date(),
                 "available_dates": repository.available_dates(30),
@@ -392,6 +393,41 @@ def build_watchlist_router(
             },
         )
 
+    @router.get("/a/review", response_class=HTMLResponse)
+    def trade_review(request: Request) -> HTMLResponse:
+        review = repository.trade_review()
+        for item in review["closed"]:
+            item["planned_r_multiple"] = None
+            item["actual_r_multiple"] = None
+            item["actual_drawdown_low"] = None
+            if float(item["pnl"]) <= 0:
+                continue
+            entry_price = float(item["entry_price"])
+            exit_price = float(item["exit_price"])
+            stop_price = item.get("stop_price")
+            if stop_price is not None and entry_price > float(stop_price):
+                item["planned_r_multiple"] = round(
+                    (exit_price - entry_price) / (entry_price - float(stop_price)), 2
+                )
+            drawdown_low = market_reader.safe_trade_drawdown_low(
+                str(item["symbol"]), str(item["buy_date"]), str(item["sell_date"])
+            )
+            if drawdown_low is not None and drawdown_low < entry_price:
+                item["actual_drawdown_low"] = drawdown_low
+                item["actual_r_multiple"] = round(
+                    (exit_price - entry_price) / (entry_price - drawdown_low), 2
+                )
+        return render(
+            request,
+            "ashare/trade_review.html",
+            {
+                "active": "交易复盘",
+                "query_date": repository.latest_fact_date(),
+                "latest_date": repository.latest_fact_date(),
+                "review": review,
+            },
+        )
+
     @router.get("/a/stocks/{symbol}", response_class=HTMLResponse)
     def stock_detail(
         request: Request,
@@ -404,6 +440,9 @@ def build_watchlist_router(
         industry: str = "",
         q: str = "",
         section: str = "",
+        edit_trade: str = "",
+        traded_on: str = "",
+        trade_price: str = "",
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
@@ -444,6 +483,23 @@ def build_watchlist_router(
             default="",
         )
         query_date = date or fact_date
+        editing_trade = repository.trade_execution(edit_trade) if edit_trade else None
+        trade_prefill: dict[str, Any] = {}
+        if traded_on:
+            try:
+                calendar_date.fromisoformat(traded_on)
+                trade_prefill["traded_on"] = traded_on
+            except ValueError:
+                pass
+        if trade_price:
+            try:
+                price = float(trade_price)
+                if price > 0:
+                    trade_prefill["price"] = price
+            except ValueError:
+                pass
+        if editing_trade is not None and str(editing_trade["symbol"]) != symbol.upper():
+            raise HTTPException(status_code=404, detail="trade does not belong to this stock")
         navigation = _stock_navigation(
             repository,
             market_reader,
@@ -491,6 +547,9 @@ def build_watchlist_router(
                 "manual_labels": MANUAL_LABELS,
                 "minervini_check_labels": MINERVINI_CHECK_LABELS,
                 "minervini_metric_labels": MINERVINI_METRIC_LABELS,
+                "trade_setup_labels": TRADE_SETUP_LABELS,
+                "editing_trade": editing_trade,
+                "trade_prefill": trade_prefill,
                 "navigation": navigation,
             },
         )
@@ -543,6 +602,9 @@ def build_watchlist_router(
                 }
             )
         chart_methods = _chart_method_statuses(payload["history"], query_date)
+        market_metrics = market_reader.safe_stock_market_metrics(query_date, [symbol]).get(
+            symbol.upper(), {}
+        )
         return render(
             request,
             "ashare/watchlist_stock_chart.html",
@@ -552,6 +614,8 @@ def build_watchlist_router(
                 "latest_date": repository.latest_fact_date(),
                 "symbol": symbol.upper(),
                 "stock_name": str(payload["identity"].get("name") or symbol.upper()),
+                "industry_name": str(payload["industry"].get("industry_name") or "行业待补"),
+                "market_metrics": market_metrics,
                 "external_urls": _stock_external_urls(symbol),
                 "stock": payload,
                 "manual_labels": MANUAL_LABELS,
@@ -598,6 +662,62 @@ def build_watchlist_router(
             return RedirectResponse(return_to, status_code=303)
         return RedirectResponse(f"/a/stocks/{symbol.upper()}", status_code=303)
 
+    @router.post("/a/stocks/{symbol}/trades", response_class=RedirectResponse)
+    async def record_stock_trade(request: Request, symbol: str) -> RedirectResponse:
+        values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+
+        def value(key: str, default: str = "") -> str:
+            return str((values.get(key) or [default])[0])
+
+        stop_price = value("stop_price")
+
+        try:
+            repository.record_trade(
+                traded_on=value("traded_on"),
+                traded_at=value("traded_at"),
+                symbol=symbol,
+                side=value("side"),
+                quantity=int(value("quantity")),
+                price=float(value("price")),
+                fee=float(value("fee", "0") or "0"),
+                method="MANUAL", setup_method=value("setup_method", "PULLBACK"),
+                stop_price=float(stop_price) if stop_price else None,
+                rationale=value("rationale"),
+                invalidation=value("invalidation"),
+                exit_reason=value("exit_reason"),
+                market_context=value("market_context"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(f"/a/stocks/{symbol.upper()}#trade-journal", status_code=303)
+
+    @router.post("/a/trades/{execution_id}", response_class=RedirectResponse)
+    async def update_trade(request: Request, execution_id: str) -> RedirectResponse:
+        values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+
+        def value(key: str, default: str = "") -> str:
+            return str((values.get(key) or [default])[0])
+
+        stop_price = value("stop_price")
+
+        existing = repository.trade_execution(execution_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="trade not found")
+        try:
+            repository.update_trade(
+                execution_id,
+                traded_on=value("traded_on"), traded_at=value("traded_at"), side=value("side"),
+                quantity=int(value("quantity")), price=float(value("price")),
+                fee=float(value("fee", "0") or "0"), method="MANUAL",
+                setup_method=value("setup_method", "PULLBACK"),
+                stop_price=float(stop_price) if stop_price else None,
+                rationale=value("rationale"), invalidation=value("invalidation"),
+                exit_reason=value("exit_reason"), market_context=value("market_context"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(f"/a/stocks/{existing['symbol']}#trade-journal", status_code=303)
+
     @router.get("/api/a/stocks/{symbol}/chart")
     def api_stock_chart(
         symbol: str,
@@ -608,20 +728,38 @@ def build_watchlist_router(
         use_ema: bool = True,
         band_style: str = Query(default="atr", pattern="^(atr|tr|range)$"),
         atr_length: int = Query(default=10, ge=1, le=250),
-        limit: int = Query(default=320, ge=30, le=1000),
+        limit: int | None = Query(default=None, ge=30),
+        interval: str = Query(default="day", pattern="^(day|week)$"),
     ) -> dict[str, Any]:
         bars = market_reader.safe_stock_chart_bars(symbol, date, limit=limit)
+        if interval == "week":
+            bars = _weekly_bars(bars)
         if len(bars) < 2:
             return {"status": "DATA_GAP", "reason": "INSUFFICIENT_DAILY_OHLC", "bars": []}
         scale_ids = {str(row.get("price_scale_id") or "") for row in bars}
         if len(scale_ids) != 1 or not next(iter(scale_ids)):
             return {"status": "DATA_GAP", "reason": "INCONSISTENT_PRICE_SCALE", "bars": []}
         price_scale_id = next(iter(scale_ids))
+        overlay = repository.chart_trade_overlay(symbol, date)
+        for stop in overlay["open_stops"]:
+            stop["chart_price"] = market_reader.safe_chart_price_from_raw(
+                symbol, str(stop["buy_date"]), float(stop["stop_price"]), date
+            )
+        if interval == "week":
+            week_end = {
+                _week_key(str(row["trade_date"])): str(row["trade_date"])
+                for row in bars
+            }
+            for execution in overlay["executions"]:
+                execution["traded_on"] = week_end.get(
+                    _week_key(str(execution["traded_on"])), str(execution["traded_on"])
+                )
         return {
             "status": "OK",
             "symbol": symbol.upper(),
             "as_of_date": date,
             "adjustment": "qfq",
+            "interval": interval,
             "price_scale_id": price_scale_id,
             "bars": bars,
             "keltner": keltner_channels(
@@ -634,6 +772,7 @@ def build_watchlist_router(
                 atr_length=atr_length,
             ),
             "drawings": repository.chart_drawings(symbol, price_scale_id),
+            "trade_overlay": overlay,
         }
 
     @router.post("/api/a/stocks/{symbol}/chart/drawings")
@@ -975,6 +1114,31 @@ def _index_external_urls(symbol: str) -> dict[str, str]:
     elif suffix == "SZ" and len(code) == 6:
         urls["tonghuashun_url"] = f"https://stockpage.10jqka.com.cn/{code}/index/"
     return urls
+
+
+def _week_key(value: str) -> tuple[int, int]:
+    parsed = calendar_date.fromisoformat(value)
+    iso = parsed.isocalendar()
+    return (iso.year, iso.week)
+
+
+def _weekly_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for bar in bars:
+        grouped.setdefault(_week_key(str(bar["trade_date"])), []).append(bar)
+    weekly: list[dict[str, Any]] = []
+    for values in grouped.values():
+        first, last = values[0], values[-1]
+        weekly.append({
+            **last,
+            "open": first["open"],
+            "high": max(float(item["high"]) for item in values),
+            "low": min(float(item["low"]) for item in values),
+            "close": last["close"],
+            "volume": sum(float(item.get("volume") or 0) for item in values),
+            "amount": sum(float(item.get("amount") or 0) for item in values),
+        })
+    return weekly
 
 
 def _build_candlestick_chart(bars: list[dict[str, Any]]) -> dict[str, Any]:

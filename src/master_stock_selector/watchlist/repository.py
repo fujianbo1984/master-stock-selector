@@ -5,11 +5,12 @@ import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from statistics import fmean, median
 from threading import Lock
 from typing import Any
+from uuid import uuid4
 
 from .industry import (
     INDUSTRY_LEVEL,
@@ -17,6 +18,13 @@ from .industry import (
     INDUSTRY_TAXONOMY,
     build_industry_observations,
 )
+
+TRADE_METHOD_LABELS = {
+    "WEINSTEIN": "温斯坦",
+    "MINERVINI": "米涅尔维尼",
+    "MANUAL": "人工判断",
+}
+TRADE_SETUP_LABELS = {"BREAKOUT": "突破", "PULLBACK": "回调"}
 
 WATCHLIST_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS stock_method_daily_fact (
@@ -83,6 +91,29 @@ CREATE TABLE IF NOT EXISTS manual_watch_review (
     note TEXT NOT NULL DEFAULT '',
     reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS trade_execution (
+    execution_id TEXT NOT NULL PRIMARY KEY,
+    traded_on TEXT NOT NULL,
+    traded_at TEXT NOT NULL DEFAULT '',
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    price REAL NOT NULL CHECK (price > 0),
+    fee REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
+    method TEXT NOT NULL CHECK (method IN ('WEINSTEIN', 'MINERVINI', 'MANUAL')),
+    setup_method TEXT NOT NULL DEFAULT 'PULLBACK' CHECK (setup_method IN ('BREAKOUT', 'PULLBACK')),
+    stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
+    rationale TEXT NOT NULL DEFAULT '',
+    invalidation TEXT NOT NULL DEFAULT '',
+    exit_reason TEXT NOT NULL DEFAULT '',
+    market_context TEXT NOT NULL DEFAULT '',
+    observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_trade_execution_symbol_date
+ON trade_execution(symbol, traded_on, created_at);
+CREATE INDEX IF NOT EXISTS idx_trade_execution_date
+ON trade_execution(traded_on, created_at);
 CREATE TABLE IF NOT EXISTS chart_drawing (
     drawing_id TEXT NOT NULL PRIMARY KEY,
     symbol TEXT NOT NULL,
@@ -416,25 +447,54 @@ class MarketDataReader:
         symbol: str,
         end_date: str,
         *,
-        limit: int = 320,
+        limit: int | None = 320,
     ) -> list[dict[str, Any]]:
         """Return one point-in-time, front-adjusted daily OHLC series for chart review."""
 
-        if limit < 30 or limit > 1000:
-            raise ValueError("limit must be between 30 and 1000")
+        if limit is not None and limit < 30:
+            raise ValueError("limit must be at least 30")
+        limit_clause = "LIMIT ?" if limit is not None else ""
+        parameters: tuple[Any, ...] = (symbol.upper(), end_date, end_date)
+        if limit is not None:
+            parameters += (limit,)
         with self.connect() as connection:
             rows = connection.execute(
-                """
-                SELECT trade_date, open, high, low, close, volume, amount, price_scale_id
-                FROM daily_bars
-                WHERE market = 'ashare' AND symbol = ? AND adj_type = 'qfq'
-                  AND trade_date <= ? AND data_as_of_date <= ?
-                  AND open IS NOT NULL AND high IS NOT NULL AND low IS NOT NULL
-                  AND close IS NOT NULL
-                ORDER BY trade_date DESC
-                LIMIT ?
+                f"""
+                WITH latest_scale AS (
+                    SELECT qfq.price_scale_id, factor.adj_factor
+                    FROM daily_bars AS qfq
+                    JOIN daily_adjustment_factors AS factor
+                      ON factor.market=qfq.market AND factor.symbol=qfq.symbol
+                     AND factor.trade_date=qfq.trade_date
+                    WHERE qfq.market = 'ashare' AND qfq.symbol = ?
+                      AND qfq.adj_type = 'qfq' AND qfq.trade_date <= ?
+                      AND qfq.data_as_of_date <= ? AND qfq.price_scale_id != ''
+                    ORDER BY qfq.trade_date DESC
+                    LIMIT 1
+                )
+                SELECT qfq.trade_date,
+                       ROUND(raw.open * factor.adj_factor / latest_scale.adj_factor, 6) AS open,
+                       ROUND(raw.high * factor.adj_factor / latest_scale.adj_factor, 6) AS high,
+                       ROUND(raw.low * factor.adj_factor / latest_scale.adj_factor, 6) AS low,
+                       ROUND(raw.close * factor.adj_factor / latest_scale.adj_factor, 6) AS close,
+                       qfq.volume, qfq.amount, latest_scale.price_scale_id
+                FROM daily_bars AS qfq
+                JOIN daily_bars AS raw
+                  ON raw.market=qfq.market AND raw.symbol=qfq.symbol
+                 AND raw.trade_date=qfq.trade_date AND raw.adj_type='raw'
+                JOIN daily_adjustment_factors AS factor
+                  ON factor.market=qfq.market AND factor.symbol=qfq.symbol
+                 AND factor.trade_date=qfq.trade_date
+                CROSS JOIN latest_scale
+                WHERE qfq.market = 'ashare' AND qfq.symbol = ? AND qfq.adj_type = 'qfq'
+                  AND qfq.trade_date <= ? AND qfq.data_as_of_date <= ?
+                  AND raw.data_as_of_date <= ?
+                  AND raw.open IS NOT NULL AND raw.high IS NOT NULL AND raw.low IS NOT NULL
+                  AND raw.close IS NOT NULL AND factor.adj_factor > 0
+                ORDER BY qfq.trade_date DESC
+                {limit_clause}
                 """,
-                (symbol.upper(), end_date, end_date, limit),
+                parameters[:3] + parameters[:3] + (end_date,) + parameters[3:],
             ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
@@ -443,12 +503,66 @@ class MarketDataReader:
         symbol: str,
         end_date: str,
         *,
-        limit: int = 320,
+        limit: int | None = 320,
     ) -> list[dict[str, Any]]:
         try:
             return self.stock_chart_bars(symbol, end_date, limit=limit)
         except (FileNotFoundError, sqlite3.Error, ValueError):
             return []
+
+    def trade_drawdown_low(self, symbol: str, buy_date: str, sell_date: str) -> float | None:
+        """Return the raw daily low during a matched trade, inclusive of both dates."""
+        if not symbol or not buy_date or not sell_date or buy_date > sell_date:
+            return None
+        with self.connect() as connection:
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()}
+            required = {"market", "symbol", "trade_date", "low", "adj_type"}
+            if not required.issubset(columns):
+                return None
+            as_of_clause = " AND data_as_of_date <= ?" if "data_as_of_date" in columns else ""
+            parameters: tuple[str, ...] = (
+                symbol.upper(), buy_date, sell_date, sell_date
+            ) if as_of_clause else (symbol.upper(), buy_date, sell_date)
+            row = connection.execute(
+                f"""
+                SELECT MIN(low) FROM daily_bars
+                WHERE market = 'ashare' AND symbol = ? AND adj_type = 'raw'
+                  AND trade_date >= ? AND trade_date <= ?{as_of_clause}
+                  AND low IS NOT NULL AND low > 0
+                """,
+                parameters,
+            ).fetchone()
+        return round(float(row[0]), 3) if row and row[0] is not None else None
+
+    def safe_trade_drawdown_low(self, symbol: str, buy_date: str, sell_date: str) -> float | None:
+        try:
+            return self.trade_drawdown_low(symbol, buy_date, sell_date)
+        except (FileNotFoundError, sqlite3.Error):
+            return None
+
+    def safe_chart_price_from_raw(
+        self, symbol: str, trade_date: str, raw_price: float, as_of_date: str
+    ) -> float | None:
+        try:
+            with self.connect() as connection:
+                columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()}
+                as_of_clause = " AND qfq.data_as_of_date <= ?" if "data_as_of_date" in columns else ""
+                parameters: tuple[str, ...] = (symbol.upper(), trade_date, as_of_date) if as_of_clause else (symbol.upper(), trade_date)
+                row = connection.execute(
+                    f"""
+                    SELECT qfq.close, raw.close FROM daily_bars AS qfq
+                    JOIN daily_bars AS raw ON raw.market=qfq.market AND raw.symbol=qfq.symbol
+                      AND raw.trade_date=qfq.trade_date AND raw.adj_type='raw'
+                    WHERE qfq.market='ashare' AND qfq.symbol=? AND qfq.trade_date=?
+                      AND qfq.adj_type='qfq'{as_of_clause}
+                    """,
+                    parameters,
+                ).fetchone()
+            if not row or not row[0] or not row[1]:
+                return None
+            return round(raw_price * float(row[0]) / float(row[1]), 6)
+        except (FileNotFoundError, sqlite3.Error):
+            return None
 
     def security_members(self, as_of_date: str) -> dict[str, dict[str, Any]]:
         with self.connect() as connection:
@@ -803,9 +917,57 @@ class WatchlistRepository:
         with self._initialize_lock:
             if self._initialized:
                 return
+            if self._existing_schema_is_current():
+                self._initialized = True
+                return
             with self.connect() as connection:
                 connection.executescript(WATCHLIST_SCHEMA_SQL)
+                self._ensure_trade_execution_columns(connection)
             self._initialized = True
+
+    def _existing_schema_is_current(self) -> bool:
+        """Avoid a schema write when opening the already-initialized live database."""
+        if not self.path.is_file():
+            return False
+        try:
+            connection = sqlite3.connect(
+                f"file:{self.path.resolve()}?mode=ro", uri=True, timeout=1
+            )
+            try:
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+                columns = {
+                    str(row[1]) for row in connection.execute("PRAGMA table_info(trade_execution)")
+                }
+            finally:
+                connection.close()
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).lower():
+                # A daily writer may own a rollback journal. The schema was already
+                # established before the writer began; defer any migration rather than
+                # turning a web startup into a competing schema write.
+                return True
+            return False
+        return (
+            {"stock_method_daily_fact", "trade_execution"}.issubset(tables)
+            and {"traded_at", "setup_method", "stop_price"}.issubset(columns)
+        )
+
+    @staticmethod
+    def _ensure_trade_execution_columns(connection: sqlite3.Connection) -> None:
+        columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(trade_execution)")}
+        if "traded_at" not in columns:
+            connection.execute("ALTER TABLE trade_execution ADD COLUMN traded_at TEXT NOT NULL DEFAULT ''")
+        if "setup_method" not in columns:
+            connection.execute(
+                "ALTER TABLE trade_execution ADD COLUMN setup_method TEXT NOT NULL DEFAULT 'PULLBACK'"
+            )
+        if "stop_price" not in columns:
+            connection.execute("ALTER TABLE trade_execution ADD COLUMN stop_price REAL")
 
     def persist_run(
         self,
@@ -1650,6 +1812,266 @@ class WatchlistRepository:
                 (symbol.upper(), state, note.strip()),
             )
 
+    def record_trade(
+        self,
+        *,
+        traded_on: str,
+        traded_at: str = "",
+        symbol: str,
+        side: str,
+        quantity: int,
+        price: float,
+        fee: float,
+        method: str,
+        setup_method: str = "PULLBACK",
+        stop_price: float | None = None,
+        rationale: str = "",
+        invalidation: str = "",
+        exit_reason: str = "",
+        market_context: str = "",
+        permit_unmatched_sell: bool = False,
+    ) -> str:
+        """Append one manual execution and freeze the known watchlist evidence on that date."""
+        self.initialize()
+        try:
+            date.fromisoformat(traded_on)
+        except ValueError as exc:
+            raise ValueError("交易日期必须为 YYYY-MM-DD") from exc
+        normalized_time = traded_at.strip()
+        if normalized_time:
+            try:
+                datetime.strptime(normalized_time, "%H:%M:%S")
+            except ValueError as exc:
+                raise ValueError("成交时间必须为 HH:MM:SS") from exc
+        normalized_symbol = symbol.upper().strip()
+        if not normalized_symbol or "." not in normalized_symbol:
+            raise ValueError("股票代码格式不正确")
+        normalized_side = side.upper().strip()
+        if normalized_side not in {"BUY", "SELL"}:
+            raise ValueError("方向必须为买入或卖出")
+        normalized_method = method.upper().strip()
+        normalized_setup = setup_method.upper().strip()
+        if normalized_method not in {"WEINSTEIN", "MINERVINI", "MANUAL"}:
+            raise ValueError("关联方法不正确")
+        if normalized_setup not in TRADE_SETUP_LABELS:
+            raise ValueError("交易方法必须为突破或回调")
+        if quantity <= 0 or price <= 0 or fee < 0:
+            raise ValueError("数量、价格和费用必须有效")
+        normalized_stop = float(stop_price) if stop_price is not None else None
+        if normalized_stop is not None and (normalized_stop <= 0 or normalized_stop >= price):
+            raise ValueError("止损价必须大于 0 且低于买入成交价")
+        if normalized_side == "SELL":
+            normalized_stop = None
+
+        execution_id = uuid4().hex
+        with self.connect() as connection:
+            if normalized_side == "SELL":
+                existing_rows = [dict(row) for row in connection.execute(
+                        "SELECT * FROM trade_execution WHERE symbol = ? ORDER BY traded_on, traded_at, created_at, execution_id",
+                        (normalized_symbol,),
+                    ).fetchall()]
+                try:
+                    _match_trade_executions([
+                        *existing_rows,
+                        {
+                            "execution_id": execution_id, "traded_on": traded_on, "traded_at": normalized_time,
+                            "symbol": normalized_symbol, "side": normalized_side,
+                            "quantity": quantity, "price": price, "fee": fee,
+                            "method": normalized_method, "setup_method": normalized_setup,
+                            "stop_price": normalized_stop,
+                        },
+                    ])
+                except ValueError as exc:
+                    if not permit_unmatched_sell:
+                        available = _open_quantity(existing_rows)
+                        raise ValueError(f"卖出数量超过可复盘持仓：可用 {available} 股") from exc
+            snapshot_rows = connection.execute(
+                """
+                SELECT as_of_date, method, result, policy_version, origin
+                FROM stock_method_daily_fact
+                WHERE symbol = ? AND as_of_date <= ?
+                  AND as_of_date = (
+                    SELECT MAX(as_of_date) FROM stock_method_daily_fact
+                    WHERE symbol = ? AND as_of_date <= ?
+                  )
+                ORDER BY method
+                """,
+                (normalized_symbol, traded_on, normalized_symbol, traded_on),
+            ).fetchall()
+            snapshot = {
+                "as_of_date": str(snapshot_rows[0]["as_of_date"]) if snapshot_rows else "",
+                "facts": [dict(row) for row in snapshot_rows],
+                "quality": "KNOWN_AS_OF" if snapshot_rows else "NO_WATCHLIST_FACT_AS_OF",
+            }
+            connection.execute(
+                """
+                INSERT INTO trade_execution (
+                    execution_id, traded_on, traded_at, symbol, side, quantity, price, fee, method, setup_method, stop_price,
+                    rationale, invalidation, exit_reason, market_context, observation_snapshot_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    execution_id, traded_on, normalized_time, normalized_symbol, normalized_side, quantity,
+                    price, fee, normalized_method, normalized_setup, normalized_stop, rationale.strip(), invalidation.strip(),
+                    exit_reason.strip(), market_context.strip(), _json(snapshot),
+                ),
+            )
+        return execution_id
+
+    def trade_review(self) -> dict[str, Any]:
+        """Return FIFO-matched completed trades and descriptive, non-predictive statistics."""
+        self.initialize()
+        with self.connect() as connection:
+            rows = [dict(row) for row in connection.execute(
+                "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
+            ).fetchall()]
+        for row in rows:
+            row["snapshot"] = json.loads(str(row.pop("observation_snapshot_json") or "{}"))
+        closed, open_lots, unmatched_sells = _match_trade_executions(
+            rows, permit_unmatched_sells=True
+        )
+        open_positions = _summarize_open_lots(open_lots)
+        names = self._trade_stock_names({str(row["symbol"]) for row in rows})
+        for collection in (rows, closed, open_positions, unmatched_sells):
+            for item in collection:
+                symbol = str(item["symbol"])
+                item["stock_name"] = names.get(symbol, "名称待补")
+                setup_method = str(item.get("setup_method") or "PULLBACK")
+                item["setup_label"] = TRADE_SETUP_LABELS.get(setup_method, "回调")
+        return {
+            "executions": list(reversed(rows)),
+            "closed": list(reversed(closed)),
+            "open_positions": open_positions,
+            "unmatched_sells": list(reversed(unmatched_sells)),
+            "summary": _trade_statistics(closed),
+            "by_setup": {
+                setup: _trade_statistics([item for item in closed if item["setup_method"] == setup])
+                for setup in ("BREAKOUT", "PULLBACK")
+            },
+            "sample_state": (
+                "样本不足：少于 20 笔已完成交易，仅展示描述统计。"
+                if len(closed) < 20
+                else "样本达到基础复盘门槛；仍不构成策略有效性或买卖建议。"
+            ),
+        }
+
+    def trade_execution(self, execution_id: str) -> dict[str, Any] | None:
+        self.initialize()
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM trade_execution WHERE execution_id = ?", (execution_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
+        item["setup_label"] = TRADE_SETUP_LABELS.get(str(item.get("setup_method") or "PULLBACK"), "回调")
+        return item
+
+    def update_trade(
+        self,
+        execution_id: str,
+        *,
+        traded_on: str,
+        traded_at: str,
+        side: str,
+        quantity: int,
+        price: float,
+        fee: float,
+        method: str,
+        setup_method: str = "PULLBACK",
+        stop_price: float | None = None,
+        rationale: str = "",
+        invalidation: str = "",
+        exit_reason: str = "",
+        market_context: str = "",
+    ) -> None:
+        self.initialize()
+        try:
+            date.fromisoformat(traded_on)
+            if traded_at:
+                datetime.strptime(traded_at, "%H:%M:%S")
+        except ValueError as exc:
+            raise ValueError("成交日期或时间格式不正确") from exc
+        normalized_side = side.upper().strip()
+        normalized_method = method.upper().strip()
+        normalized_setup = setup_method.upper().strip()
+        if normalized_side not in {"BUY", "SELL"} or normalized_method not in TRADE_METHOD_LABELS:
+            raise ValueError("方向或关联方法不正确")
+        if normalized_setup not in TRADE_SETUP_LABELS:
+            raise ValueError("交易方法必须为突破或回调")
+        if quantity <= 0 or price <= 0 or fee < 0:
+            raise ValueError("数量、价格和费用必须有效")
+        normalized_stop = float(stop_price) if stop_price is not None else None
+        if normalized_stop is not None and (normalized_stop <= 0 or normalized_stop >= price):
+            raise ValueError("止损价必须大于 0 且低于买入成交价")
+        if normalized_side == "SELL":
+            normalized_stop = None
+        with self.connect() as connection:
+            current = connection.execute(
+                "SELECT * FROM trade_execution WHERE execution_id = ?", (execution_id,)
+            ).fetchone()
+            if current is None:
+                raise ValueError("成交记录不存在")
+            symbol = str(current["symbol"])
+            rows = [dict(row) for row in connection.execute(
+                "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
+            ).fetchall()]
+            for row in rows:
+                if str(row["execution_id"]) == execution_id:
+                    row.update({
+                        "traded_on": traded_on, "traded_at": traded_at, "side": normalized_side,
+                        "quantity": quantity, "price": price, "fee": fee, "method": normalized_method,
+                        "setup_method": normalized_setup, "stop_price": normalized_stop,
+                        "rationale": rationale.strip(), "invalidation": invalidation.strip(),
+                        "exit_reason": exit_reason.strip(), "market_context": market_context.strip(),
+                    })
+                    break
+            _match_trade_executions(rows)
+            snapshot_rows = connection.execute(
+                """
+                SELECT as_of_date, method, result, policy_version, origin
+                FROM stock_method_daily_fact WHERE symbol = ? AND as_of_date <= ?
+                  AND as_of_date = (SELECT MAX(as_of_date) FROM stock_method_daily_fact
+                                    WHERE symbol = ? AND as_of_date <= ?)
+                ORDER BY method
+                """,
+                (symbol, traded_on, symbol, traded_on),
+            ).fetchall()
+            snapshot = {
+                "as_of_date": str(snapshot_rows[0]["as_of_date"]) if snapshot_rows else "",
+                "facts": [dict(row) for row in snapshot_rows],
+                "quality": "KNOWN_AS_OF" if snapshot_rows else "NO_WATCHLIST_FACT_AS_OF",
+            }
+            connection.execute(
+                """
+                UPDATE trade_execution SET traded_on=?, traded_at=?, side=?, quantity=?, price=?, fee=?,
+                    method=?, setup_method=?, stop_price=?, rationale=?, invalidation=?, exit_reason=?, market_context=?,
+                    observation_snapshot_json=? WHERE execution_id=?
+                """,
+                (traded_on, traded_at.strip(), normalized_side, quantity, price, fee, normalized_method,
+                 normalized_setup, normalized_stop, rationale.strip(), invalidation.strip(), exit_reason.strip(), market_context.strip(),
+                 _json(snapshot), execution_id),
+            )
+
+    def _trade_stock_names(self, symbols: set[str]) -> dict[str, str]:
+        if not symbols:
+            return {}
+        placeholders = ",".join("?" for _ in symbols)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT snapshot.symbol, snapshot.name FROM security_identity_snapshot AS snapshot
+                WHERE snapshot.symbol IN ({placeholders})
+                  AND snapshot.snapshot_date = (
+                    SELECT MAX(latest.snapshot_date) FROM security_identity_snapshot AS latest
+                    WHERE latest.symbol = snapshot.symbol
+                  )
+                """,
+                tuple(sorted(symbols)),
+            ).fetchall()
+        return {str(row["symbol"]): str(row["name"] or "") for row in rows}
+
     def chart_drawings(self, symbol: str, price_scale_id: str) -> list[dict[str, Any]]:
         self.initialize()
         with self.connect() as connection:
@@ -1657,12 +2079,33 @@ class WatchlistRepository:
                 """
                 SELECT drawing_id, tool, anchors_json, created_at, updated_at
                 FROM chart_drawing
-                WHERE symbol = ? AND price_scale_id = ?
+                WHERE symbol = ? AND price_scale_id = ? AND tool IN ('trendline', 'horizontal')
                 ORDER BY created_at, drawing_id
                 """,
                 (symbol.upper(), price_scale_id),
             ).fetchall()
         return [{**dict(row), "anchors": json.loads(str(row["anchors_json"]))} for row in rows]
+
+    def chart_trade_overlay(self, symbol: str, end_date: str) -> dict[str, list[dict[str, Any]]]:
+        """Return recorded trades and active stop levels for a chart overlay only."""
+        self.initialize()
+        with self.connect() as connection:
+            rows = [dict(row) for row in connection.execute(
+                "SELECT * FROM trade_execution WHERE symbol = ? AND traded_on <= ? "
+                "ORDER BY traded_on, traded_at, created_at, execution_id",
+                (symbol.upper(), end_date),
+            ).fetchall()]
+        _, open_lots, _ = _match_trade_executions(rows, permit_unmatched_sells=True)
+        return {
+            "executions": [
+                {key: row[key] for key in ("execution_id", "traded_on", "side", "quantity", "price", "stop_price")}
+                for row in rows
+            ],
+            "open_stops": [
+                {"buy_execution_id": lot["buy_execution_id"], "buy_date": lot["buy_date"], "stop_price": lot["stop_price"]}
+                for lot in open_lots if lot.get("stop_price") is not None
+            ],
+        }
 
     def save_chart_drawing(
         self,
@@ -1683,11 +2126,17 @@ class WatchlistRepository:
         for anchor in anchors:
             date = str(anchor.get("date") or "")
             logical = anchor.get("logical")
+            logical_from_end = anchor.get("logical_from_end")
+            logical_from_start = anchor.get("logical_from_start")
             price = anchor.get("price")
             if not isinstance(price, (int, float)) or float(price) <= 0:
                 raise ValueError("invalid drawing anchor")
             if len(date) == 10:
                 normalized.append({"date": date, "price": round(float(price), 6)})
+            elif isinstance(logical_from_end, (int, float)) and float(logical_from_end) > 0:
+                normalized.append({"logical_from_end": round(float(logical_from_end), 4), "price": round(float(price), 6)})
+            elif isinstance(logical_from_start, (int, float)) and float(logical_from_start) < 0:
+                normalized.append({"logical_from_start": round(float(logical_from_start), 4), "price": round(float(price), 6)})
             elif isinstance(logical, (int, float)):
                 normalized.append({"logical": round(float(logical), 4), "price": round(float(price), 6)})
             else:
@@ -1750,6 +2199,111 @@ class WatchlistRepository:
             "has_facts": bool(fact_state[0]) if fact_state else False,
             "latest_fact_date": str(fact_state[1] or "") if fact_state else "",
         }
+
+
+def _open_quantity(rows: Sequence[Mapping[str, Any]]) -> int:
+    _, lots, _ = _match_trade_executions(rows)
+    return sum(int(lot["remaining_quantity"]) for lot in lots)
+
+
+def _match_trade_executions(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    permit_unmatched_sells: bool = False,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Match long-only executions FIFO; costs include allocated commissions."""
+    lots: list[dict[str, Any]] = []
+    closed: list[dict[str, Any]] = []
+    unmatched_sells: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row["side"]) == "BUY":
+            quantity = int(row["quantity"])
+            lots.append({
+                "symbol": str(row["symbol"]), "buy_execution_id": str(row["execution_id"]),
+                "buy_date": str(row["traded_on"]), "method": str(row["method"]),
+                "setup_method": str(row.get("setup_method") or "PULLBACK"),
+                "entry_price": float(row["price"]), "stop_price": row.get("stop_price"),
+                "remaining_quantity": quantity,
+                "unit_cost": (float(row["price"]) * quantity + float(row["fee"])) / quantity,
+                "rationale": str(row.get("rationale") or ""),
+                "invalidation": str(row.get("invalidation") or ""),
+                "market_context": str(row.get("market_context") or ""),
+            })
+            continue
+
+        remaining_to_sell = int(row["quantity"])
+        matching_lots = [lot for lot in lots if lot["symbol"] == str(row["symbol"])]
+        for lot in matching_lots:
+            if remaining_to_sell <= 0:
+                break
+            matched_quantity = min(remaining_to_sell, int(lot["remaining_quantity"]))
+            sale_proceeds = float(row["price"]) * matched_quantity - (
+                float(row["fee"]) * matched_quantity / int(row["quantity"])
+            )
+            cost = float(lot["unit_cost"]) * matched_quantity
+            pnl = sale_proceeds - cost
+            closed.append({
+                "symbol": str(row["symbol"]), "method": str(lot["method"]),
+                "setup_method": str(lot["setup_method"]),
+                "buy_execution_id": str(lot["buy_execution_id"]),
+                "sell_execution_id": str(row["execution_id"]),
+                "buy_date": str(lot["buy_date"]), "sell_date": str(row["traded_on"]),
+                "quantity": matched_quantity, "cost": round(cost, 2),
+                "proceeds": round(sale_proceeds, 2), "pnl": round(pnl, 2),
+                "entry_price": float(lot["entry_price"]), "exit_price": float(row["price"]),
+                "stop_price": lot.get("stop_price"),
+                "return_pct": round(pnl / cost * 100, 2) if cost else None,
+                "holding_days": (date.fromisoformat(str(row["traded_on"])) - date.fromisoformat(str(lot["buy_date"]))).days,
+                "rationale": str(lot["rationale"]), "invalidation": str(lot["invalidation"]),
+                "market_context": str(lot["market_context"]),
+                "exit_reason": str(row.get("exit_reason") or ""),
+            })
+            lot["remaining_quantity"] = int(lot["remaining_quantity"]) - matched_quantity
+            remaining_to_sell -= matched_quantity
+        if remaining_to_sell:
+            if not permit_unmatched_sells:
+                raise ValueError("卖出记录无法由已有买入记录配对")
+            unmatched_sells.append({
+                "symbol": str(row["symbol"]), "sell_date": str(row["traded_on"]),
+                "quantity": remaining_to_sell, "price": float(row["price"]),
+                "fee": round(float(row["fee"]) * remaining_to_sell / int(row["quantity"]), 2),
+                "exit_reason": str(row.get("exit_reason") or ""),
+            })
+    return closed, [lot for lot in lots if int(lot["remaining_quantity"]) > 0], unmatched_sells
+
+
+def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for lot in lots:
+        key = (str(lot["symbol"]), str(lot.get("setup_method") or "PULLBACK"))
+        item = grouped.setdefault(key, {"symbol": key[0], "setup_method": key[1], "quantity": 0, "cost": 0.0})
+        quantity = int(lot["remaining_quantity"])
+        item["quantity"] += quantity
+        item["cost"] += float(lot["unit_cost"]) * quantity
+    return [
+        {**item, "cost": round(float(item["cost"]), 2)}
+        for item in sorted(grouped.values(), key=lambda item: (str(item["symbol"]), str(item["setup_method"])))
+    ]
+
+
+def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    count = len(trades)
+    pnl_values = [float(item["pnl"]) for item in trades]
+    gains = [value for value in pnl_values if value > 0]
+    losses = [value for value in pnl_values if value < 0]
+    total_cost = sum(float(item["cost"]) for item in trades)
+    return {
+        "count": count,
+        "net_pnl": round(sum(pnl_values), 2),
+        "return_pct": round(sum(pnl_values) / total_cost * 100, 2) if total_cost else None,
+        "win_rate_pct": round(len(gains) / count * 100, 1) if count else None,
+        "avg_gain": round(sum(gains) / len(gains), 2) if gains else None,
+        "avg_loss": round(sum(losses) / len(losses), 2) if losses else None,
+        "profit_loss_ratio": round((sum(gains) / len(gains)) / abs(sum(losses) / len(losses)), 2)
+        if gains and losses else None,
+        "expectancy": round(sum(pnl_values) / count, 2) if count else None,
+        "avg_holding_days": round(sum(int(item["holding_days"]) for item in trades) / count, 1) if count else None,
+    }
 
 
 def _json(value: Any) -> str:

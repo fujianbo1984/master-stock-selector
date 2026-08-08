@@ -1,10 +1,14 @@
 {% extends "market.html" %}
+{% set suppress_page_intro = true %}
 {% block heading %}四指数判断{% endblock %}
 {% block subtitle %}Weinstein 完整阶段 + Minervini Stage 2 是/否 · 数据截至 {{ query_date }}{% endblock %}
 {% block content %}
-<section class="section panel">
-  <div class="section-heading"><div><p class="eyebrow">TWO INDEPENDENT METHODS</p><h2>四指数独立判断</h2></div><span class="muted">{{ weinstein_policy_version }}<br>{{ minervini_policy_version }}</span></div>
-  <p class="reading-note">Weinstein 只使用已结束的完整交易周；Minervini 只回答是否处于 Stage 2。四指数不投票、不加权，也不直接决定个股能否进入观察池。</p>
+<section class="section daily-hero page-ledger-hero">
+  <div><p class="eyebrow">四指数判断</p><h1>两种方法独立呈现市场阶段</h1><p>Weinstein 使用完整交易周；Minervini 只回答是否处于 Stage 2。四指数不投票、不加权，也不直接决定个股能否进入观察池。</p></div>
+  <div class="page-ledger-meta"><span>{{ weinstein_policy_version }}</span><span>{{ minervini_policy_version }}</span></div>
+</section>
+
+<section class="section panel index-ledger-panel">
   {% if indices %}
   <div class="index-detail-grid">
     {% for row in indices %}
@@ -32,9 +36,8 @@
   {% else %}<div class="empty">暂无指数阶段事实。请先运行 <code>masterstock watchlist</code>。</div>{% endif %}
 </section>
 
-<section class="section panel notes-panel">
-  <h2>判定原则</h2>
-  <p>Stage 2 要求价格位于上升的30周均线上方且中期回报为正；Stage 4 为价格位于下降的30周均线下方且中期回报为负。均线走平时必须结合此前路径区分 Stage 1 与 Stage 3，无法唯一判断时输出转换期。</p>
-  <p>Minervini 指数 Stage 2 使用50日、150日、200日均线关系、200日线方向与52周价格位置。因对象是指数，不把四个指数互相排名来代替个股横截面相对强度条件；结果只是“是”“否”或“数据不足”。</p>
-</section>
+<details class="section stock-disclosure notes-panel">
+  <summary><span><strong>判定原则与口径边界</strong><small>展开查看 Stage 规则与指数 Minervini 适配说明</small></span><span class="disclosure-action">展开</span></summary>
+  <div class="stock-disclosure-body"><p>Stage 2 要求价格位于上升的30周均线上方且中期回报为正；Stage 4 为价格位于下降的30周均线下方且中期回报为负。均线走平时必须结合此前路径区分 Stage 1 与 Stage 3，无法唯一判断时输出转换期。</p><p>Minervini 指数 Stage 2 使用50日、150日、200日均线关系、200日线方向与52周价格位置。因对象是指数，不把四个指数互相排名来代替个股横截面相对强度条件；结果只是“是”“否”或“数据不足”。</p></div>
+</details>
 {% endblock %}

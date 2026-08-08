@@ -71,6 +71,7 @@ def create_app(
                     ("四指数判断", "/a/indices"),
                     ("行业观察", "/a/industries"),
                     ("我的重点", "/a/focus"),
+                    ("交易复盘", "/a/review"),
                 ],
             }
         ]

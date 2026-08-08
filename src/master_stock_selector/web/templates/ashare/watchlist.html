@@ -4,9 +4,9 @@
 {% block heading %}大师观察池{% endblock %}
 {% block subtitle %}Weinstein 与 Minervini 独立筛选 · {{ query_date or '暂无事实日期' }}{% endblock %}
 {% block content %}
-<section class="section daily-hero watchlist-hero">
+<section class="section daily-hero watchlist-hero page-ledger-hero">
   <div>
-    <p class="eyebrow">MASTER WATCHLIST</p>
+    <p class="eyebrow">大师观察池</p>
     <h1>程序缩小范围，最终判断由你完成</h1>
     <p class="muted watchlist-hero-summary">指数保留 Weinstein 完整阶段，并增加 Minervini Stage 2 是/否判断；个股只看两种方法的独立结果。不合成总分。</p>
   </div>
@@ -45,11 +45,10 @@
 {% if summary.reconstructed %}
 <div class="notice" role="status">当前结果含历史重建事实（RECONSTRUCTED），表示依据现有本地行情重算，不冒充当日曾实际保存的观察结果。</div>
 {% endif %}
-<div class="eligibility-note" role="note">
-  <strong>观察资格：</strong>已按 {{ query_date }} 当日风险标识排除 ST/*ST {{ summary.excluded_st }} 只；市值不参与 Weinstein 或 Minervini 判定。
-  非 ST 入选股中，低于 50 亿 {{ summary.small_cap }} 只；默认仅展示总市值不低于 50 亿的股票，且市值缺失不展示。
-  市值只影响展示，不参与 Weinstein 或 Minervini 判定。{% if filters.min_cap and summary.missing_market_cap %}市值缺失的 {{ summary.missing_market_cap }} 只在当前门槛下不显示。{% endif %}
-</div>
+<details class="section stock-disclosure eligibility-note" role="note">
+  <summary><span><strong>观察资格与展示口径</strong><small>已排除 ST/*ST {{ summary.excluded_st }} 只；市值门槛只影响展示，不参与方法判定</small></span><span class="disclosure-action">展开</span></summary>
+  <div class="stock-disclosure-body">已按 {{ query_date }} 当日风险标识排除 ST/*ST {{ summary.excluded_st }} 只；市值不参与 Weinstein 或 Minervini 判定。非 ST 入选股中，低于 50 亿 {{ summary.small_cap }} 只；默认仅展示总市值不低于 50 亿的股票，且市值缺失不展示。市值只影响展示，不参与 Weinstein 或 Minervini 判定。{% if filters.min_cap and summary.missing_market_cap %}市值缺失的 {{ summary.missing_market_cap }} 只在当前门槛下不显示。{% endif %}</div>
+</details>
 
 <section class="section panel index-stage-strip">
   <details class="index-stage-disclosure">
@@ -136,13 +135,6 @@
 <section class="section panel watchlist-section" id="focus-candidates">
   <div class="section-heading"><div><p class="eyebrow">04 / HUMAN REVIEW</p><h2>我的重点观察</h2></div><div class="section-actions"><span class="muted">人工状态不改变系统事实</span><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="focus-candidates">下载 TradingView 列表（{{ focus_rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="focus-candidates">复制代码</button></div></div>
   {% set navigation_section = 'focus-candidates' %}{% set section_rows = focus_rows %}{% include "ashare/_watchlist_table.html" %}
-</section>
-{% endif %}
-
-{% if available_dates %}
-<section class="section snapshot-bar" aria-label="历史事实日期">
-  <span class="muted">最近事实</span>
-  {% for item in available_dates|reverse %}<a class="snapshot-link {% if item == query_date %}active{% endif %}" href="/a/daily?date={{ item }}&min_cap={{ filters.min_cap }}">{{ item }}</a>{% endfor %}
 </section>
 {% endif %}
 
