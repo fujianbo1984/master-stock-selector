@@ -2,14 +2,36 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+cd "$PROJECT_DIR"
+ENV_FILE="${MASTERSTOCK_ENV_FILE:-$PROJECT_DIR/.env}"
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
 MASTERSTOCK_BIN="${MASTERSTOCK_BIN:-$PROJECT_DIR/.venv/bin/masterstock}"
 HOST="${MASTERSTOCK_WEB_HOST:-127.0.0.1}"
 PORT="${MASTERSTOCK_WEB_PORT:-8000}"
 MARKET_DATABASE="${MASTERSTOCK_MARKET_DATABASE:-$PROJECT_DIR/data/market.sqlite3}"
 WATCHLIST_DATABASE="${MASTERSTOCK_WATCHLIST_DATABASE:-$PROJECT_DIR/data/master_watchlist.sqlite3}"
+USER_DATABASE="${MASTERSTOCK_USER_DATABASE:-$PROJECT_DIR/data/users.sqlite3}"
 PID_FILE="${MASTERSTOCK_WEB_PID_FILE:-$PROJECT_DIR/.masterstock-web.pid}"
 LOG_FILE="${MASTERSTOCK_WEB_LOG_FILE:-$PROJECT_DIR/logs/web.log}"
 WAIT_SECONDS="${MASTERSTOCK_WEB_WAIT_SECONDS:-10}"
+
+resolve_project_path() {
+  local value="$1"
+  if [[ "$value" = /* ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '%s/%s\n' "$PROJECT_DIR" "${value#./}"
+  fi
+}
+
+MARKET_DATABASE="$(resolve_project_path "$MARKET_DATABASE")"
+WATCHLIST_DATABASE="$(resolve_project_path "$WATCHLIST_DATABASE")"
+USER_DATABASE="$(resolve_project_path "$USER_DATABASE")"
 
 fail() {
   echo "start web failed: $*" >&2
@@ -38,13 +60,15 @@ if command -v curl >/dev/null 2>&1 && curl --noproxy '*' -fsS --max-time 1 "http
   fail "port $HOST:$PORT is already serving a web process; refusing to claim it"
 fi
 
-mkdir -p "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")" "$(dirname "$WATCHLIST_DATABASE")"
+mkdir -p "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")" \
+  "$(dirname "$WATCHLIST_DATABASE")" "$(dirname "$USER_DATABASE")"
 
 nohup "$MASTERSTOCK_BIN" web \
   --host "$HOST" \
   --port "$PORT" \
   --market-database "$MARKET_DATABASE" \
   --watchlist-database "$WATCHLIST_DATABASE" \
+  --user-database "$USER_DATABASE" \
   >>"$LOG_FILE" 2>&1 &
 pid=$!
 echo "$pid" >"$PID_FILE"

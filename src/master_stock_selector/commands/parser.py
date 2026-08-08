@@ -4,17 +4,22 @@ import argparse
 
 from .parser_backfill import REGISTRARS as BACKFILL_REGISTRARS
 from .parser_daily import REGISTRARS as DAILY_REGISTRARS
+from .parser_reference import REGISTRARS as REFERENCE_REGISTRARS
 from .parser_types import ParserRegistrar
 from .parser_watchlist import REGISTRARS as WATCHLIST_REGISTRARS
 from .parser_web import REGISTRARS as WEB_REGISTRARS
 
-COMMAND_ORDER = ("daily", "market-backfill", "watchlist", "web")
+COMMAND_ORDER = (
+    "daily", "market-backfill", "reference-backfill", "reference-materialize",
+    "database-optimize", "database-validate", "watchlist", "web",
+)
 
 
 def _registrars() -> dict[str, ParserRegistrar]:
     registrars = {
         **DAILY_REGISTRARS,
         **BACKFILL_REGISTRARS,
+        **REFERENCE_REGISTRARS,
         **WATCHLIST_REGISTRARS,
         **WEB_REGISTRARS,
     }

@@ -1,0 +1,53 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block heading %}我的观察{% endblock %}
+{% block subtitle %}个人观察、重点与归档 · 仅当前账号可见{% endblock %}
+{% block content %}
+<section class="section observation-workspace-hero page-ledger-hero">
+  <div><p class="eyebrow">个人工作区 · {{ current_user.display_name or current_user.username }}</p><h1>我的观察</h1><p class="muted">把公开观察池中值得继续研究的股票收进来；个人状态不会改写方法事实。</p></div>
+  <div class="observation-workspace-meta"><span class="workspace-visibility">仅当前账号可见</span><a class="button button-secondary" href="/a/daily?date={{ query_date }}">去大师观察池发现</a></div>
+</section>
+
+<nav class="section observation-tabs" aria-label="我的观察分类">
+  {% for value, label in [('WATCH','观察中'),('FOCUS','重点'),('ARCHIVED','已归档')] %}
+  <a class="{% if selected_state == value %}active{% endif %}" {% if selected_state == value %}aria-current="page"{% endif %} href="/a/observations?state={{ value }}&amp;date={{ query_date }}"><span>{{ label }}</span><strong>{{ counts[value] }}</strong></a>
+  {% endfor %}
+</nav>
+
+<section class="section panel observation-list-panel">
+  <div class="section-heading"><div><p class="eyebrow">个人数据 / {{ manual_labels[selected_state] }}</p><h2>{{ manual_labels[selected_state] }}</h2></div><span class="muted">{{ items|length }} 只</span></div>
+  {% if items %}
+  <div class="observation-list">
+    {% for item in items %}
+    <article class="observation-item">
+      <div class="observation-item-stock">
+        <a href="/a/stocks/{{ item.symbol }}?date={{ query_date }}&amp;manual={{ selected_state }}&amp;min_cap=0&amp;section=personal-observations"><strong>{{ item.name }}</strong><small>{{ item.symbol }}</small></a>
+        <span class="manual-state manual-{{ item.manual.manual_state|lower }}">{{ item.manual_label }}</span>
+      </div>
+      <div class="observation-item-facts">
+        {% if item.public %}
+          {% for method in item.public.methods.values() %}<span><b>{{ method.method_label }}</b> {{ method.result_label }}{% if method.state_label %}<small>{{ method.state_label }}</small>{% endif %}</span>{% endfor %}
+        {% else %}<span class="muted">当前日期不在公开观察池，个人记录仍保留</span>{% endif %}
+      </div>
+      <p class="observation-note">{{ item.manual.note or '尚未记录个人分析备注。' }}</p>
+      <div class="observation-item-actions">
+        {% set return_path = '/a/observations?state=' ~ selected_state ~ '&date=' ~ query_date %}
+        {% if selected_state == 'WATCH' %}
+          {% set actions = [('FOCUS','设为重点'),('ARCHIVED','归档'),('UNREVIEWED','移出')] %}
+        {% elif selected_state == 'FOCUS' %}
+          {% set actions = [('WATCH','降为观察'),('ARCHIVED','归档'),('UNREVIEWED','移出')] %}
+        {% else %}
+          {% set actions = [('WATCH','恢复观察'),('UNREVIEWED','移出')] %}
+        {% endif %}
+        {% for value, label in actions %}<form method="post" action="/a/stocks/{{ item.symbol }}/review"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="manual_state" value="{{ value }}"><input type="hidden" name="return_to" value="{{ return_path }}"><button class="{{ 'text-button' if value == 'UNREVIEWED' else 'button button-secondary button-compact' }}" type="submit">{{ label }}</button></form>{% endfor %}
+        <a class="text-link" href="/a/stocks/{{ item.symbol }}?date={{ query_date }}&amp;manual={{ selected_state }}&amp;min_cap=0&amp;section=personal-observations">详情与备注 →</a>
+      </div>
+      <small class="observation-updated">最后更新 {{ item.manual.reviewed_at }}</small>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="workspace-empty"><span class="workspace-empty-index">00</span><div><h3>{{ '还没有归档记录' if selected_state == 'ARCHIVED' else '这一类还是空的' }}</h3><p>{{ '归档用于收起暂时不再跟踪的股票，之后仍可恢复。' if selected_state == 'ARCHIVED' else '从大师观察池一键加入，再在这里逐步收敛。' }}</p><a class="button button-secondary" href="/a/daily?date={{ query_date }}">去发现股票</a></div></div>
+  {% endif %}
+</section>
+{% endblock %}

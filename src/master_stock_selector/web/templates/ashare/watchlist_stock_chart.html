@@ -3,9 +3,9 @@
 {% block heading %}{{ stock_name }} 日线图{% endblock %}
 {% block subtitle %}{{ symbol }} · 前复权 · 数据截至 {{ query_date }}{% endblock %}
 {% block content %}
-<section id="stock-chart" class="section panel stock-chart-panel chart-workbench" data-stock-chart data-symbol="{{ symbol }}" data-date="{{ query_date }}" tabindex="-1">
+<section id="stock-chart" class="section panel stock-chart-panel chart-workbench" data-stock-chart data-symbol="{{ symbol }}" data-date="{{ query_date }}"{% if private_workspace %} data-private-overlay-url="/api/me/stocks/{{ symbol }}/overlay" data-csrf-token="{{ csrf_token }}"{% endif %} tabindex="-1">
   <header class="chart-workbench-header">
-  <div class="chart-workbench-title"><h1>{% if external_urls.tradingview_url %}<a href="{{ external_urls.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在 TradingView 打开 {{ stock_name }}">{{ stock_name }}</a>{% else %}{{ stock_name }}{% endif %} <small>{% if external_urls.tonghuashun_url %}<a href="{{ external_urls.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ symbol }}">{{ symbol }}</a>{% else %}{{ symbol }}{% endif %}</small></h1><p class="chart-stock-summary">行业：{{ industry_name }}{% if market_metrics.total_market_cap_yi is not none %} · 总市值 {{ market_metrics.total_market_cap_yi }}亿{% endif %}{% if market_metrics.float_market_cap_yi is not none %} · 流通市值 {{ market_metrics.float_market_cap_yi }}亿{% endif %}</p></div>
+  <div class="chart-workbench-title"><h1>{% if external_urls.tradingview_url %}<a href="{{ external_urls.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在外部行情网站打开 {{ stock_name }}">{{ stock_name }}</a>{% else %}{{ stock_name }}{% endif %} <small>{% if external_urls.tonghuashun_url %}<a href="{{ external_urls.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ symbol }}">{{ symbol }}</a>{% else %}{{ symbol }}{% endif %}</small></h1><p class="chart-stock-summary">行业：{{ industry_name }}{% if market_metrics.total_market_cap_yi is not none %} · 总市值 {{ market_metrics.total_market_cap_yi }}亿{% endif %}{% if market_metrics.float_market_cap_yi is not none %} · 流通市值 {{ market_metrics.float_market_cap_yi }}亿{% endif %}</p></div>
   <div class="chart-hero-actions">
     <div class="chart-method-status" aria-label="{{ query_date }} 两位大师模板状态">
       <span class="chart-observation {% if is_observation_today %}is-observation{% else %}is-not-observation{% endif %}">{% if is_observation_today %}今日观察名单{% else %}非今日观察名单{% endif %}</span>
@@ -18,36 +18,42 @@
       {% if navigation.next %}<a class="button button-compact" data-chart-next href="/a/stocks/{{ navigation.next.symbol }}/chart?{{ navigation.query }}#stock-chart">下一只：{{ navigation.next.name }} →</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">已是最后一只 →</span>{% endif %}
     </nav>
     {% endif %}
-    <form method="post" action="/a/stocks/{{ symbol }}/review" class="chart-review-control" aria-label="人工观察记录">
+    {% if private_workspace %}<form method="post" action="/a/stocks/{{ symbol }}/review" class="chart-review-control" aria-label="我的观察">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="return_to" value="/a/stocks/{{ symbol }}/chart?{{ navigation.query }}#stock-chart">
       <input type="hidden" name="nav_position" value="{{ navigation.position }}"><input type="hidden" name="nav_total" value="{{ navigation.total }}">{% if navigation.previous %}<input type="hidden" name="nav_previous" value="{{ navigation.previous.symbol }}">{% endif %}{% if navigation.next %}<input type="hidden" name="nav_next" value="{{ navigation.next.symbol }}">{% endif %}
-      <span>人工观察</span><select name="manual_state" aria-label="人工观察状态" title="变更后自动保存">{% for value, label in manual_labels.items() %}<option value="{{ value }}" {% if stock.manual.manual_state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><span class="chart-review-autosave">自动保存</span>
-    </form>
+      <span class="manual-state manual-{{ stock.manual.manual_state|lower }}">{{ stock.manual_label }}</span>
+      {% if stock.manual.manual_state == 'UNREVIEWED' %}{% set chart_actions = [('WATCH','加入观察')] %}
+      {% elif stock.manual.manual_state == 'WATCH' %}{% set chart_actions = [('FOCUS','设为重点'),('ARCHIVED','归档')] %}
+      {% elif stock.manual.manual_state == 'FOCUS' %}{% set chart_actions = [('WATCH','降为观察'),('ARCHIVED','归档')] %}
+      {% else %}{% set chart_actions = [('WATCH','恢复观察')] %}{% endif %}
+      {% for value, label in chart_actions %}<button class="text-button" name="manual_state" value="{{ value }}" type="submit">{{ label }}</button>{% endfor %}
+    </form>{% else %}<a class="button" href="/login?next=/a/stocks/{{ symbol }}/chart">登录后记录观察</a>{% endif %}
     <a class="button button-secondary" href="{{ back_url }}">返回个股证据</a><a class="text-link" href="/a/daily?date={{ query_date }}">返回观察池 →</a>
   </div>
   </header>
   <div class="chart-toolbar" aria-label="图表设置">
     <div class="chart-periods" role="group" aria-label="周期与显示区间"><span class="chart-group-label">周期</span><button class="button button-secondary button-compact" type="button" data-chart-interval="day" aria-pressed="true">日线</button><button class="button button-secondary button-compact" type="button" data-chart-interval="week" aria-pressed="false">周线</button><span class="chart-group-divider" aria-hidden="true"></span><span class="chart-group-label">区间</span><button class="button button-secondary button-compact" type="button" data-chart-limit="260" aria-pressed="true">一年</button><button class="button button-secondary button-compact" type="button" data-chart-limit="all" aria-pressed="false">全部</button></div>
-    <div class="drawing-tool-group" role="group" aria-label="操作与绘图"><span class="chart-group-label">操作</span><button class="button button-secondary button-compact" type="button" data-draw-tool="browse" aria-pressed="true">浏览</button><button class="button button-secondary button-compact" type="button" data-chart-record aria-pressed="false">录入成交</button><button class="button button-secondary button-compact" type="button" data-draw-tool="select" aria-pressed="false">选择</button><span class="chart-group-divider" aria-hidden="true"></span><span class="chart-group-label">绘图</span><button class="button button-secondary button-compact" type="button" data-draw-tool="trendline" aria-pressed="false">趋势线</button><button class="button button-secondary button-compact" type="button" data-draw-tool="horizontal" aria-pressed="false">水平线</button></div>
-    <div class="chart-indicators" role="group" aria-label="指标图层"><span class="chart-group-label">图层</span><label><input type="checkbox" data-ma="20"> MA20</label><label><input type="checkbox" data-ma="50"> MA50</label><label><input type="checkbox" data-volume checked> 成交量</label></div>
+    <div class="drawing-tool-group" role="group" aria-label="操作与绘图"><span class="chart-group-label">操作</span><button class="button button-secondary button-compact" type="button" data-draw-tool="browse" aria-pressed="true">浏览</button>{% if private_workspace %}<button class="button button-secondary button-compact" type="button" data-chart-record aria-pressed="false">录入成交</button><button class="button button-secondary button-compact" type="button" data-draw-tool="select" aria-pressed="false">选择</button><span class="chart-group-divider" aria-hidden="true"></span><span class="chart-group-label">绘图</span><button class="button button-secondary button-compact" type="button" data-draw-tool="trendline" aria-pressed="false">趋势线</button><button class="button button-secondary button-compact" type="button" data-draw-tool="horizontal" aria-pressed="false">水平线</button>{% endif %}</div>
+    <div class="chart-indicators" role="group" aria-label="指标图层"><span class="chart-group-label">图层</span><label><input type="checkbox" data-ma="20"> 20日均线</label><label><input type="checkbox" data-ma="50"> 50日均线</label><label><input type="checkbox" data-volume checked> 成交量</label></div>
     <span class="drawing-hint" data-drawing-hint>选择工具后在图上点击</span><span class="drawing-destructive-actions" data-drawing-actions hidden><button class="text-button" type="button" data-delete-selected disabled>删除选中</button><button class="text-button" type="button" data-clear-drawings>清空全部</button></span>
     <details class="kc-settings">
-      <summary><span data-kc-summary>KC：EMA20 · ATR10 · ×2.25 · 收盘价</span><b>设置</b></summary>
+      <summary><span data-kc-summary>肯特纳通道：20日指数移动平均 · 10日平均真实波幅 · 2.25倍 · 收盘价</span><b>设置</b></summary>
       <div class="kc-settings-panel">
-        <label>KC 基准<select data-kc-ma><option value="ema" selected>EMA</option><option value="sma">SMA</option></select></label>
-        <label>通道<select data-kc-style><option value="atr" selected>ATR</option><option value="tr">True Range</option><option value="range">Range</option></select></label>
-        <label>MA <input data-kc-length type="number" min="1" max="250" value="20"></label>
-        <label>ATR <input data-kc-atr-length type="number" min="1" max="250" value="10"></label>
+        <label>通道基准<select data-kc-ma><option value="ema" selected>指数移动平均</option><option value="sma">简单移动平均</option></select></label>
+        <label>波幅算法<select data-kc-style><option value="atr" selected>平均真实波幅</option><option value="tr">真实波幅</option><option value="range">最高最低价差</option></select></label>
+        <label>均线周期 <input data-kc-length type="number" min="1" max="250" value="20"></label>
+        <label>波幅周期 <input data-kc-atr-length type="number" min="1" max="250" value="10"></label>
         <label>倍数 <input data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="2.25"></label>
         <label>来源<select data-kc-source><option value="close" selected>收盘价</option><option value="open">开盘价</option><option value="high">最高价</option><option value="low">最低价</option></select></label>
       </div>
     </details>
     <output class="chart-range-status" data-chart-status>正在加载本地日线…</output>
   </div>
-  <div class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>Keltner Channel <span class="legend-buy">▲</span>买入 <span class="legend-sell">▼</span>卖出 <span>图表由 <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a> 提供</span></div>
+  <div class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>肯特纳通道 <span class="legend-buy">▲</span>买入 <span class="legend-sell">▼</span>卖出 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
   <div class="stock-chart-stage"><div class="stock-chart-canvas" data-chart-canvas></div><canvas class="drawing-overlay" data-drawing-overlay aria-label="趋势线与水平线绘图区"></canvas></div>
   <p class="muted chart-boundary">画线仅保存为个人观察标注，并绑定当前前复权尺度；若本地复权尺度不一致，系统不会加载或套用旧标注。</p>
 </section>
 <script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-<script src="/static/stock-chart.js?v=20260808-full-history-v16"></script>
+<script src="/static/stock-chart.js?v=20260808-chinese-ui-v17"></script>
 {% endblock %}

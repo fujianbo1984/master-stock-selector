@@ -8,6 +8,12 @@ anyio==4.14.1
     # via
     #   httpx2
     #   starlette
+argon2-cffi==25.1.0
+    # via -r requirements.txt
+argon2-cffi-bindings==25.1.0
+    # via argon2-cffi
+cffi==2.1.1
+    # via argon2-cffi-bindings
 click==8.4.2
     # via uvicorn
 et-xmlfile==2.0.0
@@ -52,6 +58,8 @@ pathspec==1.1.1
     # via mypy
 pluggy==1.6.0
     # via pytest
+pycparser==3.0
+    # via cffi
 pydantic==2.13.4
     # via fastapi
 pydantic-core==2.46.4

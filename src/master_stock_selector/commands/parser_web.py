@@ -19,6 +19,10 @@ def register_web(subparsers: SubparserRegistry) -> None:
             "MASTERSTOCK_WATCHLIST_DATABASE", "data/master_watchlist.sqlite3"
         ),
     )
+    parser.add_argument(
+        "--user-database",
+        default=os.environ.get("MASTERSTOCK_USER_DATABASE", "data/users.sqlite3"),
+    )
 
 
 REGISTRARS: dict[str, ParserRegistrar] = {"web": register_web}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the MasterStock daily watchlist after the A-share close
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 17:10:00 Asia/Shanghai
+RandomizedDelaySec=2m
+Unit=masterstock-daily.service
+
+[Install]
+WantedBy=timers.target

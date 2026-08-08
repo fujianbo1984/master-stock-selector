@@ -1,7 +1,7 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
 {% block heading %}行业聚集观察{% endblock %}
-{% block subtitle %}SW2021 申万三级行业 · Weinstein 与 Minervini 独立事实 · {{ query_date }}{% endblock %}
+{% block subtitle %}申万2021三级行业 · Weinstein 与 Minervini 独立事实 · {{ query_date }}{% endblock %}
 {% block content %}
 <section class="section daily-hero watchlist-hero page-ledger-hero">
   <div><p class="eyebrow">行业观察</p><h1>看入选股在哪些行业聚集</h1><p class="muted">行业层只提供人工分析线索；不计分、不判定“主线”、不修改任何个股方法结论。</p></div>
@@ -24,9 +24,9 @@
 
 <section class="section panel ledger-table-panel">
   <div class="section-heading"><div><p class="eyebrow">行业事实</p><h2>行业方法宽度</h2></div><span class="muted">显示 {{ rows|length }} 条 · 按入选数量排列，非行业排名</span></div>
-  {% if rows %}<div class="table-wrap"><table class="industry-observation-table" data-sortable="true"><thead><tr><th>行业</th><th>成员</th><th>Weinstein 符合</th><th>W 新入/重进</th><th>W 退出/中断</th><th>Minervini 符合</th><th>M 新入/重进</th><th>M 退出/中断</th><th>两法同时</th><th>并集</th><th>质量</th></tr></thead><tbody>
+  {% if rows %}<div class="table-wrap"><table class="industry-observation-table" data-sortable="true"><thead><tr><th>行业</th><th>成员</th><th>Weinstein 符合</th><th>Weinstein 新入/重进</th><th>Weinstein 退出/中断</th><th>Minervini 符合</th><th>Minervini 新入/重进</th><th>Minervini 退出/中断</th><th>两法同时</th><th>并集</th><th>质量</th></tr></thead><tbody>
   {% for row in rows %}<tr>
-    <td><a href="/a/industries/{{ row.industry_code }}/chart?date={{ query_date }}" title="打开 {{ row.industry_name }} 行业K线"><strong>{{ row.industry_name }}</strong><small>{{ row.industry_code }} · SW2021-L3</small></a></td>
+    <td><a href="/a/industries/{{ row.industry_code }}/chart?date={{ query_date }}" title="打开 {{ row.industry_name }} 行业日线"><strong>{{ row.industry_name }}</strong><small>{{ row.industry_code }} · 申万2021三级</small></a></td>
     <td data-sort="{{ row.eligible_member_count }}">{{ row.eligible_member_count }}</td>
     <td data-sort="{{ row.weinstein_pass_count }}"><strong>{{ row.weinstein_pass_count }}</strong> / {{ row.weinstein_evaluable_count }}{% if row.weinstein_pass_rate_pct is not none %}<small>{{ row.weinstein_pass_rate_pct }}%</small>{% endif %}</td>
     <td>{{ row.w_entered_count + row.w_reentered_count }}</td><td>{{ row.w_exited_count + row.w_data_gap_count }}</td>

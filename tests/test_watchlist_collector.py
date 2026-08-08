@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 
 import pytest
@@ -248,14 +247,12 @@ def test_collector_atomically_adds_day_and_rescales_only_changed_factor(tmp_path
             WHERE symbol='000001.SZ' AND trade_date='2026-08-03' AND adj_type='raw'
             """
         ).fetchone()
-        members = json.loads(
-            connection.execute(
-                """
-                SELECT members_json FROM security_master_snapshots
-                WHERE as_of_date='2026-08-03'
-                """
-            ).fetchone()[0]
-        )
+        members = connection.execute(
+            """
+            SELECT symbol, name, is_st FROM security_master_history
+            WHERE valid_from='2026-08-03' ORDER BY symbol
+            """
+        ).fetchall()
         receipt_count = connection.execute(
             "SELECT COUNT(*) FROM watchlist_market_collection_receipt"
         ).fetchone()[0]
@@ -268,7 +265,7 @@ def test_collector_atomically_adds_day_and_rescales_only_changed_factor(tmp_path
         ("600001.SH", "raw", 22.0),
     ]
     assert quote == (12.0, 11.5, pytest.approx(4.3478))
-    assert next(row for row in members if row["ts_code"] == "600001.SH")["is_st"] is True
+    assert next(row for row in members if row[0] == "600001.SH")[2] == 1
     assert receipt_count == 1
 
     requests_before_retry = provider.request_count

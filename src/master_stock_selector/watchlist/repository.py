@@ -125,8 +125,8 @@ CREATE TABLE IF NOT EXISTS chart_drawing (
 );
 CREATE INDEX IF NOT EXISTS idx_chart_drawing_symbol_scale
 ON chart_drawing(symbol, price_scale_id, created_at);
-CREATE TABLE IF NOT EXISTS security_identity_snapshot (
-    snapshot_date TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS security_identity_history (
+    valid_from TEXT NOT NULL,
     symbol TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '',
     industry TEXT NOT NULL DEFAULT '',
@@ -135,9 +135,10 @@ CREATE TABLE IF NOT EXISTS security_identity_snapshot (
     is_suspended INTEGER NOT NULL DEFAULT 0 CHECK (is_suspended IN (0, 1)),
     listing_status TEXT NOT NULL DEFAULT '',
     trading_status TEXT NOT NULL DEFAULT '',
+    source_digest TEXT NOT NULL,
     origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (snapshot_date, symbol)
+    PRIMARY KEY (symbol, valid_from)
 );
 CREATE TABLE IF NOT EXISTS watchlist_run_receipt (
     run_id TEXT NOT NULL PRIMARY KEY,
@@ -155,8 +156,9 @@ CREATE TABLE IF NOT EXISTS watchlist_run_receipt (
     finished_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS industry_dimension_snapshot (
-    snapshot_date TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS industry_dimension_history (
+    valid_from TEXT NOT NULL,
+    valid_to TEXT NOT NULL DEFAULT '',
     taxonomy TEXT NOT NULL,
     industry_level TEXT NOT NULL,
     industry_code TEXT NOT NULL,
@@ -167,10 +169,9 @@ CREATE TABLE IF NOT EXISTS industry_dimension_snapshot (
     source_digest TEXT NOT NULL,
     origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (snapshot_date, taxonomy, industry_level, industry_code)
+    PRIMARY KEY (taxonomy, industry_level, industry_code, valid_from)
 );
-CREATE TABLE IF NOT EXISTS security_industry_membership_snapshot (
-    snapshot_date TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS security_industry_membership_history (
     symbol TEXT NOT NULL,
     taxonomy TEXT NOT NULL,
     industry_level TEXT NOT NULL,
@@ -183,7 +184,7 @@ CREATE TABLE IF NOT EXISTS security_industry_membership_snapshot (
     source_digest TEXT NOT NULL,
     origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (snapshot_date, symbol, taxonomy, industry_level, industry_code)
+    PRIMARY KEY (symbol, taxonomy, industry_level, industry_code, valid_from)
 );
 CREATE TABLE IF NOT EXISTS industry_observation_daily_fact (
     as_of_date TEXT NOT NULL,
@@ -234,10 +235,12 @@ CREATE INDEX IF NOT EXISTS idx_index_weinstein_symbol_date
 ON index_weinstein_weekly_fact(index_symbol, effective_date);
 CREATE INDEX IF NOT EXISTS idx_index_minervini_symbol_date
 ON index_minervini_stage2_daily_fact(index_symbol, as_of_date);
-CREATE INDEX IF NOT EXISTS idx_security_identity_symbol_date
-ON security_identity_snapshot(symbol, snapshot_date);
-CREATE INDEX IF NOT EXISTS idx_industry_membership_symbol_date
-ON security_industry_membership_snapshot(symbol, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_security_identity_history_asof
+ON security_identity_history(symbol, valid_from);
+CREATE INDEX IF NOT EXISTS idx_security_identity_history_date
+ON security_identity_history(valid_from, is_st, symbol);
+CREATE INDEX IF NOT EXISTS idx_industry_membership_history_asof
+ON security_industry_membership_history(taxonomy, industry_level, valid_from, valid_to, symbol);
 CREATE INDEX IF NOT EXISTS idx_industry_observation_date_activity
 ON industry_observation_daily_fact(as_of_date, union_pass_count);
 
@@ -281,29 +284,29 @@ CREATE TRIGGER IF NOT EXISTS trg_watchlist_run_receipt_no_delete
 BEFORE DELETE ON watchlist_run_receipt BEGIN
     SELECT RAISE(ABORT, 'watchlist_run_receipt is immutable');
 END;
-CREATE TRIGGER IF NOT EXISTS trg_security_identity_snapshot_no_update
-BEFORE UPDATE ON security_identity_snapshot BEGIN
-    SELECT RAISE(ABORT, 'security_identity_snapshot is immutable');
+CREATE TRIGGER IF NOT EXISTS trg_security_identity_history_no_update
+BEFORE UPDATE ON security_identity_history BEGIN
+    SELECT RAISE(ABORT, 'security_identity_history is immutable');
 END;
-CREATE TRIGGER IF NOT EXISTS trg_security_identity_snapshot_no_delete
-BEFORE DELETE ON security_identity_snapshot BEGIN
-    SELECT RAISE(ABORT, 'security_identity_snapshot is immutable');
+CREATE TRIGGER IF NOT EXISTS trg_security_identity_history_no_delete
+BEFORE DELETE ON security_identity_history BEGIN
+    SELECT RAISE(ABORT, 'security_identity_history is immutable');
 END;
-CREATE TRIGGER IF NOT EXISTS trg_industry_dimension_snapshot_no_update
-BEFORE UPDATE ON industry_dimension_snapshot BEGIN
-    SELECT RAISE(ABORT, 'industry_dimension_snapshot is immutable');
+CREATE TRIGGER IF NOT EXISTS trg_industry_dimension_history_no_update
+BEFORE UPDATE ON industry_dimension_history BEGIN
+    SELECT RAISE(ABORT, 'industry_dimension_history is immutable');
 END;
-CREATE TRIGGER IF NOT EXISTS trg_industry_dimension_snapshot_no_delete
-BEFORE DELETE ON industry_dimension_snapshot BEGIN
-    SELECT RAISE(ABORT, 'industry_dimension_snapshot is immutable');
+CREATE TRIGGER IF NOT EXISTS trg_industry_dimension_history_no_delete
+BEFORE DELETE ON industry_dimension_history BEGIN
+    SELECT RAISE(ABORT, 'industry_dimension_history is immutable');
 END;
-CREATE TRIGGER IF NOT EXISTS trg_security_industry_membership_snapshot_no_update
-BEFORE UPDATE ON security_industry_membership_snapshot BEGIN
-    SELECT RAISE(ABORT, 'security_industry_membership_snapshot is immutable');
+CREATE TRIGGER IF NOT EXISTS trg_security_industry_membership_history_no_update
+BEFORE UPDATE ON security_industry_membership_history BEGIN
+    SELECT RAISE(ABORT, 'security_industry_membership_history is immutable');
 END;
-CREATE TRIGGER IF NOT EXISTS trg_security_industry_membership_snapshot_no_delete
-BEFORE DELETE ON security_industry_membership_snapshot BEGIN
-    SELECT RAISE(ABORT, 'security_industry_membership_snapshot is immutable');
+CREATE TRIGGER IF NOT EXISTS trg_security_industry_membership_history_no_delete
+BEFORE DELETE ON security_industry_membership_history BEGIN
+    SELECT RAISE(ABORT, 'security_industry_membership_history is immutable');
 END;
 CREATE TRIGGER IF NOT EXISTS trg_industry_observation_daily_fact_no_update
 BEFORE UPDATE ON industry_observation_daily_fact BEGIN
@@ -566,6 +569,49 @@ class MarketDataReader:
 
     def security_members(self, as_of_date: str) -> dict[str, dict[str, Any]]:
         with self.connect() as connection:
+            tables = {
+                str(row[0]) for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if "security_master_history" in tables and connection.execute(
+                "SELECT 1 FROM security_master_history LIMIT 1"
+            ).fetchone():
+                rows = connection.execute(
+                    """
+                    SELECT history.* FROM security_master_history AS history
+                    WHERE history.valid_from <= ?
+                      AND history.valid_from = (
+                        SELECT MAX(latest.valid_from)
+                        FROM security_master_history AS latest
+                        WHERE latest.symbol = history.symbol AND latest.valid_from <= ?
+                      )
+                    ORDER BY history.symbol
+                    """,
+                    (as_of_date, as_of_date),
+                ).fetchall()
+                return {
+                    str(row["symbol"]): {
+                        "ts_code": str(row["symbol"]),
+                        "symbol": str(row["code"] or ""),
+                        "name": str(row["name"] or ""),
+                        "industry": str(row["industry"] or ""),
+                        "market": str(row["board"] or ""),
+                        "list_date": str(row["list_date"] or ""),
+                        "delist_date": str(row["delist_date"] or ""),
+                        "provider_list_status": str(row["provider_list_status"] or ""),
+                        "listing_status_as_of": str(row["listing_status_as_of"] or ""),
+                        "is_st": bool(row["is_st"]),
+                        "st_status": str(row["st_status"] or ""),
+                        "st_type": str(row["st_type"] or ""),
+                        "is_suspended": bool(row["is_suspended"]),
+                        "suspend_reason": str(row["suspend_reason"] or ""),
+                        "trading_status": str(row["trading_status"] or ""),
+                    }
+                    for row in rows
+                }
+            if "security_master_snapshots" not in tables:
+                return {}
             row = connection.execute(
                 """
                 SELECT members_json
@@ -953,7 +999,12 @@ class WatchlistRepository:
                 return True
             return False
         return (
-            {"stock_method_daily_fact", "trade_execution"}.issubset(tables)
+            {
+                "stock_method_daily_fact",
+                "trade_execution",
+                "security_identity_history",
+                "security_industry_membership_history",
+            }.issubset(tables)
             and {"traded_at", "setup_method", "stop_price"}.issubset(columns)
         )
 
@@ -968,6 +1019,93 @@ class WatchlistRepository:
             )
         if "stop_price" not in columns:
             connection.execute("ALTER TABLE trade_execution ADD COLUMN stop_price REAL")
+
+    @staticmethod
+    def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
+        return connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone() is not None
+
+    @classmethod
+    def _table_has_rows(cls, connection: sqlite3.Connection, table: str) -> bool:
+        return cls._table_exists(connection, table) and connection.execute(
+            f"SELECT 1 FROM {table} LIMIT 1"
+        ).fetchone() is not None
+
+    @classmethod
+    def _identity_rows_as_of(
+        cls, connection: sqlite3.Connection, as_of_date: str
+    ) -> list[dict[str, Any]]:
+        if cls._table_has_rows(connection, "security_identity_history"):
+            rows = connection.execute(
+                """
+                SELECT identity.*
+                FROM security_identity_history AS identity
+                WHERE identity.valid_from <= ?
+                  AND identity.valid_from = (
+                    SELECT MAX(latest.valid_from)
+                    FROM security_identity_history AS latest
+                    WHERE latest.symbol = identity.symbol AND latest.valid_from <= ?
+                  )
+                ORDER BY identity.symbol
+                """,
+                (as_of_date, as_of_date),
+            ).fetchall()
+            return [{**dict(row), "snapshot_date": str(row["valid_from"])} for row in rows]
+        if not cls._table_exists(connection, "security_identity_snapshot"):
+            return []
+        rows = connection.execute(
+            """
+            SELECT identity.* FROM security_identity_snapshot AS identity
+            JOIN (
+                SELECT symbol, MAX(snapshot_date) AS snapshot_date
+                FROM security_identity_snapshot
+                WHERE snapshot_date <= ? GROUP BY symbol
+            ) AS latest
+              ON latest.symbol = identity.symbol
+             AND latest.snapshot_date = identity.snapshot_date
+            ORDER BY identity.symbol
+            """,
+            (as_of_date,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @classmethod
+    def _membership_rows_as_of(
+        cls, connection: sqlite3.Connection, as_of_date: str
+    ) -> list[dict[str, Any]]:
+        if cls._table_has_rows(connection, "security_industry_membership_history"):
+            rows = connection.execute(
+                """
+                SELECT * FROM security_industry_membership_history
+                WHERE taxonomy = ? AND industry_level = ?
+                  AND valid_from <= ? AND (valid_to = '' OR valid_to >= ?)
+                ORDER BY symbol, industry_code
+                """,
+                (INDUSTRY_TAXONOMY, INDUSTRY_LEVEL, as_of_date, as_of_date),
+            ).fetchall()
+            return [{**dict(row), "snapshot_date": as_of_date} for row in rows]
+        if not cls._table_exists(connection, "security_industry_membership_snapshot"):
+            return []
+        latest = connection.execute(
+            """
+            SELECT MAX(snapshot_date) FROM security_industry_membership_snapshot
+            WHERE snapshot_date <= ? AND taxonomy = ? AND industry_level = ?
+            """,
+            (as_of_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL),
+        ).fetchone()
+        snapshot_date = str(latest[0] or "") if latest else ""
+        if not snapshot_date:
+            return []
+        rows = connection.execute(
+            """
+            SELECT * FROM security_industry_membership_snapshot
+            WHERE snapshot_date = ? AND taxonomy = ? AND industry_level = ?
+            ORDER BY symbol, industry_code
+            """,
+            (snapshot_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def persist_run(
         self,
@@ -1018,24 +1156,7 @@ class WatchlistRepository:
                 ],
             )
             self._insert_index_minervini_facts(connection, index_minervini_facts)
-            self._insert_immutable_rows(
-                connection,
-                "security_identity_snapshot",
-                (
-                    "snapshot_date", "symbol", "name", "industry", "list_date",
-                    "is_st", "is_suspended", "listing_status", "trading_status", "origin",
-                ),
-                [
-                    (
-                        row["snapshot_date"], row["symbol"], str(row.get("name") or ""),
-                        str(row.get("industry") or ""), str(row.get("list_date") or ""),
-                        int(bool(row.get("is_st"))), int(bool(row.get("is_suspended"))),
-                        str(row.get("listing_status") or ""),
-                        str(row.get("trading_status") or ""), row["origin"],
-                    )
-                    for row in identities
-                ],
-            )
+            self._insert_identity_changes(connection, identities)
             self._persist_industry_observations_for_range(
                 connection,
                 from_date=str(receipt["from_date"]),
@@ -1117,6 +1238,55 @@ class WatchlistRepository:
             "quality_counts": _count_values(observations, "quality_state"),
         }
 
+    def import_reference_history_date(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Append PIT identity changes and SW membership intervals for one date.
+
+        This deliberately does not alter stock-method facts: identity, ST and
+        industry are contextual source facts, not a third selection method.
+        """
+        self.initialize()
+        snapshot_date = str(payload.get("snapshot_date") or "")
+        identities = list(payload.get("identities") or [])
+        dimensions = list(payload.get("dimensions") or [])
+        memberships = list(payload.get("memberships") or [])
+        if not snapshot_date or not identities:
+            raise ValueError("reference snapshot requires a date and identities")
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            identity_change_count = self._insert_identity_changes(connection, identities)
+            if dimensions and memberships:
+                self._insert_industry_dimensions(connection, dimensions)
+                self._insert_industry_memberships(connection, memberships)
+                try:
+                    policies = self._fact_policy_versions(connection, snapshot_date)
+                except ValueError:
+                    # Minervini begins only after its required 252-session
+                    # history.  The identity/membership facts remain valid,
+                    # while an industry observation waits for both methods.
+                    observations = []
+                else:
+                    observations = self._build_industry_observations_from_connection(
+                        connection,
+                        as_of_date=snapshot_date,
+                        minervini_policy_version=policies["minervini"],
+                        weinstein_policy_version=policies["weinstein"],
+                        origin="RECONSTRUCTED",
+                    )
+                    self._insert_industry_observations(connection, observations)
+            else:
+                observations = []
+        return {
+            "snapshot_date": snapshot_date,
+            "identity_evaluation_count": len(identities),
+            "identity_change_count": identity_change_count,
+            "membership_count": len(memberships),
+            "observation_count": len(observations),
+        }
+
+    def import_reference_snapshot(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Compatibility alias for callers created before temporal compaction."""
+        return self.import_reference_history_date(payload)
+
     @staticmethod
     def _fact_policy_versions(
         connection: sqlite3.Connection, as_of_date: str
@@ -1151,14 +1321,7 @@ class WatchlistRepository:
         weinstein_policy_version: str,
         origin: str,
     ) -> None:
-        membership = connection.execute(
-            """
-            SELECT MAX(snapshot_date) FROM security_industry_membership_snapshot
-            WHERE snapshot_date <= ? AND taxonomy = ? AND industry_level = ?
-            """,
-            (as_of_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL),
-        ).fetchone()
-        if not membership or not membership[0]:
+        if not self._membership_rows_as_of(connection, as_of_date):
             return
         dates = connection.execute(
             """
@@ -1187,43 +1350,14 @@ class WatchlistRepository:
         weinstein_policy_version: str,
         origin: str,
     ) -> list[dict[str, Any]]:
-        membership_row = connection.execute(
-            """
-            SELECT MAX(snapshot_date) FROM security_industry_membership_snapshot
-            WHERE snapshot_date <= ? AND taxonomy = ? AND industry_level = ?
-            """,
-            (as_of_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL),
-        ).fetchone()
-        membership_date = str(membership_row[0] or "") if membership_row else ""
-        if not membership_date:
+        membership_rows = WatchlistRepository._membership_rows_as_of(connection, as_of_date)
+        if not membership_rows:
             return []
-        identity_row = connection.execute(
-            "SELECT MAX(snapshot_date) FROM security_identity_snapshot WHERE snapshot_date <= ?",
-            (as_of_date,),
-        ).fetchone()
-        identity_date = str(identity_row[0] or "") if identity_row else ""
-        if not identity_date:
+        identity_rows = WatchlistRepository._identity_rows_as_of(connection, as_of_date)
+        if not identity_rows:
             return []
         eligible_symbols = [
-            str(row[0])
-            for row in connection.execute(
-                """
-                SELECT symbol FROM security_identity_snapshot
-                WHERE snapshot_date = ? AND is_st = 0
-                """,
-                (identity_date,),
-            ).fetchall()
-        ]
-        membership_rows = [
-            dict(row)
-            for row in connection.execute(
-                """
-                SELECT * FROM security_industry_membership_snapshot
-                WHERE snapshot_date = ? AND taxonomy = ? AND industry_level = ?
-                ORDER BY symbol, industry_code
-                """,
-                (membership_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL),
-            ).fetchall()
+            str(row["symbol"]) for row in identity_rows if not bool(row.get("is_st"))
         ]
         method_rows = [
             dict(row)
@@ -1251,7 +1385,7 @@ class WatchlistRepository:
             eligible_symbols=eligible_symbols,
             memberships=membership_rows,
             method_facts=method_rows,
-            membership_snapshot_date=membership_date,
+            membership_snapshot_date=as_of_date,
             membership_source_digest=_sha256_json(source_digests),
             minervini_policy_version=minervini_policy_version,
             weinstein_policy_version=weinstein_policy_version,
@@ -1259,17 +1393,124 @@ class WatchlistRepository:
         )
 
     @classmethod
+    def _insert_identity_changes(
+        cls, connection: sqlite3.Connection, rows: Sequence[Mapping[str, Any]]
+    ) -> int:
+        if not rows:
+            return 0
+        latest_rows = connection.execute(
+            """
+            SELECT history.* FROM security_identity_history AS history
+            JOIN (
+                SELECT symbol, MAX(valid_from) AS valid_from
+                FROM security_identity_history GROUP BY symbol
+            ) AS latest
+              ON latest.symbol = history.symbol AND latest.valid_from = history.valid_from
+            """
+        ).fetchall()
+        state_columns = (
+            "name", "industry", "list_date", "is_st", "is_suspended",
+            "listing_status", "trading_status",
+        )
+        latest: dict[str, tuple[Any, ...]] = {
+            str(row["symbol"]): tuple(row[column] for column in state_columns)
+            for row in latest_rows
+        }
+        inserts: list[tuple[Any, ...]] = []
+        for row in sorted(
+            rows,
+            key=lambda item: (
+                str(item.get("snapshot_date") or item.get("valid_from") or ""),
+                str(item.get("symbol") or ""),
+            ),
+        ):
+            valid_from = str(row.get("valid_from") or row.get("snapshot_date") or "")
+            symbol = str(row.get("symbol") or "").upper()
+            if not valid_from or not symbol:
+                raise ValueError("identity history requires valid_from and symbol")
+            state: tuple[Any, ...] = (
+                str(row.get("name") or ""),
+                str(row.get("industry") or ""),
+                str(row.get("list_date") or ""),
+                int(bool(row.get("is_st"))),
+                int(bool(row.get("is_suspended"))),
+                str(row.get("listing_status") or ""),
+                str(row.get("trading_status") or ""),
+            )
+            if latest.get(symbol) == state:
+                continue
+            digest = str(row.get("source_digest") or _sha256_json({
+                "symbol": symbol, "valid_from": valid_from, "state": state,
+            }))
+            inserts.append((valid_from, symbol, *state, digest, str(row["origin"])))
+            latest[symbol] = state
+        cls._insert_immutable_rows(
+            connection,
+            "security_identity_history",
+            (
+                "valid_from", "symbol", *state_columns, "source_digest", "origin",
+            ),
+            inserts,
+        )
+        return len(inserts)
+
+    @classmethod
     def _insert_industry_dimensions(
         cls, connection: sqlite3.Connection, rows: Sequence[Mapping[str, Any]]
     ) -> None:
         columns = (
-            "snapshot_date", "taxonomy", "industry_level", "industry_code",
+            "valid_from", "valid_to", "taxonomy", "industry_level", "industry_code",
             "industry_name", "parent_industry_code", "source", "source_version",
             "source_digest", "origin",
         )
+        latest_rows = connection.execute(
+            """
+            SELECT history.* FROM industry_dimension_history AS history
+            JOIN (
+                SELECT taxonomy, industry_level, industry_code, MAX(valid_from) AS valid_from
+                FROM industry_dimension_history
+                GROUP BY taxonomy, industry_level, industry_code
+            ) AS latest
+              ON latest.taxonomy = history.taxonomy
+             AND latest.industry_level = history.industry_level
+             AND latest.industry_code = history.industry_code
+             AND latest.valid_from = history.valid_from
+            """
+        ).fetchall()
+        state_columns = (
+            "industry_name", "parent_industry_code", "source", "source_version", "source_digest",
+        )
+        latest = {
+            (str(row["taxonomy"]), str(row["industry_level"]), str(row["industry_code"])):
+            tuple(str(row[column] or "") for column in state_columns)
+            for row in latest_rows
+        }
+        normalized: list[dict[str, Any]] = []
+        for row in sorted(
+            rows,
+            key=lambda item: (
+                str(item.get("snapshot_date") or item.get("valid_from") or ""),
+                str(item.get("industry_code") or ""),
+            ),
+        ):
+            item = {
+                **dict(row),
+                "valid_from": str(row.get("valid_from") or row.get("snapshot_date") or ""),
+                "valid_to": str(row.get("valid_to") or ""),
+            }
+            key = (
+                str(item.get("taxonomy") or ""),
+                str(item.get("industry_level") or ""),
+                str(item.get("industry_code") or ""),
+            )
+            state = tuple(str(item.get(column) or "") for column in state_columns)
+            if latest.get(key) == state:
+                continue
+            normalized.append(item)
+            latest[key] = state
         cls._insert_or_verify_rows(
-            connection, "industry_dimension_snapshot", columns,
-            ("snapshot_date", "taxonomy", "industry_level", "industry_code"), rows,
+            connection, "industry_dimension_history", columns,
+            ("taxonomy", "industry_level", "industry_code", "valid_from"), normalized,
         )
 
     @classmethod
@@ -1277,13 +1518,13 @@ class WatchlistRepository:
         cls, connection: sqlite3.Connection, rows: Sequence[Mapping[str, Any]]
     ) -> None:
         columns = (
-            "snapshot_date", "symbol", "taxonomy", "industry_level", "industry_code",
+            "symbol", "taxonomy", "industry_level", "industry_code",
             "industry_name", "valid_from", "valid_to", "assignment_state", "source",
             "source_digest", "origin",
         )
         cls._insert_or_verify_rows(
-            connection, "security_industry_membership_snapshot", columns,
-            ("snapshot_date", "symbol", "taxonomy", "industry_level", "industry_code"), rows,
+            connection, "security_industry_membership_history", columns,
+            ("symbol", "taxonomy", "industry_level", "industry_code", "valid_from"), rows,
         )
 
     @classmethod
@@ -1479,37 +1720,11 @@ class WatchlistRepository:
             review_rows = connection.execute(
                 "SELECT symbol, manual_state, note, reviewed_at FROM manual_watch_review"
             ).fetchall()
-            identity_rows = connection.execute(
-                """
-                SELECT identity.* FROM security_identity_snapshot AS identity
-                JOIN (
-                    SELECT symbol, MAX(snapshot_date) AS snapshot_date
-                    FROM security_identity_snapshot
-                    WHERE snapshot_date <= ?
-                    GROUP BY symbol
-                ) AS latest
-                  ON latest.symbol = identity.symbol
-                 AND latest.snapshot_date = identity.snapshot_date
-                """,
-                (as_of_date,),
-            ).fetchall()
-            industry_rows = connection.execute(
-                """
-                SELECT membership.*
-                FROM security_industry_membership_snapshot AS membership
-                WHERE membership.snapshot_date = (
-                    SELECT MAX(snapshot_date)
-                    FROM security_industry_membership_snapshot
-                    WHERE snapshot_date <= ? AND taxonomy = ? AND industry_level = ?
-                )
-                  AND membership.taxonomy = ? AND membership.industry_level = ?
-                  AND membership.assignment_state = 'VERIFIED'
-                """,
-                (
-                    as_of_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL,
-                    INDUSTRY_TAXONOMY, INDUSTRY_LEVEL,
-                ),
-            ).fetchall()
+            identity_rows = self._identity_rows_as_of(connection, as_of_date)
+            industry_rows = [
+                row for row in self._membership_rows_as_of(connection, as_of_date)
+                if str(row.get("assignment_state") or "") == "VERIFIED"
+            ]
         reviews = {str(row["symbol"]): dict(row) for row in review_rows}
         identities = {str(row["symbol"]): dict(row) for row in identity_rows}
         industries = {str(row["symbol"]): dict(row) for row in industry_rows}
@@ -1596,57 +1811,61 @@ class WatchlistRepository:
         if not observation:
             return {}
         with self.connect() as connection:
-            membership_date = str(observation["membership_snapshot_date"])
-            members = connection.execute(
+            memberships = [
+                row for row in self._membership_rows_as_of(connection, as_of_date)
+                if str(row.get("industry_code") or "").upper() == code
+                and str(row.get("assignment_state") or "") == "VERIFIED"
+            ]
+            identities = {
+                str(row["symbol"]): row
+                for row in self._identity_rows_as_of(connection, as_of_date)
+            }
+            fact_rows = connection.execute(
                 """
-                SELECT membership.symbol, membership.industry_code,
-                       membership.industry_name, identity.name,
-                       wf.result AS weinstein_result, wt.state AS weinstein_state,
-                       mf.result AS minervini_result, mt.state AS minervini_state
-                FROM security_industry_membership_snapshot AS membership
-                LEFT JOIN security_identity_snapshot AS identity
-                  ON identity.snapshot_date = (
-                      SELECT MAX(i2.snapshot_date) FROM security_identity_snapshot AS i2
-                      WHERE i2.symbol = membership.symbol AND i2.snapshot_date <= ?
-                  ) AND identity.symbol = membership.symbol
-                LEFT JOIN stock_method_daily_fact AS wf
-                  ON wf.as_of_date = ? AND wf.symbol = membership.symbol
-                 AND wf.method = 'weinstein'
-                 AND wf.policy_version = ?
-                LEFT JOIN stock_method_transition AS wt
-                  ON wt.as_of_date = wf.as_of_date AND wt.symbol = wf.symbol
-                 AND wt.method = wf.method AND wt.policy_version = wf.policy_version
-                LEFT JOIN stock_method_daily_fact AS mf
-                  ON mf.as_of_date = ? AND mf.symbol = membership.symbol
-                 AND mf.method = 'minervini'
-                 AND mf.policy_version = ?
-                LEFT JOIN stock_method_transition AS mt
-                  ON mt.as_of_date = mf.as_of_date AND mt.symbol = mf.symbol
-                 AND mt.method = mf.method AND mt.policy_version = mf.policy_version
-                WHERE membership.snapshot_date = ?
-                  AND membership.taxonomy = ? AND membership.industry_level = ?
-                  AND membership.industry_code = ?
-                  AND membership.assignment_state = 'VERIFIED'
-                  AND COALESCE(identity.is_st, 0) = 0
-                ORDER BY CASE
-                    WHEN wf.result = 'PASS' AND mf.result = 'PASS' THEN 1
-                    WHEN wf.result = 'PASS' THEN 2
-                    WHEN mf.result = 'PASS' THEN 3 ELSE 4 END,
-                    membership.symbol
+                SELECT f.symbol, f.method, f.result, COALESCE(t.state, '') AS state
+                FROM stock_method_daily_fact AS f
+                LEFT JOIN stock_method_transition AS t
+                  ON t.as_of_date = f.as_of_date AND t.symbol = f.symbol
+                 AND t.method = f.method AND t.policy_version = f.policy_version
+                WHERE f.as_of_date = ?
+                  AND ((f.method = 'weinstein' AND f.policy_version = ?)
+                    OR (f.method = 'minervini' AND f.policy_version = ?))
                 """,
                 (
                     as_of_date,
-                    as_of_date,
                     str(observation["weinstein_policy_version"]),
-                    as_of_date,
                     str(observation["minervini_policy_version"]),
-                    membership_date,
-                    INDUSTRY_TAXONOMY,
-                    INDUSTRY_LEVEL,
-                    code,
                 ),
             ).fetchall()
-        return {"observation": dict(observation), "members": [dict(row) for row in members]}
+        facts: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
+        for row in fact_rows:
+            facts[str(row["symbol"])][str(row["method"])] = {
+                "result": str(row["result"]), "state": str(row["state"] or "")
+            }
+        members: list[dict[str, Any]] = []
+        for membership in memberships:
+            symbol = str(membership["symbol"])
+            identity = identities.get(symbol) or {}
+            if bool(identity.get("is_st")):
+                continue
+            symbol_facts = facts.get(symbol, {})
+            members.append({
+                "symbol": symbol,
+                "industry_code": str(membership.get("industry_code") or ""),
+                "industry_name": str(membership.get("industry_name") or ""),
+                "name": str(identity.get("name") or ""),
+                "weinstein_result": str(symbol_facts.get("weinstein", {}).get("result") or ""),
+                "weinstein_state": str(symbol_facts.get("weinstein", {}).get("state") or ""),
+                "minervini_result": str(symbol_facts.get("minervini", {}).get("result") or ""),
+                "minervini_state": str(symbol_facts.get("minervini", {}).get("state") or ""),
+            })
+        members.sort(key=lambda row: (
+            1 if row["weinstein_result"] == "PASS" and row["minervini_result"] == "PASS"
+            else 2 if row["weinstein_result"] == "PASS"
+            else 3 if row["minervini_result"] == "PASS" else 4,
+            row["symbol"],
+        ))
+        return {"observation": dict(observation), "members": members}
 
     def index_facts(self, as_of_date: str) -> list[dict[str, Any]]:
         self.initialize()
@@ -1734,29 +1953,26 @@ class WatchlistRepository:
             review = connection.execute(
                 "SELECT * FROM manual_watch_review WHERE symbol = ?", (symbol,)
             ).fetchone()
-            identity_row = connection.execute(
-                """
-                SELECT * FROM security_identity_snapshot
-                WHERE symbol = ?
-                  AND snapshot_date <= COALESCE((
-                      SELECT MAX(as_of_date) FROM stock_method_daily_fact WHERE symbol = ?
-                  ), '')
-                ORDER BY snapshot_date DESC LIMIT 1
-                """,
-                (symbol, symbol),
+            latest_row = connection.execute(
+                "SELECT MAX(as_of_date) FROM stock_method_daily_fact WHERE symbol = ?",
+                (symbol,),
             ).fetchone()
-            industry_row = connection.execute(
-                """
-                SELECT * FROM security_industry_membership_snapshot
-                WHERE symbol = ? AND taxonomy = ? AND industry_level = ?
-                  AND assignment_state = 'VERIFIED'
-                  AND snapshot_date <= COALESCE((
-                      SELECT MAX(as_of_date) FROM stock_method_daily_fact WHERE symbol = ?
-                  ), '')
-                ORDER BY snapshot_date DESC LIMIT 1
-                """,
-                (symbol, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL, symbol),
-            ).fetchone()
+            detail_date = str(latest_row[0] or "") if latest_row else ""
+            identity_row = next(
+                (
+                    row for row in self._identity_rows_as_of(connection, detail_date)
+                    if str(row["symbol"]) == symbol
+                ),
+                None,
+            )
+            industry_row = next(
+                (
+                    row for row in self._membership_rows_as_of(connection, detail_date)
+                    if str(row["symbol"]) == symbol
+                    and str(row.get("assignment_state") or "") == "VERIFIED"
+                ),
+                None,
+            )
             history_total = int(
                 connection.execute(
                     "SELECT COUNT(*) FROM stock_method_daily_fact WHERE symbol = ?",
@@ -2059,18 +2275,64 @@ class WatchlistRepository:
             return {}
         placeholders = ",".join("?" for _ in symbols)
         with self.connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT snapshot.symbol, snapshot.name FROM security_identity_snapshot AS snapshot
-                WHERE snapshot.symbol IN ({placeholders})
-                  AND snapshot.snapshot_date = (
-                    SELECT MAX(latest.snapshot_date) FROM security_identity_snapshot AS latest
-                    WHERE latest.symbol = snapshot.symbol
-                  )
-                """,
-                tuple(sorted(symbols)),
-            ).fetchall()
+            if self._table_has_rows(connection, "security_identity_history"):
+                rows = connection.execute(
+                    f"""
+                    SELECT history.symbol, history.name
+                    FROM security_identity_history AS history
+                    WHERE history.symbol IN ({placeholders})
+                      AND history.valid_from = (
+                        SELECT MAX(latest.valid_from)
+                        FROM security_identity_history AS latest
+                        WHERE latest.symbol = history.symbol
+                      )
+                    """,
+                    tuple(sorted(symbols)),
+                ).fetchall()
+            elif self._table_exists(connection, "security_identity_snapshot"):
+                rows = connection.execute(
+                    f"""
+                    SELECT snapshot.symbol, snapshot.name
+                    FROM security_identity_snapshot AS snapshot
+                    WHERE snapshot.symbol IN ({placeholders})
+                      AND snapshot.snapshot_date = (
+                        SELECT MAX(latest.snapshot_date)
+                        FROM security_identity_snapshot AS latest
+                        WHERE latest.symbol = snapshot.symbol
+                      )
+                    """,
+                    tuple(sorted(symbols)),
+                ).fetchall()
+            else:
+                rows = []
         return {str(row["symbol"]): str(row["name"] or "") for row in rows}
+
+    def stock_names(self, symbols: set[str]) -> dict[str, str]:
+        """Resolve public stock names without exposing private trade storage."""
+        return self._trade_stock_names(symbols)
+
+    def observation_snapshot(self, symbol: str, as_of_date: str) -> dict[str, Any]:
+        """Freeze the latest public method facts known on a user's trade date."""
+        self.initialize()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT as_of_date, method, result, policy_version, origin
+                FROM stock_method_daily_fact
+                WHERE symbol = ? AND as_of_date <= ?
+                  AND as_of_date = (
+                    SELECT MAX(as_of_date) FROM stock_method_daily_fact
+                    WHERE symbol = ? AND as_of_date <= ?
+                  )
+                ORDER BY method
+                """,
+                (symbol.upper(), as_of_date, symbol.upper(), as_of_date),
+            ).fetchall()
+        return {
+            "as_of_date": str(rows[0]["as_of_date"]) if rows else "",
+            "facts": [dict(row) for row in rows],
+            "quality": "KNOWN_AS_OF" if rows else "NO_WATCHLIST_FACT_AS_OF",
+        }
 
     def chart_drawings(self, symbol: str, price_scale_id: str) -> list[dict[str, Any]]:
         self.initialize()

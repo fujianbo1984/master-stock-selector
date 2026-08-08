@@ -21,6 +21,18 @@
     </div>
     {% endfor %}
   </nav>
+  <div class="research-account" aria-label="当前个人工作区">
+    {% if current_user %}
+    <span class="research-account-avatar" aria-hidden="true">{{ (current_user.display_name or current_user.username)[:1] }}</span>
+    <span class="research-account-copy"><small>个人工作区</small><strong>{{ current_user.display_name or current_user.username }}</strong></span>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="text-button" type="submit">退出</button>
+    </form>
+    {% else %}
+    <a class="button button-secondary button-compact" href="/login">登录</a>
+    {% endif %}
+  </div>
   <div class="research-date">
     <strong>{{ latest_date or query_date or today }}</strong>
     <span>数据截至 {{ (v2.market_date if v2 is defined else None) or latest_date or query_date or today }} · 收盘后复盘</span>
@@ -29,7 +41,7 @@
 {% if not suppress_page_intro %}
 <section class="page-intro" aria-labelledby="page-title">
   <div>
-    <span class="section-label">龙场悟道 · A 股大师观察池</span>
+    <span class="section-label">龙场悟道 · 沪深股票大师观察池</span>
     <h1 id="page-title">{{ self.heading() }}</h1>
   </div>
   <p>{{ self.subtitle() }}</p>

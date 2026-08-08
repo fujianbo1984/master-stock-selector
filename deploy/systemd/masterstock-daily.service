@@ -1,0 +1,24 @@
+[Unit]
+Description=Collect and calculate the MasterStock daily watchlist
+After=network-online.target masterstock-web.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=masterstock
+Group=masterstock
+WorkingDirectory=/opt/masterstock
+EnvironmentFile=/etc/masterstock/masterstock.env
+Environment=TZ=Asia/Shanghai
+Environment=MASTERSTOCK_MARKET_DATABASE=/var/lib/masterstock/market.sqlite3
+Environment=MASTERSTOCK_WATCHLIST_DATABASE=/var/lib/masterstock/master_watchlist.sqlite3
+Environment=MASTERSTOCK_WATCHLIST_LOCK_DIR=/run/masterstock/watchlist.lock
+ExecStart=/opt/masterstock/scripts/run_master_watchlist.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RuntimeDirectory=masterstock
+RuntimeDirectoryMode=0700
+ReadWritePaths=/var/lib/masterstock /run/masterstock

@@ -11,8 +11,12 @@ class CommandPolicy:
 
 
 COMMAND_POLICIES: dict[str, CommandPolicy] = {
+    "database-optimize": CommandPolicy("deployment_database_candidate", requires_apply=True),
+    "database-validate": CommandPolicy("deployment_database_validation"),
     "daily": CommandPolicy("market_and_master_watchlist_fact", requires_apply=True),
     "market-backfill": CommandPolicy("market_history_fact"),
+    "reference-backfill": CommandPolicy("market_reference_fact", requires_apply=True),
+    "reference-materialize": CommandPolicy("master_watchlist_reference_fact", requires_apply=True),
     "watchlist": CommandPolicy("master_watchlist_fact", requires_apply=True),
     "web": CommandPolicy("read_only_product_surface"),
 }

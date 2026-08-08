@@ -1,0 +1,19 @@
+[Unit]
+Description=Back up MasterStock private user database
+After=masterstock-web.service
+
+[Service]
+Type=oneshot
+User=masterstock
+Group=masterstock
+WorkingDirectory=/opt/masterstock
+EnvironmentFile=/etc/masterstock/masterstock.env
+Environment=MASTERSTOCK_USER_DATABASE=/var/lib/masterstock/users.sqlite3
+Environment=MASTERSTOCK_BACKUP_DIR=/var/backups/masterstock
+ExecStart=/opt/masterstock/scripts/backup_databases.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/masterstock /var/backups/masterstock

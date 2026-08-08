@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Two-method A-share master watchlist for human review."
 requires-python = ">=3.11"
 dependencies = [
+  "argon2-cffi>=23.1",
   "fastapi>=0.115",
   "httpx2>=0.28",
   "jinja2>=3.1",
@@ -38,6 +39,7 @@ files = [
   "src/master_stock_selector/commands",
   "src/master_stock_selector/watchlist",
   "src/master_stock_selector/web/app.py",
+  "src/master_stock_selector/web/users.py",
   "src/master_stock_selector/web/routers/watchlist.py",
   "tests",
 ]

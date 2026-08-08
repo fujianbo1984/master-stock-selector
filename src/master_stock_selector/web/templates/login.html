@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}登录 · 龙场悟道{% endblock %}
+{% block body %}
+<section class="auth-shell" aria-labelledby="login-title">
+  <div class="auth-intro">
+    <a class="research-brand auth-brand" href="/a/daily" aria-label="返回大师选股">
+      <span class="research-brand-name">龙场悟道</span>
+      <span class="research-seal" aria-hidden="true">悟</span>
+    </a>
+    <div>
+      <p class="eyebrow">大师选股 · 个人工作区</p>
+      <h1>公开事实与个人判断，<br>在这里分开。</h1>
+      <p class="auth-intro-copy">方法结果向所有访客开放；你的观察列表、分析备注、价格图绘制、买卖点和成交复盘只进入自己的工作区。</p>
+    </div>
+    <div class="auth-boundaries" aria-label="工作区数据边界">
+      <div><span>01</span><strong>公开研究</strong><small>行情、指数、行业与方法事实</small></div>
+      <div><span>02</span><strong>个人工作区</strong><small>我的观察、备注、买卖点、成交复盘与画线</small></div>
+    </div>
+    <a class="auth-public-link" href="/a/daily"><span>暂不登录</span><strong>继续浏览公开研究 →</strong></a>
+  </div>
+  <div class="panel auth-panel">
+    <div class="auth-panel-heading">
+      <span class="workspace-badge">独立私人空间</span>
+      <h2 id="login-title">登录大师选股</h2>
+      <p>一个账号对应一个独立工作区。</p>
+    </div>
+    {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="/login" class="auth-form">
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <label>用户名<input name="username" autocomplete="username" placeholder="输入用户名" required autofocus></label>
+      <label>密码
+        <span class="password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="输入密码" required><button class="password-toggle" type="button" data-password-toggle aria-controls="login-password" aria-pressed="false">显示</button></span>
+      </label>
+      <button class="button auth-submit" type="submit">进入我的工作区</button>
+    </form>
+    <p class="auth-privacy">登录后，个人数据不会改写公开的 Weinstein 或 Minervini 方法事实。</p>
+  </div>
+</section>
+{% endblock %}

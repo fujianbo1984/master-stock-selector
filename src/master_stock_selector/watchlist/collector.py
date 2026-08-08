@@ -40,6 +40,31 @@ CREATE TABLE IF NOT EXISTS watchlist_market_collection_receipt (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_collection_success_date
 ON watchlist_market_collection_receipt(trade_date, status);
+CREATE TABLE IF NOT EXISTS security_master_history (
+    valid_from TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    industry TEXT NOT NULL DEFAULT '',
+    board TEXT NOT NULL DEFAULT '',
+    list_date TEXT NOT NULL DEFAULT '',
+    delist_date TEXT NOT NULL DEFAULT '',
+    provider_list_status TEXT NOT NULL DEFAULT '',
+    listing_status_as_of TEXT NOT NULL DEFAULT '',
+    is_st INTEGER NOT NULL DEFAULT 0 CHECK (is_st IN (0, 1)),
+    st_status TEXT NOT NULL DEFAULT '',
+    st_type TEXT NOT NULL DEFAULT '',
+    is_suspended INTEGER NOT NULL DEFAULT 0 CHECK (is_suspended IN (0, 1)),
+    suspend_reason TEXT NOT NULL DEFAULT '',
+    trading_status TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL,
+    source_version TEXT NOT NULL,
+    source_digest TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, valid_from)
+);
+CREATE INDEX IF NOT EXISTS idx_security_master_history_asof
+ON security_master_history(symbol, valid_from);
 CREATE INDEX IF NOT EXISTS idx_daily_bars_qfq_amount_lookup
 ON daily_bars(market, adj_type, symbol, trade_date DESC, amount)
 WHERE amount IS NOT NULL;
@@ -58,7 +83,6 @@ REQUIRED_TABLES = {
     "daily_metrics",
     "daily_adjustment_factors",
     "market_index_daily_bars",
-    "security_master_snapshots",
 }
 
 
@@ -290,7 +314,6 @@ def _persist_batch(
         }
     )
     batch_id = f"market-{run_id}"
-    snapshot_id = f"security-master-{target_date}-{uuid4().hex[:12]}"
 
     with sqlite3.connect(path, timeout=30) as connection:
         connection.row_factory = sqlite3.Row
@@ -344,11 +367,9 @@ def _persist_batch(
                 content_hash=content_hash,
                 metrics=metrics,
             )
-            _write_security_snapshot(
+            _write_security_history(
                 connection,
                 target_date=target_date,
-                run_id=run_id,
-                snapshot_id=snapshot_id,
                 fetched_at=fetched_at,
                 source_name=provider.source_name,
                 source_version=provider.source_version,
@@ -787,38 +808,62 @@ def _write_metrics(
     )
 
 
-def _write_security_snapshot(
+def _write_security_history(
     connection: sqlite3.Connection,
     *,
     target_date: str,
-    run_id: str,
-    snapshot_id: str,
     fetched_at: str,
     source_name: str,
     source_version: str,
     members: list[dict[str, Any]],
 ) -> None:
-    symbols = [str(member["ts_code"]) for member in members]
-    connection.execute(
+    columns = (
+        "code", "name", "industry", "board", "list_date", "delist_date",
+        "provider_list_status", "listing_status_as_of", "is_st", "st_status",
+        "st_type", "is_suspended", "suspend_reason", "trading_status",
+    )
+    latest_rows = connection.execute(
         """
-        INSERT INTO security_master_snapshots (
-            snapshot_id, run_id, market, as_of_date, provider, source_version,
-            symbol_count, symbols_hash, symbols_json, members_json, fetched_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        SELECT history.* FROM security_master_history AS history
+        JOIN (
+            SELECT symbol, MAX(valid_from) AS valid_from
+            FROM security_master_history GROUP BY symbol
+        ) AS latest
+          ON latest.symbol = history.symbol AND latest.valid_from = history.valid_from
+        """
+    ).fetchall()
+    latest = {
+        str(row["symbol"]): tuple(row[column] for column in columns)
+        for row in latest_rows
+    }
+    inserts: list[tuple[Any, ...]] = []
+    for member in sorted(members, key=lambda row: str(row.get("ts_code") or "")):
+        symbol = str(member.get("ts_code") or "").upper()
+        state: tuple[Any, ...] = (
+            str(member.get("symbol") or ""), str(member.get("name") or ""),
+            str(member.get("industry") or ""), str(member.get("market") or ""),
+            str(member.get("list_date") or ""), str(member.get("delist_date") or ""),
+            str(member.get("provider_list_status") or ""),
+            str(member.get("listing_status_as_of") or ""), int(bool(member.get("is_st"))),
+            str(member.get("st_status") or ""), str(member.get("st_type") or ""),
+            int(bool(member.get("is_suspended"))), str(member.get("suspend_reason") or ""),
+            str(member.get("trading_status") or ""),
+        )
+        if latest.get(symbol) == state:
+            continue
+        digest = _digest({"symbol": symbol, "valid_from": target_date, "state": state})
+        inserts.append((target_date, symbol, *state, source_name, source_version, digest, fetched_at))
+        latest[symbol] = state
+    connection.executemany(
+        """
+        INSERT INTO security_master_history (
+            valid_from, symbol, code, name, industry, board, list_date, delist_date,
+            provider_list_status, listing_status_as_of, is_st, st_status, st_type,
+            is_suspended, suspend_reason, trading_status, provider, source_version,
+            source_digest, fetched_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
-        (
-            snapshot_id,
-            run_id,
-            MARKET,
-            target_date,
-            source_name,
-            source_version,
-            len(symbols),
-            _digest(symbols),
-            json.dumps(symbols, ensure_ascii=False),
-            json.dumps(members, ensure_ascii=False, sort_keys=True),
-            fetched_at,
-        ),
+        inserts,
     )
 
 

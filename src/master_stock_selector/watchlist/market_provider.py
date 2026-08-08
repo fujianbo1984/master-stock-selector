@@ -78,6 +78,44 @@ class TushareMarketProvider:
             "ts_code,symbol,name,industry,market,list_date",
         )
 
+    def stock_name_changes(self) -> list[dict[str, Any]]:
+        """Return the provider's full A-share name-history ledger.
+
+        Names are reference facts with effective-date intervals; callers must
+        never treat the current ``stock_basic.name`` as a historical name.
+        """
+        return self._paged_rows(
+            "namechange", {},
+            "ts_code,name,start_date,end_date,ann_date,change_reason",
+        )
+
+    def stock_st(self, trade_date: str) -> list[dict[str, Any]]:
+        return self._paged_rows(
+            "stock_st", {"trade_date": _compact_date(trade_date)},
+            "ts_code,name,trade_date,type,type_name",
+        )
+
+    def sw_l3_classifications(self) -> list[dict[str, Any]]:
+        return self._paged_rows(
+            "index_classify", {"level": "L3", "src": "SW2021"},
+            "index_code,industry_name,level,industry_code,is_pub,parent_code,src",
+            page_size=2000,
+        )
+
+    def sw_l3_members(self, l3_code: str) -> list[dict[str, Any]]:
+        """Return historical members for one SW2021 L3 index.
+
+        The endpoint caps broad requests, so requesting each L3 index is the
+        only complete and reproducible form of the source query.
+        """
+        fields = "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"
+        # Tushare exposes current and exited members as separate result sets;
+        # requesting only N silently loses the current membership universe.
+        return [
+            *self._paged_rows("index_member_all", {"l3_code": l3_code, "is_new": "Y"}, fields, page_size=2000),
+            *self._paged_rows("index_member_all", {"l3_code": l3_code, "is_new": "N"}, fields, page_size=2000),
+        ]
+
     def market_daily_bars(self, trade_date: str) -> dict[str, dict[str, Any]]:
         rows = self._paged_rows(
             "daily",

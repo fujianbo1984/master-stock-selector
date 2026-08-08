@@ -16,6 +16,7 @@ def handle(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         create_app(
             market_database=Path(args.market_database),
             watchlist_database=Path(args.watchlist_database),
+            user_database=Path(args.user_database),
         ),
         host=args.host,
         port=args.port,

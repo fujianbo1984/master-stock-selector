@@ -23,7 +23,7 @@
 | 沪深 A 股普通股票 | Weinstein | 当前是否处于明确 Stage 2，以及进入、持续、退出状态 |
 | 沪深 A 股普通股票 | Minervini | 当前是否通过趋势模板，以及进入、持续、退出状态 |
 | 申万三级行业 | SW2021-L3 | 两种方法的入选数量、交集、宽度、当日变化及成分股等权代理K线 |
-| 人工复核 | 用户 | 未分析、观察、重点观察、放弃及备注 |
+| 个人观察 | 用户 | 观察中、重点、已归档及私有备注；未加入即无记录 |
 | 交易复盘 | 用户 | 实际成交、持仓、已实现结果与描述性统计 |
 
 Weinstein 与 Minervini 的事实始终独立保存。“两法同时符合”只是集合交集，不是新策略或综合评分。行业观察使用同一当日非 ST 基础池，只用于发现入选股票的聚集现象，不评选“主线”，也不改变任何个股的方法结论。
@@ -32,7 +32,7 @@ Weinstein 与 Minervini 的事实始终独立保存。“两法同时符合”�
 
 ### 观察资格与可交易性
 
-- 大师观察池按所选日期的证券身份快照默认排除 `ST`、`*ST`；历史页面不得使用未来日期的风险标识。
+- 大师观察池从证券身份有效期历史中取所选日期当时的状态，默认排除 `ST`、`*ST`；历史页面不得使用未来日期的风险标识。
 - 总市值不参与 Weinstein 或 Minervini 判定。网站提供“不限、30亿、50亿、100亿”四档可选下限，默认不限。
 - 总市值低于50亿元只标记为“小市值”，不会从方法事实中删除；市值门槛只改变页面显示范围。
 - 表格和个股页同时展示当日总市值、流通市值及最近20个交易日成交额中位数，供人工判断流动性，不生成流动性评分。
@@ -75,10 +75,11 @@ Tushare交易日确认
 ## 数据边界
 
 - `data/market.sqlite3`：采集环节唯一写入的市场输入库，包含原始及前复权股票日线、复权因子、指数日线、按日总市值/流通市值、证券身份和采集凭证。采集完成后，方法计算只读该库。
-- `data/master_watchlist.sqlite3`：方法事实、状态转移、行业观察、人工复核和运行凭证。
+- `data/master_watchlist.sqlite3`：公开的方法事实、状态转移、行业观察和运行凭证。
+- `data/users.sqlite3`：账号、服务端会话以及按 `user_id` 隔离的人工复核、成交和图表标注；权限应为 `0600`。
 - `data/backups/`：清理前代码恢复包和带日期的数据库备份；恢复前必须核对对应 `.sha256` 文件和备份日期。
 
-申万三级行业映射已经写入 `master_watchlist.sqlite3`，运行网站不再依赖旧 `research.sqlite3`。旧研究数据库、输出目录和行情缓存已移除。
+申万三级行业映射已经以有效期历史写入 `master_watchlist.sqlite3`，运行网站不再依赖旧 `research.sqlite3`。旧研究数据库、输出目录和行情缓存已移除。
 
 事实来源分为：
 
@@ -87,7 +88,7 @@ Tushare交易日确认
 
 缺失输入必须保留为未知状态。不得跨日期拼接、使用未来数据或用近似值伪造完整证据。
 
-行业K线以所选日期的申万成员快照和成分股前复权 OHLC 日线等权合成，固定起始点为 1000。它不是申万官方行业指数，且回看历史时含有当期成员口径，只作人工趋势观察，不作方法有效性证据。
+行业K线以所选日期当时有效的申万成员和成分股前复权 OHLC 日线等权合成，固定起始点为 1000。它不是申万官方行业指数，且回看历史时含有当期成员口径，只作人工趋势观察，不作方法有效性证据。
 
 ## 项目结构
 
@@ -97,15 +98,19 @@ src/master_stock_selector/
 ├── watchlist/      # Tushare采集、两种方法、行业观察及 SQLite 仓储
 └── web/            # FastAPI 路由、模板和样式
 scripts/
+├── manage_users.sh
+├── backup_databases.sh
 ├── install_daily_schedule.sh
 ├── run_master_watchlist.sh
 ├── start_web.sh
 ├── stop_web.sh
 └── uninstall_daily_schedule.sh
 tests/              # 当前产品合同测试
+deploy/             # ECS systemd、Nginx 与备份模板
 data/
 ├── market.sqlite3
 ├── master_watchlist.sqlite3
+├── users.sqlite3
 └── backups/
 ```
 
@@ -214,20 +219,94 @@ scripts/restart_web.sh
 
 默认地址：[http://127.0.0.1:8000/a/daily](http://127.0.0.1:8000/a/daily)
 
+网站使用三个职责分离的 SQLite 数据库：`market.sqlite3` 保存公开行情，
+`master_watchlist.sqlite3` 保存公开方法事实，`users.sqlite3` 保存账号、会话以及每个
+用户自己的观察列表、备注、K 线绘图、买卖点、成交和复盘。一个用户就是一个独立租户，不支持团队共享。
+
+首次使用前创建账号（密码通过终端安全提示输入，不进入命令历史）：
+
+```bash
+scripts/manage_users.sh create your-name --display-name "显示名称"
+scripts/manage_users.sh list
+```
+
+禁用账号或重置密码：
+
+```bash
+scripts/manage_users.sh disable your-name
+scripts/manage_users.sh reset-password your-name
+```
+
+公开行情、指数、行业和方法证据无需登录；`/a/focus`、`/a/review`、人工备注、成交、
+止损和图表标注必须登录，并以服务端会话中的 `user_id` 隔离。生产环境必须保持
+`MASTERSTOCK_SECURE_COOKIES=1` 并由 HTTPS 访问。
+
 常用页面：
 
 - `/a/daily`：大师观察池
 - `/a/indices`：四指数 Weinstein 完整阶段与 Minervini Stage 2 是/否
 - `/a/industries`：申万三级行业聚集观察
 - `/a/industries/{industry_code}/chart`：申万三级行业成分股等权代理K线
-- `/a/focus`：人工重点观察
+- `/a/observations`：我的观察（观察中 / 重点 / 已归档）
 - `/a/review`：实际成交与交易复盘
 - `/a/stocks/{symbol}`：个股方法证据与人工备注
 - `/a/runs`：观察池运行凭证
 
-程序还提供只读 JSON 接口 `/api/a/watchlist/{date}`、`/api/a/indices/{date}`、`/api/a/industries/{date}`，以及进程级健康检查 `/healthz`。观察池页面和接口可使用 `min_cap=0|30|50|100` 选择总市值下限。
+程序还提供只读 JSON 接口 `/api/a/watchlist/{date}`、`/api/a/indices/{date}`、`/api/a/industries/{date}`，以及进程级健康检查 `/healthz`。公开图表接口只返回行情和公开指标；个人成交与画线通过登录后的 `/api/me/` 接口单独读取，避免进入公开缓存。观察池页面和接口可使用 `min_cap=0|30|50|100` 选择总市值下限。
 
 数据库、监听地址、Tushare限速和最低股票数可以通过 `.env.example` 中列出的环境变量覆盖。
+
+在线数据库不能用普通文件复制备份。项目使用 SQLite Backup API 只备份不可重建的
+用户数据库：
+
+```bash
+MASTERSTOCK_BACKUP_DIR=/var/backups/masterstock scripts/backup_databases.sh
+```
+
+脚本会对 `users.sqlite3` 执行 `quick_check`、生成一致性备份、再次校验备份，并按
+`MASTERSTOCK_BACKUP_RETENTION_DAYS`（默认 7 天）清理过期文件。公开数据库依靠云盘
+快照和重建流程保护，不进入每日应用备份。异地 OSS 上传由部署环境单独配置，不在
+仓库中保存访问密钥。
+
+如需保留旧版单用户私有数据，先执行只读预检，再明确应用：
+
+```bash
+scripts/manage_users.sh migrate-legacy \
+  --source data/master_watchlist.sqlite3 --username your-name
+scripts/manage_users.sh migrate-legacy \
+  --source data/master_watchlist.sqlite3 --username your-name --apply
+```
+
+迁移不会删除或修改旧数据库。
+
+### 公开数据库精简
+
+`market.sqlite3` 和 `master_watchlist.sqlite3` 中的证券身份、名称、ST 状态及申万行业归属使用有效期历史，只在属性变化时新增记录。日常采集和观察池计算会继续写入这些历史表；历史页面按查询日期还原当时状态。
+
+从旧快照库生成独立候选库，然后逐日校验等价性：
+
+```bash
+.venv/bin/masterstock database-optimize \
+  --market-source data/market.sqlite3 \
+  --market-target data/market_v2.sqlite3 \
+  --watchlist-source data/master_watchlist.sqlite3 \
+  --watchlist-target data/master_watchlist_v2.sqlite3 \
+  --apply
+
+.venv/bin/masterstock database-validate \
+  --market-source data/market.sqlite3 \
+  --market-target data/market_v2.sqlite3 \
+  --watchlist-source data/master_watchlist.sqlite3 \
+  --watchlist-target data/master_watchlist_v2.sqlite3
+```
+
+只有校验返回 `EQUIVALENT` 才可在停止 Web 和日常任务后切换文件。旧库应先改名保留为回滚副本；新库通过 `PRAGMA quick_check`、`/healthz` 及主要页面检查后，再决定是否删除旧库。
+
+### ECS 部署
+
+`deploy/systemd/` 提供 Web 常驻进程、交易日采集定时器和用户数据库备份定时器，
+`deploy/nginx/` 提供 HTTPS 反向代理示例。安装、权限、首次备份和恢复检查见
+[`deploy/README.md`](deploy/README.md)。模板中的域名和证书路径是占位值，不能原样用于生产。
 
 ## 验证
 

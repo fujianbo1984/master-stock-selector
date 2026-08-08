@@ -11,6 +11,8 @@
   const deleteSelectedButton = root.querySelector("[data-delete-selected]");
   const symbol = root.dataset.symbol;
   const date = root.dataset.date;
+  const privateOverlayUrl = root.dataset.privateOverlayUrl || "";
+  const csrfToken = root.dataset.csrfToken || "";
   let limit = 260;
   let interval = "day";
   let payload = null;
@@ -54,9 +56,9 @@
   });
   const updateKcSummary = () => {
     const source = root.querySelector("[data-kc-source]").selectedOptions[0].text;
-    const basis = root.querySelector("[data-kc-ma]").value.toUpperCase();
-    const style = root.querySelector("[data-kc-style]").value.toUpperCase();
-    kcSummary.textContent = `KC：${basis}${root.querySelector("[data-kc-length]").value} · ${style}${root.querySelector("[data-kc-atr-length]").value} · ×${root.querySelector("[data-kc-multiplier]").value} · ${source}`;
+    const basis = root.querySelector("[data-kc-ma]").value === "ema" ? "指数移动平均" : "简单移动平均";
+    const style = ({ atr: "平均真实波幅", tr: "真实波幅", range: "最高最低价差" })[root.querySelector("[data-kc-style]").value];
+    kcSummary.textContent = `肯特纳通道：${root.querySelector("[data-kc-length]").value}日${basis} · ${root.querySelector("[data-kc-atr-length]").value}日${style} · ${root.querySelector("[data-kc-multiplier]").value}倍 · ${source}`;
   };
   const selectedDrawing = () => drawings.find(drawing => drawing.drawing_id === selectedDrawingId) || null;
   const updateDrawingActions = () => {
@@ -71,7 +73,7 @@
     overlay.style.pointerEvents = activeTool === "browse" ? "none" : "auto";
     overlay.style.cursor = activeTool === "browse" ? "default" : "crosshair";
     root.querySelectorAll("[data-draw-tool]").forEach(item => item.setAttribute("aria-pressed", String(item.dataset.drawTool === activeTool)));
-    drawingHint.textContent = ({ browse: "拖拽缩放或查看价格", select: "点击画线选中；Delete / 退格或右键删除", trendline: "点击起点，再点击终点", horizontal: "点击图表设置水平线" })[activeTool] || "选择工具后在图上点击";
+    drawingHint.textContent = ({ browse: "拖拽缩放或查看价格", select: "点击画线选中；按删除键、退格键或右键删除", trendline: "点击起点，再点击终点", horizontal: "点击图表设置水平线" })[activeTool] || "选择工具后在图上点击";
     renderDrawings();
   };
   const resize = () => {
@@ -154,6 +156,22 @@
   const storePayload = (url, value) => {
     try { window.sessionStorage.setItem(chartCacheKey(url), JSON.stringify(value)); } catch (_) { /* Browser storage can be unavailable. */ }
   };
+  const withPrivateOverlay = async (publicPayload) => {
+    const combined = { ...publicPayload, drawings: [], trade_overlay: { executions: [], open_stops: [] } };
+    if (!privateOverlayUrl || publicPayload.status !== "OK") return combined;
+    const query = new URLSearchParams({
+      date,
+      price_scale_id: publicPayload.price_scale_id,
+      interval: publicPayload.interval || interval,
+    });
+    try {
+      const response = await fetch(`${privateOverlayUrl}?${query}`, { credentials: "same-origin" });
+      if (!response.ok) return combined;
+      return { ...combined, ...(await response.json()) };
+    } catch (_) {
+      return combined;
+    }
+  };
   const drawPayload = (nextPayload) => {
     payload = nextPayload;
     candles.setData(payload.bars.map(row => ({ time: row.trade_date, open: row.open, high: row.high, low: row.low, close: row.close })));
@@ -174,7 +192,7 @@
       color: item.side === "BUY" ? "#c94e47" : "#258460",
       text: `${item.side === "BUY" ? "买" : "卖"} ${item.price} ×${item.quantity}`,
     })));
-    drawings = payload.drawings.map(canonicalizeDrawing);
+    drawings = (payload.drawings || []).map(canonicalizeDrawing);
     if (!selectedDrawing()) selectedDrawingId = null;
     updateDrawingActions(); resize(); fitBarsToViewport();
     status.textContent = `前复权 · ${payload.bars[0].trade_date} 至 ${payload.bars.at(-1).trade_date} · ${payload.bars.length} 日`;
@@ -182,14 +200,14 @@
   const request = async () => {
     const url = chartRequest(symbol, date, settings());
     const cached = cachedPayload(url);
-    if (cached?.status === "OK") drawPayload(cached);
+    if (cached?.status === "OK") drawPayload(await withPrivateOverlay(cached));
     else status.textContent = "正在加载本地日线…";
     try {
       const response = await fetch(url);
       const nextPayload = await response.json();
       if (!response.ok || nextPayload.status !== "OK") { status.textContent = `无法绘图：${nextPayload.reason || "数据不足"}`; return; }
       storePayload(url, nextPayload);
-      drawPayload(nextPayload);
+      drawPayload(await withPrivateOverlay(nextPayload));
     } catch (_) {
       if (!cached?.status) status.textContent = "本地日线加载失败，请重试";
     }
@@ -225,7 +243,8 @@
     return { logical: Number(logical.toFixed(4)), price: Number(price.toFixed(6)) };
   };
   const saveDrawing = async (drawing) => {
-    const response = await fetch(`/api/a/stocks/${encodeURIComponent(symbol)}/chart/drawings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...drawing, price_scale_id: payload.price_scale_id }) });
+    if (!privateOverlayUrl) throw new Error("请先登录");
+    const response = await fetch(`/api/me/stocks/${encodeURIComponent(symbol)}/chart/drawings`, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ ...drawing, price_scale_id: payload.price_scale_id }) });
     if (!response.ok) throw new Error("保存画线失败");
     const saved = await response.json();
     canonicalDrawingAnchors.set(saved.drawing_id, saved.anchors);
@@ -234,7 +253,8 @@
     updateDrawingActions(); renderDrawings();
   };
   const removeDrawing = async (drawing) => {
-    const response = await fetch(`/api/a/stocks/${encodeURIComponent(symbol)}/chart/drawings/${encodeURIComponent(drawing.drawing_id)}?price_scale_id=${encodeURIComponent(payload.price_scale_id)}`, { method: "DELETE" });
+    if (!privateOverlayUrl) throw new Error("请先登录");
+    const response = await fetch(`/api/me/stocks/${encodeURIComponent(symbol)}/chart/drawings/${encodeURIComponent(drawing.drawing_id)}?price_scale_id=${encodeURIComponent(payload.price_scale_id)}`, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } });
     if (!response.ok) throw new Error("删除画线失败");
     drawings = drawings.filter(item => item.drawing_id !== drawing.drawing_id);
     canonicalDrawingAnchors.delete(drawing.drawing_id);
@@ -249,7 +269,7 @@
     const drawing = nearestDrawing(event);
     selectedDrawingId = drawing ? drawing.drawing_id : null;
     updateDrawingActions(); renderDrawings();
-    drawingHint.textContent = drawing ? "已选中；按 Delete / 退格或右键删除" : "未选中画线";
+    drawingHint.textContent = drawing ? "已选中；按删除键、退格键或右键删除" : "未选中画线";
     return drawing;
   };
   overlay.addEventListener("pointermove", (event) => {
@@ -284,7 +304,7 @@
   recordButton?.addEventListener("click", () => {
     const nextRecordMode = !recordMode; setActiveTool("browse"); recordMode = nextRecordMode;
     recordButton.setAttribute("aria-pressed", String(recordMode));
-    drawingHint.textContent = recordMode ? "点击K线预填成交日与价格；保存前仍可修改" : "拖拽缩放或查看价格";
+    drawingHint.textContent = recordMode ? "点击价格图预填成交日与价格；保存前仍可修改" : "拖拽缩放或查看价格";
   });
   root.querySelectorAll("[data-ma], [data-volume]").forEach(input => input.addEventListener("change", () => { if (payload) drawPayload(payload); }));
   chart.subscribeClick((param) => {
@@ -299,7 +319,6 @@
   deleteSelectedButton.addEventListener("click", async () => { const drawing = selectedDrawing(); if (!drawing) return; try { await removeDrawing(drawing); drawingHint.textContent = "已删除选中画线"; } catch (_) { drawingHint.textContent = "删除失败，请重试"; } });
   root.querySelector("[data-clear-drawings]").addEventListener("click", async () => { if (!payload || !drawings.length || !window.confirm("清空当前复权尺度下的全部个人画线？")) return; for (const drawing of [...drawings]) await removeDrawing(drawing); });
   const chartReviewForm = document.querySelector(".chart-review-control");
-  chartReviewForm?.querySelector("select[name='manual_state']")?.addEventListener("change", () => chartReviewForm.requestSubmit());
   document.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
     const active = document.activeElement;

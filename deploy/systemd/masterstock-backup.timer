@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily MasterStock SQLite backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=10m
+Unit=masterstock-backup.service
+
+[Install]
+WantedBy=timers.target

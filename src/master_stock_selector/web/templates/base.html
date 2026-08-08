@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}龙场悟道 · 大师选股{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260808-site-ledger-v7">
+  <link rel="stylesheet" href="/static/app.css?v=20260808-observation-workspace-v12">
 </head>
 <body class="app-body">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -12,6 +12,18 @@
     {% block body %}{% endblock %}
   </main>
   <script>
+    document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+      const input = document.getElementById(button.getAttribute("aria-controls"));
+      if (!input) return;
+      button.addEventListener("click", () => {
+        const reveal = input.type === "password";
+        input.type = reveal ? "text" : "password";
+        button.textContent = reveal ? "隐藏" : "显示";
+        button.setAttribute("aria-pressed", reveal ? "true" : "false");
+        input.focus();
+      });
+    });
+
     document.querySelectorAll("table[data-sortable='true']").forEach((table) => {
       const headers = Array.from(table.querySelectorAll("thead th"));
       const sortRows = (th, index, direction) => {

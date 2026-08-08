@@ -19,5 +19,7 @@ data/
 outputs/
 outputs-live-smoke/
 logs/
+artifacts/
+design-qa.md
 .masterstock-web.pid
 launchd/*.plist

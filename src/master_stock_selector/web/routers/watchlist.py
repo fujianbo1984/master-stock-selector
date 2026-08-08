@@ -4,16 +4,18 @@ from collections.abc import Callable
 from datetime import date as calendar_date
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from ...watchlist.charting import keltner_channels
 from ...watchlist.industry import INDUSTRY_POLICY_VERSION
 from ...watchlist.industry_confirmation import build_industry_weinstein_confirmation
 from ...watchlist.repository import TRADE_SETUP_LABELS, MarketDataReader, WatchlistRepository
+from ..users import AuthenticatedUser, UserRepository
+from .auth import current_user, require_user
 
 METHOD_LABELS = {"minervini": "Minervini", "weinstein": "Weinstein"}
 RESULT_LABELS = {
@@ -30,18 +32,18 @@ STATE_LABELS = {
     "DATA_GAP": "数据中断",
 }
 STAGE_LABELS = {
-    "STAGE_1": "Stage 1 · 筑底",
-    "STAGE_2": "Stage 2 · 上升",
-    "STAGE_3": "Stage 3 · 筑顶",
-    "STAGE_4": "Stage 4 · 下降",
+    "STAGE_1": "第一阶段 · 筑底",
+    "STAGE_2": "第二阶段 · 上升",
+    "STAGE_3": "第三阶段 · 筑顶",
+    "STAGE_4": "第四阶段 · 下降",
     "TRANSITION": "转换期",
     "UNKNOWN": "数据不足",
 }
 MANUAL_LABELS = {
-    "UNREVIEWED": "未分析",
-    "WATCH": "观察",
-    "FOCUS": "重点观察",
-    "DROPPED": "放弃",
+    "UNREVIEWED": "未加入",
+    "WATCH": "观察中",
+    "FOCUS": "重点",
+    "ARCHIVED": "已归档",
 }
 MARKET_CAP_FLOORS = {0, 30, 50, 100}
 MINERVINI_CHECKS = (
@@ -87,6 +89,7 @@ def build_watchlist_router(
     render: Render,
     repository: WatchlistRepository,
     market_reader: MarketDataReader,
+    users: UserRepository,
 ) -> APIRouter:
     router = APIRouter()
     row_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
@@ -116,6 +119,12 @@ def build_watchlist_router(
             return cached[1]
 
         rows = [_decorate_watchlist_row(row) for row in repository.watchlist_rows(query_date)]
+        for row in rows:
+            row["manual"] = {
+                "manual_state": "UNREVIEWED",
+                "note": "",
+                "reviewed_at": "",
+            }
         _attach_market_metrics(
             rows,
             market_reader,
@@ -155,6 +164,39 @@ def build_watchlist_router(
         navigation_cache.clear()
         daily_aux_cache.clear()
 
+    def rows_for_user(
+        request: Request, query_date: str, *, include_liquidity: bool
+    ) -> list[dict[str, Any]]:
+        rows = cached_rows(query_date, include_liquidity=include_liquidity)
+        user = current_user(request)
+        reviews = (
+            users.reviews_for_symbols(
+                user.user_id, [str(row.get("symbol") or "") for row in rows]
+            )
+            if user is not None
+            else {}
+        )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            review = reviews.get(
+                str(row.get("symbol") or ""),
+                {"manual_state": "UNREVIEWED", "note": "", "reviewed_at": ""},
+            )
+            result.append(
+                {
+                    **row,
+                    "manual": review,
+                    "manual_label": MANUAL_LABELS.get(
+                        str(review.get("manual_state") or "UNREVIEWED"), "未加入"
+                    ),
+                }
+            )
+        return result
+
+    def require_csrf(request: Request, user: AuthenticatedUser, supplied: str) -> None:
+        if not users.csrf_valid(user, supplied):
+            raise HTTPException(status_code=403, detail="CSRF 校验失败")
+
     @router.get("/", include_in_schema=False)
     def home() -> RedirectResponse:
         return RedirectResponse("/a/daily", status_code=307)
@@ -178,8 +220,67 @@ def build_watchlist_router(
         return RedirectResponse("/a/daily", status_code=307)
 
     @router.get("/a/focus", include_in_schema=False)
-    def focus_redirect() -> RedirectResponse:
-        return RedirectResponse("/a/daily?manual=FOCUS", status_code=307)
+    def focus_redirect(request: Request) -> RedirectResponse:
+        if current_user(request) is None:
+            return RedirectResponse("/login?next=/a/focus", status_code=303)
+        query = dict(request.query_params)
+        query["state"] = "FOCUS"
+        return RedirectResponse(f"/a/observations?{urlencode(query)}", status_code=307)
+
+    @router.get("/a/observations", response_class=HTMLResponse)
+    def personal_observations(
+        request: Request,
+        date: str | None = None,
+        state: str = "WATCH",
+    ) -> Response:
+        user = current_user(request)
+        if user is None:
+            return RedirectResponse("/login?next=/a/observations", status_code=303)
+        selected_state = state.upper()
+        if selected_state not in {"WATCH", "FOCUS", "ARCHIVED"}:
+            selected_state = "WATCH"
+        query_date = _selected_date(repository, date, market_reader)
+        reviews = users.reviews_for_user(user.user_id)
+        reviews_by_symbol = {str(row["symbol"]): row for row in reviews}
+        public_by_symbol = {
+            str(row.get("symbol") or ""): row
+            for row in cached_rows(query_date, include_liquidity=False)
+        }
+        names = repository.stock_names(set(reviews_by_symbol))
+        items: list[dict[str, Any]] = []
+        for symbol, review in reviews_by_symbol.items():
+            public_row = public_by_symbol.get(symbol)
+            urls = _stock_external_urls(symbol)
+            items.append(
+                {
+                    "symbol": symbol,
+                    "name": names.get(symbol) or (public_row or {}).get("name") or "名称待补",
+                    "manual": review,
+                    "manual_label": MANUAL_LABELS.get(str(review["manual_state"]), "未加入"),
+                    "public": public_row,
+                    **urls,
+                }
+            )
+        counts = {
+            value: sum(1 for item in items if item["manual"]["manual_state"] == value)
+            for value in ("WATCH", "FOCUS", "ARCHIVED")
+        }
+        visible_items = [
+            item for item in items if item["manual"]["manual_state"] == selected_state
+        ]
+        return render(
+            request,
+            "ashare/personal_observations.html",
+            {
+                "active": "我的观察",
+                "query_date": query_date,
+                "latest_date": repository.latest_fact_date(),
+                "selected_state": selected_state,
+                "counts": counts,
+                "items": visible_items,
+                "manual_labels": MANUAL_LABELS,
+            },
+        )
 
     @router.get("/a/daily", response_class=HTMLResponse)
     def daily_watchlist(
@@ -191,17 +292,24 @@ def build_watchlist_router(
         min_cap: int = Query(default=50),
         industry: str = "",
         q: str = "",
-    ) -> HTMLResponse:
+    ) -> Response:
+        if manual.upper() in {"WATCH", "FOCUS", "ARCHIVED", "DROPPED"}:
+            if current_user(request) is None:
+                return RedirectResponse("/login?next=/a/observations", status_code=303)
+            query = {"state": "ARCHIVED" if manual.upper() == "DROPPED" else manual.upper()}
+            if date:
+                query["date"] = date
+            return RedirectResponse(f"/a/observations?{urlencode(query)}", status_code=307)
         market_cap_floor = _market_cap_floor(min_cap)
         query_date = _selected_date(repository, date, market_reader)
         # 首页仍取总市值以执行默认的小市值过滤，但不加载流通市值和
         # 20 日成交额中位数，减少首次打开观察池的数据库工作量。
-        rows = cached_rows(query_date, include_liquidity=False)
+        rows = rows_for_user(request, query_date, include_liquidity=False)
         filtered = _filter_rows(
             rows,
             method=method,
             state=state,
-            manual=manual,
+            manual="all",
             min_cap=market_cap_floor,
             industry=industry,
             q=q,
@@ -213,23 +321,18 @@ def build_watchlist_router(
             row for row in filtered
             if row["has_pass"] and not row["has_new_state"] and not row["has_exit_state"]
         ]
-        focus_all = [
-            row for row in filtered
-            if str(row["manual"].get("manual_state") or "") == "FOCUS"
-        ]
         default_limit = 40
-        show_full_groups = state != "all" or manual != "all" or bool(q.strip())
+        show_full_groups = state != "all" or bool(q.strip())
         new_rows = new_all if show_full_groups else new_all[:default_limit]
         continuing_rows = (
             continuing_all if show_full_groups else continuing_all[:default_limit]
         )
         exit_rows = exit_all if show_full_groups else exit_all[:default_limit]
-        focus_rows = focus_all if show_full_groups else focus_all[:default_limit]
         return render(
             request,
             "ashare/watchlist.html",
             {
-                "active": "我的重点" if manual == "FOCUS" else "大师观察池",
+                "active": "大师观察池",
                 "query_date": query_date,
                 "latest_date": repository.latest_fact_date(),
                 "available_dates": repository.available_dates(30),
@@ -239,17 +342,15 @@ def build_watchlist_router(
                 "new_rows": new_rows,
                 "continuing_rows": continuing_rows,
                 "exit_rows": exit_rows,
-                "focus_rows": focus_rows,
                 "section_totals": {
                     "new": len(new_all),
                     "continuing": len(continuing_all),
                     "exited": len(exit_all),
-                    "focus": len(focus_all),
                 },
                 "filters": {
                     "method": method,
                     "state": state,
-                    "manual": manual,
+                    "manual": "all",
                     "min_cap": market_cap_floor,
                     "industry": industry,
                     "q": q,
@@ -260,7 +361,6 @@ def build_watchlist_router(
                     "new": len(new_all),
                     "continuing": len(continuing_all),
                     "exited": len(exit_all),
-                    "focus": len(focus_all),
                     "both": sum(1 for row in filtered if row["both_pass"]),
                     "reconstructed": sum(
                         1 for row in filtered if row.get("origin") == "RECONSTRUCTED"
@@ -394,8 +494,12 @@ def build_watchlist_router(
         )
 
     @router.get("/a/review", response_class=HTMLResponse)
-    def trade_review(request: Request) -> HTMLResponse:
-        review = repository.trade_review()
+    def trade_review(request: Request) -> Response:
+        user = current_user(request)
+        if user is None:
+            return RedirectResponse("/login?next=/a/review", status_code=303)
+        names = repository.stock_names(users.trade_symbols(user.user_id))
+        review = users.trade_review(user.user_id, names)
         for item in review["closed"]:
             item["planned_r_multiple"] = None
             item["actual_r_multiple"] = None
@@ -447,6 +551,17 @@ def build_watchlist_router(
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
             raise HTTPException(status_code=404, detail="stock has no watchlist facts")
+        user = current_user(request)
+        payload["manual"] = (
+            users.review(user.user_id, symbol)
+            if user is not None
+            else {
+                "symbol": symbol.upper(),
+                "manual_state": "UNREVIEWED",
+                "note": "",
+                "reviewed_at": "",
+            }
+        )
         for row in payload["latest"].values():
             row["result_label"] = RESULT_LABELS.get(str(row.get("result") or ""), "未知")
             row["state_label"] = STATE_LABELS.get(str(row.get("state") or ""), "未发生变化")
@@ -476,14 +591,18 @@ def build_watchlist_router(
             reverse=True,
         )[:120]
         payload["manual_label"] = MANUAL_LABELS.get(
-            str(payload["manual"].get("manual_state") or "UNREVIEWED"), "未分析"
+            str(payload["manual"].get("manual_state") or "UNREVIEWED"), "未加入"
         )
         fact_date = max(
             (str(row.get("as_of_date") or "") for row in payload["latest"].values()),
             default="",
         )
         query_date = date or fact_date
-        editing_trade = repository.trade_execution(edit_trade) if edit_trade else None
+        editing_trade = (
+            users.trade_execution(user.user_id, edit_trade)
+            if user is not None and edit_trade
+            else None
+        )
         trade_prefill: dict[str, Any] = {}
         if traded_on:
             try:
@@ -512,7 +631,9 @@ def build_watchlist_router(
             industry=industry,
             q=q,
             section=section,
-            rows_for_date=lambda value: cached_rows(value, include_liquidity=False),
+            rows_for_date=lambda value: rows_for_user(
+                request, value, include_liquidity=False
+            ),
         )
         payload["market_metrics"] = market_reader.safe_stock_market_metrics(
             query_date,
@@ -551,6 +672,7 @@ def build_watchlist_router(
                 "editing_trade": editing_trade,
                 "trade_prefill": trade_prefill,
                 "navigation": navigation,
+                "private_workspace": user is not None,
             },
         )
 
@@ -574,6 +696,20 @@ def build_watchlist_router(
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
             raise HTTPException(status_code=404, detail="stock has no watchlist facts")
+        user = current_user(request)
+        payload["manual"] = (
+            users.review(user.user_id, symbol)
+            if user is not None
+            else {
+                "symbol": symbol.upper(),
+                "manual_state": "UNREVIEWED",
+                "note": "",
+                "reviewed_at": "",
+            }
+        )
+        payload["manual_label"] = MANUAL_LABELS.get(
+            str(payload["manual"].get("manual_state") or "UNREVIEWED"), "未加入"
+        )
         query_date = date or max(
             (str(row.get("as_of_date") or "") for row in payload["latest"].values()),
             default="",
@@ -590,7 +726,9 @@ def build_watchlist_router(
             industry=industry,
             q=q,
             section=section,
-            rows_for_date=lambda value: cached_rows(value, include_liquidity=False),
+            rows_for_date=lambda value: rows_for_user(
+                request, value, include_liquidity=False
+            ),
         )
         if navigation["total"] == 0 and (nav_previous or nav_next):
             navigation.update(
@@ -626,23 +764,25 @@ def build_watchlist_router(
                 ),
                 "back_url": f"/a/stocks/{symbol.upper()}?{navigation['query']}",
                 "navigation": navigation,
+                "private_workspace": user is not None,
             },
         )
 
     @router.post("/a/stocks/{symbol}/review", response_class=RedirectResponse)
     async def save_stock_review(request: Request, symbol: str) -> RedirectResponse:
+        user = require_user(request)
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+        require_csrf(request, user, str((values.get("csrf_token") or [""])[0]))
         state = str((values.get("manual_state") or ["UNREVIEWED"])[0])
         note_values = values.get("note")
         note = (
             str(note_values[0])
             if note_values is not None
-            else str(repository.stock_detail(symbol)["manual"].get("note") or "")
+            else str(users.review(user.user_id, symbol).get("note") or "")
         )
         return_to = str((values.get("return_to") or [""])[0])
         try:
-            repository.save_review(symbol, state, note)
-            clear_row_caches()
+            users.save_review(user.user_id, symbol, state, note)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         chart_prefix = f"/a/stocks/{symbol.upper()}/chart"
@@ -660,20 +800,32 @@ def build_watchlist_router(
                 path = f"{path}{'&' if '?' in path else '?'}{urlencode(navigation_context)}"
                 return_to = f"{path}#{fragment}" if marker else path
             return RedirectResponse(return_to, status_code=303)
+        parsed_return = urlsplit(return_to)
+        if (
+            return_to.startswith("/a/")
+            and not return_to.startswith("//")
+            and not parsed_return.scheme
+            and not parsed_return.netloc
+        ):
+            return RedirectResponse(return_to, status_code=303)
         return RedirectResponse(f"/a/stocks/{symbol.upper()}", status_code=303)
 
     @router.post("/a/stocks/{symbol}/trades", response_class=RedirectResponse)
     async def record_stock_trade(request: Request, symbol: str) -> RedirectResponse:
+        user = require_user(request)
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
 
         def value(key: str, default: str = "") -> str:
             return str((values.get(key) or [default])[0])
 
         stop_price = value("stop_price")
+        require_csrf(request, user, value("csrf_token"))
 
         try:
-            repository.record_trade(
-                traded_on=value("traded_on"),
+            traded_on = value("traded_on")
+            users.record_trade(
+                user.user_id,
+                traded_on=traded_on,
                 traded_at=value("traded_at"),
                 symbol=symbol,
                 side=value("side"),
@@ -686,6 +838,7 @@ def build_watchlist_router(
                 invalidation=value("invalidation"),
                 exit_reason=value("exit_reason"),
                 market_context=value("market_context"),
+                observation_snapshot=repository.observation_snapshot(symbol, traded_on),
             )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -693,26 +846,33 @@ def build_watchlist_router(
 
     @router.post("/a/trades/{execution_id}", response_class=RedirectResponse)
     async def update_trade(request: Request, execution_id: str) -> RedirectResponse:
+        user = require_user(request)
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
 
         def value(key: str, default: str = "") -> str:
             return str((values.get(key) or [default])[0])
 
         stop_price = value("stop_price")
+        require_csrf(request, user, value("csrf_token"))
 
-        existing = repository.trade_execution(execution_id)
+        existing = users.trade_execution(user.user_id, execution_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="trade not found")
         try:
-            repository.update_trade(
+            traded_on = value("traded_on")
+            users.update_trade(
+                user.user_id,
                 execution_id,
-                traded_on=value("traded_on"), traded_at=value("traded_at"), side=value("side"),
+                traded_on=traded_on, traded_at=value("traded_at"), side=value("side"),
                 quantity=int(value("quantity")), price=float(value("price")),
                 fee=float(value("fee", "0") or "0"), method="MANUAL",
                 setup_method=value("setup_method", "PULLBACK"),
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"), invalidation=value("invalidation"),
                 exit_reason=value("exit_reason"), market_context=value("market_context"),
+                observation_snapshot=repository.observation_snapshot(
+                    str(existing["symbol"]), traded_on
+                ),
             )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -740,20 +900,6 @@ def build_watchlist_router(
         if len(scale_ids) != 1 or not next(iter(scale_ids)):
             return {"status": "DATA_GAP", "reason": "INCONSISTENT_PRICE_SCALE", "bars": []}
         price_scale_id = next(iter(scale_ids))
-        overlay = repository.chart_trade_overlay(symbol, date)
-        for stop in overlay["open_stops"]:
-            stop["chart_price"] = market_reader.safe_chart_price_from_raw(
-                symbol, str(stop["buy_date"]), float(stop["stop_price"]), date
-            )
-        if interval == "week":
-            week_end = {
-                _week_key(str(row["trade_date"])): str(row["trade_date"])
-                for row in bars
-            }
-            for execution in overlay["executions"]:
-                execution["traded_on"] = week_end.get(
-                    _week_key(str(execution["traded_on"])), str(execution["traded_on"])
-                )
         return {
             "status": "OK",
             "symbol": symbol.upper(),
@@ -771,15 +917,45 @@ def build_watchlist_router(
                 band_style=band_style,
                 atr_length=atr_length,
             ),
-            "drawings": repository.chart_drawings(symbol, price_scale_id),
+        }
+
+    @router.get("/api/me/stocks/{symbol}/overlay")
+    def private_chart_overlay(
+        request: Request,
+        symbol: str,
+        date: str,
+        price_scale_id: str,
+        interval: str = Query(default="day", pattern="^(day|week)$"),
+    ) -> dict[str, Any]:
+        user = require_user(request)
+        overlay = users.chart_trade_overlay(user.user_id, symbol, date)
+        for stop in overlay["open_stops"]:
+            stop["chart_price"] = market_reader.safe_chart_price_from_raw(
+                symbol, str(stop["buy_date"]), float(stop["stop_price"]), date
+            )
+        if interval == "week":
+            bars = _weekly_bars(market_reader.safe_stock_chart_bars(symbol, date))
+            week_end = {
+                _week_key(str(row["trade_date"])): str(row["trade_date"])
+                for row in bars
+            }
+            for execution in overlay["executions"]:
+                execution["traded_on"] = week_end.get(
+                    _week_key(str(execution["traded_on"])), str(execution["traded_on"])
+                )
+        return {
+            "drawings": users.chart_drawings(user.user_id, symbol, price_scale_id),
             "trade_overlay": overlay,
         }
 
-    @router.post("/api/a/stocks/{symbol}/chart/drawings")
+    @router.post("/api/me/stocks/{symbol}/chart/drawings")
     async def create_chart_drawing(request: Request, symbol: str) -> dict[str, Any]:
+        user = require_user(request)
+        require_csrf(request, user, request.headers.get("X-CSRF-Token", ""))
         try:
             values = await request.json()
-            drawing = repository.save_chart_drawing(
+            drawing = users.save_chart_drawing(
+                user.user_id,
                 str(values.get("drawing_id") or uuid4().hex),
                 symbol,
                 str(values.get("price_scale_id") or ""),
@@ -790,9 +966,17 @@ def build_watchlist_router(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return drawing
 
-    @router.delete("/api/a/stocks/{symbol}/chart/drawings/{drawing_id}")
-    def delete_chart_drawing(symbol: str, drawing_id: str, price_scale_id: str) -> dict[str, bool]:
-        return {"deleted": repository.delete_chart_drawing(drawing_id, symbol, price_scale_id)}
+    @router.delete("/api/me/stocks/{symbol}/chart/drawings/{drawing_id}")
+    def delete_chart_drawing(
+        request: Request, symbol: str, drawing_id: str, price_scale_id: str
+    ) -> dict[str, bool]:
+        user = require_user(request)
+        require_csrf(request, user, request.headers.get("X-CSRF-Token", ""))
+        return {
+            "deleted": users.delete_chart_drawing(
+                user.user_id, drawing_id, symbol, price_scale_id
+            )
+        }
 
     @router.get("/a/runs", response_class=HTMLResponse)
     def runs(request: Request) -> HTMLResponse:
@@ -863,16 +1047,27 @@ def build_watchlist_router(
         }
 
     @router.get("/healthz")
-    def healthz() -> dict[str, Any]:
+    def healthz() -> JSONResponse:
         runtime = repository.readiness()
-        return {
-            "status": "ok" if runtime["connected"] else "degraded",
+        market_runtime = market_reader.readiness()
+        user_runtime = users.readiness()
+        healthy = bool(
+            runtime["connected"]
+            and runtime["has_facts"]
+            and market_runtime.get("exists")
+            and market_runtime.get("latest_date")
+            and user_runtime["connected"]
+        )
+        payload = {
+            "status": "ok" if healthy else "degraded",
             "product": "master-watchlist-v1",
             "scope": "process_database_and_latest_fact_only",
             "runtime": runtime,
-            "market": market_reader.readiness(),
+            "market": market_runtime,
+            "users": user_runtime,
             "note": "健康检查不代表大师方法结论已经过人工语义验收。",
         }
+        return JSONResponse(payload, status_code=200 if healthy else 503)
 
     return router
 
@@ -919,7 +1114,7 @@ def _decorate_watchlist_row(row: dict[str, Any]) -> dict[str, Any]:
     item["state_labels"] = [STATE_LABELS[state] for state in states if state in STATE_LABELS]
     item["method_labels"] = [METHOD_LABELS[key] for key in methods if key in METHOD_LABELS]
     item["manual_label"] = MANUAL_LABELS.get(
-        str(item.get("manual", {}).get("manual_state") or "UNREVIEWED"), "未分析"
+        str(item.get("manual", {}).get("manual_state") or "UNREVIEWED"), "未加入"
     )
     item.update(_stock_external_urls(str(item.get("symbol") or "")))
     return item
@@ -1341,6 +1536,7 @@ def _stock_navigation(
         "continuing-candidates": "持续符合",
         "exit-candidates": "退出 / 中断",
         "focus-candidates": "我的重点观察",
+        "personal-observations": "我的观察",
     }
     empty: dict[str, Any] = {
         "query": query,
@@ -1378,12 +1574,14 @@ def _stock_navigation(
         ]
     elif section == "exit-candidates":
         selected = [row for row in filtered if row["has_exit_state"]]
-    else:
+    elif section == "focus-candidates":
         selected = [
             row
             for row in filtered
             if str(row["manual"].get("manual_state") or "") == "FOCUS"
         ]
+    else:
+        selected = filtered
     symbols = [str(row.get("symbol") or "").upper() for row in selected]
     try:
         index = symbols.index(symbol.upper())
