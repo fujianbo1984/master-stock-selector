@@ -611,9 +611,28 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert "Weinstein：符合" in chart.text
     assert "/a/stocks/000003.SZ/chart?date=2026-07-31" in chart.text
     assert "data-chart-next" in chart.text
+    assert "data-chart-next href=" in chart.text
+    assert "/chart?date=2026-07-31&amp;" in chart.text
+    next_href = chart.text.split('data-chart-next href="', 1)[1].split('"', 1)[0]
+    assert "#stock-chart" not in next_href
     assert 'aria-label="我的观察"' in chart.text
     assert "归档" in chart.text
     assert ">保存</button>" not in chart.text
+
+    next_chart = client.get(
+        "/a/stocks/000003.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0"
+        "&section=personal-observations"
+    )
+    assert next_chart.status_code == 200
+    assert "data-chart-previous" in next_chart.text
+    assert "平安银行" in next_chart.text
+
+    legacy_fragment = client.get(
+        "/a/stocks/000003.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0"
+        "&section=personal-observations%23stock-chart"
+    )
+    assert legacy_fragment.status_code == 200
+    assert "data-chart-previous" in legacy_fragment.text
 
     updated = client.post(
         "/a/stocks/000001.SZ/review",
@@ -1074,3 +1093,99 @@ def test_login_cookie_is_secure_by_default(tmp_path):
     assert response.headers["strict-transport-security"] == "max-age=31536000"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_authenticated_user_can_change_password_from_account_settings(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    app = create_app(
+        market_database=tmp_path / "market.sqlite3",
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+    )
+    client = _authenticated_client(app)
+
+    page = client.get("/account/password")
+    assert page.status_code == 200
+    assert "修改密码" in page.text
+    assert "账户设置" in page.text
+    assert 'autocomplete="current-password"' in page.text
+    assert page.headers["cache-control"] == "private, no-store"
+
+    wrong = client.post(
+        "/account/password",
+        data={
+            "csrf_token": _csrf(client),
+            "current_password": "wrong-password",
+            "new_password": "New-test-password-456",
+            "new_password_confirmation": "New-test-password-456",
+        },
+    )
+    assert wrong.status_code == 400
+    assert "当前密码不正确" in wrong.text
+    assert client.get("/a/observations").status_code == 200
+
+    changed = client.post(
+        "/account/password",
+        data={
+            "csrf_token": _csrf(client),
+            "current_password": "Test-password-123",
+            "new_password": "New-test-password-456",
+            "new_password_confirmation": "New-test-password-456",
+        },
+        follow_redirects=False,
+    )
+    assert changed.status_code == 303
+    assert changed.headers["location"] == "/login?password_changed=1"
+    assert client.cookies.get(SESSION_COOKIE) is None
+    assert client.get("/a/observations", follow_redirects=False).status_code == 303
+
+    notice = client.get(changed.headers["location"])
+    assert "密码已更新" in notice.text
+    assert client.post(
+        "/login",
+        data={"username": "tester", "password": "Test-password-123"},
+        follow_redirects=False,
+    ).status_code == 401
+    assert client.post(
+        "/login",
+        data={"username": "tester", "password": "New-test-password-456"},
+        follow_redirects=False,
+    ).status_code == 303
+
+
+def test_change_password_requires_login_csrf_and_matching_confirmation(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    app = create_app(
+        market_database=tmp_path / "market.sqlite3",
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+    )
+    anonymous = TestClient(app)
+    assert anonymous.get("/account/password", follow_redirects=False).headers[
+        "location"
+    ] == "/login?next=/account/password"
+    assert anonymous.post("/account/password", data={}).status_code == 401
+
+    client = _authenticated_client(app)
+    assert client.post(
+        "/account/password",
+        data={
+            "csrf_token": "wrong",
+            "current_password": "Test-password-123",
+            "new_password": "New-test-password-456",
+            "new_password_confirmation": "New-test-password-456",
+        },
+    ).status_code == 403
+    mismatch = client.post(
+        "/account/password",
+        data={
+            "csrf_token": _csrf(client),
+            "current_password": "Test-password-123",
+            "new_password": "New-test-password-456",
+            "new_password_confirmation": "Different-password-789",
+        },
+    )
+    assert mismatch.status_code == 400
+    assert "两次输入的新密码不一致" in mismatch.text

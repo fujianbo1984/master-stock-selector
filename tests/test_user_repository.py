@@ -41,6 +41,33 @@ def test_accounts_sessions_and_sqlite_security_settings(tmp_path):
     assert repository.authenticate("alice", "Secure-password-123") is None
 
 
+def test_user_can_change_password_and_all_existing_sessions_are_revoked(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("alice", "Secure-password-123")
+    first_token, _ = repository.create_session(user_id)
+    second_token, _ = repository.create_session(user_id)
+
+    assert not repository.change_password(
+        user_id, "wrong-password", "New-secure-password-456"
+    )
+    assert repository.session_user(first_token) is not None
+    assert repository.authenticate("alice", "Secure-password-123") is not None
+
+    assert repository.change_password(
+        user_id, "Secure-password-123", "New-secure-password-456"
+    )
+    assert repository.session_user(first_token) is None
+    assert repository.session_user(second_token) is None
+    assert repository.authenticate("alice", "Secure-password-123") is None
+    assert repository.authenticate("alice", "New-secure-password-456") is not None
+
+    with pytest.raises(ValueError, match="新密码不能与当前密码相同"):
+        repository.change_password(
+            user_id, "New-secure-password-456", "New-secure-password-456"
+        )
+
+
 def test_private_rows_are_scoped_by_user_id(tmp_path):
     repository = UserRepository(tmp_path / "users.sqlite3")
     repository.initialize()

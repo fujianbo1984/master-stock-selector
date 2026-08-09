@@ -14,8 +14,8 @@
     {% if navigation.total %}
     <nav class="list-stock-navigation chart-list-navigation" aria-label="{{ navigation.section_label }}快速切换">
       <span class="chart-navigation-context">{{ navigation.section_label }} <b>{{ navigation.position }} / {{ navigation.total }}</b></span>
-      {% if navigation.previous %}<a class="button button-secondary button-compact" data-chart-previous href="/a/stocks/{{ navigation.previous.symbol }}/chart?{{ navigation.query }}#stock-chart">← 上一只：{{ navigation.previous.name }}</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">← 已是第一只</span>{% endif %}
-      {% if navigation.next %}<a class="button button-compact" data-chart-next href="/a/stocks/{{ navigation.next.symbol }}/chart?{{ navigation.query }}#stock-chart">下一只：{{ navigation.next.name }} →</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">已是最后一只 →</span>{% endif %}
+      {% if navigation.previous %}<a class="button button-secondary button-compact" data-chart-previous href="/a/stocks/{{ navigation.previous.symbol }}/chart?{{ navigation.query }}">← 上一只：{{ navigation.previous.name }}</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">← 已是第一只</span>{% endif %}
+      {% if navigation.next %}<a class="button button-compact" data-chart-next href="/a/stocks/{{ navigation.next.symbol }}/chart?{{ navigation.query }}">下一只：{{ navigation.next.name }} →</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">已是最后一只 →</span>{% endif %}
     </nav>
     {% endif %}
     {% if private_workspace %}<form method="post" action="/a/stocks/{{ symbol }}/review" class="chart-review-control" aria-label="我的观察">

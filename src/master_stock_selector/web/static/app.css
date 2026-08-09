@@ -997,7 +997,14 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .auth-submit { width: 100%; min-height: 46px; margin-top: 2px; }
 .auth-privacy { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.65; }
 .auth-error { margin: 0 0 16px; padding: .75rem .9rem; border: 1px solid #d6a19b; border-radius: 5px; color: #8f261f; background: #fff2f0; }
+.auth-notice { margin: 0 0 16px; padding: .75rem .9rem; border: 1px solid #9fc9b4; border-radius: 5px; color: #176044; background: #effaf4; }
 .private-login-panel { display: grid; justify-items: start; gap: .5rem; }
+.account-settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 480px); gap: clamp(32px, 7vw, 84px); align-items: start; padding-top: 48px; }
+.account-settings-intro { display: grid; gap: 12px; max-width: 560px; }
+.account-settings-intro h1 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: clamp(34px, 4vw, 48px); }
+.account-settings-intro p { margin: 0; line-height: 1.75; }
+.account-password-panel { padding: 30px; border-top: 3px solid var(--accent); }
+.password-requirements { margin: -6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 
 @media (max-width: 860px) {
   .observation-workspace-hero { align-items: flex-start; flex-direction: column; }
@@ -1008,6 +1015,8 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
   .auth-intro { gap: 22px; padding: 0; }
   .auth-intro h1 { font-size: clamp(32px, 8vw, 42px); }
   .auth-panel { padding: 26px; }
+  .account-settings-layout { grid-template-columns: 1fr; gap: 24px; padding-top: 28px; }
+  .account-password-panel { width: 100%; max-width: 560px; }
 }
 
 @media (max-width: 520px) {
@@ -1022,5 +1031,6 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
   .auth-boundaries > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
   .auth-public-link { align-items: flex-start; flex-direction: column; gap: 3px; }
   .auth-panel { padding: 22px 18px; }
+  .account-password-panel { padding: 22px 18px; }
   .workspace-empty { grid-template-columns: 1fr; gap: 8px; padding: 30px 20px; }
 }

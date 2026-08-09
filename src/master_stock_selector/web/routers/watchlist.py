@@ -1519,6 +1519,10 @@ def _stock_navigation(
 ) -> dict[str, Any]:
     """Keep chart navigation inside the selected daily-list context, not a global rank."""
 
+    # URL fragments normally stay in the browser, but some installed web-app
+    # clients have sent the trailing chart anchor as part of the query value.
+    # Keep old/bookmarked links usable instead of losing the list context.
+    section = section.partition("#")[0]
     query = urlencode(
         {
             "date": query_date,

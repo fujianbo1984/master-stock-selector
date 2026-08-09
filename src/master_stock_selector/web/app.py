@@ -96,6 +96,7 @@ def create_app(
         private_items = [
             ("我的观察", "/a/observations"),
             ("交易复盘", "/a/review"),
+            ("账户设置", "/account/password"),
         ] if user is not None else []
         nav_groups = [{"label": "公开研究", "items": public_items}]
         if private_items:

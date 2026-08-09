@@ -262,6 +262,45 @@ class UserRepository:
                 (int(time()), str(row["user_id"])),
             )
 
+    def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:
+        """Change an authenticated user's password and revoke every existing session."""
+        _validate_password(new_password)
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT password_hash FROM user_account
+                WHERE user_id=? AND status='ACTIVE'
+                """,
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                verified = self.password_hasher.verify(
+                    str(row["password_hash"]), current_password
+                )
+            except (VerifyMismatchError, InvalidHashError):
+                return False
+            if not verified:
+                return False
+            if current_password == new_password:
+                raise ValueError("新密码不能与当前密码相同")
+            connection.execute(
+                """
+                UPDATE user_account SET password_hash=?, updated_at=CURRENT_TIMESTAMP
+                WHERE user_id=?
+                """,
+                (self.password_hasher.hash(new_password), user_id),
+            )
+            connection.execute(
+                """
+                UPDATE user_session SET revoked_at_epoch=?
+                WHERE user_id=? AND revoked_at_epoch IS NULL
+                """,
+                (int(time()), user_id),
+            )
+        return True
+
     def authenticate(self, username: str, password: str) -> dict[str, str] | None:
         normalized = _normalize_username(username)
         with self.connect() as connection:

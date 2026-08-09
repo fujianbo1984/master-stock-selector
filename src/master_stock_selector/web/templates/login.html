@@ -24,6 +24,7 @@
       <h2 id="login-title">登录大师选股</h2>
       <p>一个账号对应一个独立工作区。</p>
     </div>
+    {% if notice %}<p class="auth-notice" role="status">{{ notice }}</p>{% endif %}
     {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
     <form method="post" action="/login" class="auth-form">
       <input type="hidden" name="next" value="{{ next_path }}">
