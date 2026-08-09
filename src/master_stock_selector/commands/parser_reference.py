@@ -41,6 +41,8 @@ def register_database_optimize(subparsers: SubparserRegistry) -> None:
     parser.add_argument("--market-target", required=True)
     parser.add_argument("--watchlist-source", required=True)
     parser.add_argument("--watchlist-target", required=True)
+    parser.add_argument("--market-retention-days", type=int)
+    parser.add_argument("--watchlist-retention-days", type=int)
     parser.add_argument("--apply", action="store_true")
 
 
@@ -53,6 +55,8 @@ def register_database_validate(subparsers: SubparserRegistry) -> None:
     parser.add_argument("--market-target", required=True)
     parser.add_argument("--watchlist-source", required=True)
     parser.add_argument("--watchlist-target", required=True)
+    parser.add_argument("--market-retention-days", type=int)
+    parser.add_argument("--watchlist-retention-days", type=int)
 
 
 REGISTRARS: dict[str, ParserRegistrar] = {

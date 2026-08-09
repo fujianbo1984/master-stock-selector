@@ -55,6 +55,37 @@ CREATE TABLE IF NOT EXISTS stock_method_transition (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (as_of_date, symbol, method, policy_version)
 );
+CREATE TABLE IF NOT EXISTS stock_method_lifecycle_baseline (
+    symbol TEXT NOT NULL,
+    method TEXT NOT NULL CHECK (method IN ('minervini', 'weinstein')),
+    policy_version TEXT NOT NULL,
+    boundary_date TEXT NOT NULL,
+    previous_result TEXT NOT NULL CHECK (
+        previous_result IN ('PASS', 'FAIL', 'UNKNOWN', 'TRANSITION')
+    ),
+    ever_passed INTEGER NOT NULL DEFAULT 0 CHECK (ever_passed IN (0, 1)),
+    first_qualified_on TEXT,
+    streak_started_on TEXT,
+    consecutive_sessions INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (symbol, method, policy_version)
+);
+CREATE TABLE IF NOT EXISTS weinstein_stage_baseline (
+    instrument_type TEXT NOT NULL CHECK (instrument_type IN ('stock', 'index')),
+    symbol TEXT NOT NULL,
+    boundary_effective_date TEXT NOT NULL,
+    previous_stage TEXT NOT NULL CHECK (
+        previous_stage IN (
+            'STAGE_1', 'STAGE_2', 'STAGE_3', 'STAGE_4', 'TRANSITION', 'UNKNOWN'
+        )
+    ),
+    last_directional_stage TEXT NOT NULL DEFAULT '' CHECK (
+        last_directional_stage IN ('', 'STAGE_2', 'STAGE_4')
+    ),
+    stage_started_on TEXT NOT NULL DEFAULT '',
+    duration_weeks INTEGER NOT NULL DEFAULT 0,
+    policy_version TEXT NOT NULL,
+    PRIMARY KEY (instrument_type, symbol, policy_version)
+);
 CREATE TABLE IF NOT EXISTS index_weinstein_weekly_fact (
     effective_date TEXT NOT NULL,
     index_symbol TEXT NOT NULL,
@@ -259,6 +290,22 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_stock_method_transition_no_delete
 BEFORE DELETE ON stock_method_transition BEGIN
     SELECT RAISE(ABORT, 'stock_method_transition is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_stock_method_lifecycle_baseline_no_update
+BEFORE UPDATE ON stock_method_lifecycle_baseline BEGIN
+    SELECT RAISE(ABORT, 'stock_method_lifecycle_baseline is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_stock_method_lifecycle_baseline_no_delete
+BEFORE DELETE ON stock_method_lifecycle_baseline BEGIN
+    SELECT RAISE(ABORT, 'stock_method_lifecycle_baseline is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_weinstein_stage_baseline_no_update
+BEFORE UPDATE ON weinstein_stage_baseline BEGIN
+    SELECT RAISE(ABORT, 'weinstein_stage_baseline is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_weinstein_stage_baseline_no_delete
+BEFORE DELETE ON weinstein_stage_baseline BEGIN
+    SELECT RAISE(ABORT, 'weinstein_stage_baseline is immutable');
 END;
 CREATE TRIGGER IF NOT EXISTS trg_index_weinstein_weekly_fact_no_update
 BEFORE UPDATE ON index_weinstein_weekly_fact BEGIN
@@ -1585,30 +1632,72 @@ class WatchlistRepository:
             )
             WITH ordered AS (
                 SELECT f.*,
-                       LAG(result) OVER (
-                           PARTITION BY symbol, method, policy_version ORDER BY as_of_date
-                       ) AS previous_result,
-                       SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) OVER (
-                           PARTITION BY symbol, method, policy_version
+                       ROW_NUMBER() OVER (
+                           PARTITION BY f.symbol, f.method, f.policy_version
+                           ORDER BY f.as_of_date
+                       ) AS fact_number,
+                       LAG(f.result) OVER (
+                           PARTITION BY f.symbol, f.method, f.policy_version
+                           ORDER BY f.as_of_date
+                       ) AS stored_previous_result,
+                       SUM(CASE WHEN f.result = 'PASS' THEN 1 ELSE 0 END) OVER (
+                           PARTITION BY f.symbol, f.method, f.policy_version
                            ORDER BY as_of_date ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-                       ) AS earlier_passes,
-                       SUM(CASE WHEN result <> 'PASS' THEN 1 ELSE 0 END) OVER (
-                           PARTITION BY symbol, method, policy_version ORDER BY as_of_date
+                       ) AS retained_earlier_passes,
+                       SUM(CASE WHEN f.result <> 'PASS' THEN 1 ELSE 0 END) OVER (
+                           PARTITION BY f.symbol, f.method, f.policy_version ORDER BY as_of_date
                        ) AS pass_group,
-                       MIN(CASE WHEN result = 'PASS' THEN as_of_date END) OVER (
-                           PARTITION BY symbol, method, policy_version
-                       ) AS first_qualified_on
+                       MIN(CASE WHEN f.result = 'PASS' THEN f.as_of_date END) OVER (
+                           PARTITION BY f.symbol, f.method, f.policy_version
+                       ) AS retained_first_qualified_on,
+                       b.previous_result AS baseline_previous_result,
+                       COALESCE(b.ever_passed, 0) AS baseline_ever_passed,
+                       b.first_qualified_on AS baseline_first_qualified_on,
+                       b.streak_started_on AS baseline_streak_started_on,
+                       COALESCE(b.consecutive_sessions, 0) AS baseline_consecutive_sessions
                 FROM stock_method_daily_fact AS f
-            ), grouped AS (
+                LEFT JOIN stock_method_lifecycle_baseline AS b
+                  ON b.symbol=f.symbol AND b.method=f.method
+                 AND b.policy_version=f.policy_version
+            ), contextual AS (
                 SELECT ordered.*,
+                       CASE
+                           WHEN fact_number = 1 THEN baseline_previous_result
+                           ELSE stored_previous_result
+                       END AS previous_result,
+                       baseline_ever_passed
+                           + COALESCE(retained_earlier_passes, 0) AS earlier_passes,
+                       COALESCE(
+                           baseline_first_qualified_on,
+                           retained_first_qualified_on
+                       ) AS first_qualified_on
+                FROM ordered
+            ), grouped AS (
+                SELECT contextual.*,
                        MIN(CASE WHEN result = 'PASS' THEN as_of_date END) OVER (
                            PARTITION BY symbol, method, policy_version, pass_group
-                       ) AS streak_started_on,
+                       ) AS retained_streak_started_on,
                        COUNT(CASE WHEN result = 'PASS' THEN 1 END) OVER (
                            PARTITION BY symbol, method, policy_version, pass_group
                            ORDER BY as_of_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                       ) AS consecutive_sessions
-                FROM ordered
+                       ) AS retained_consecutive_sessions
+                FROM contextual
+            ), derived AS (
+                SELECT grouped.*,
+                       CASE
+                           WHEN result = 'PASS' AND pass_group = 0
+                                AND baseline_previous_result = 'PASS'
+                           THEN baseline_streak_started_on
+                           ELSE retained_streak_started_on
+                       END AS streak_started_on,
+                       CASE
+                           WHEN result = 'PASS' AND pass_group = 0
+                                AND baseline_previous_result = 'PASS'
+                           THEN baseline_consecutive_sessions
+                                + retained_consecutive_sessions
+                           ELSE retained_consecutive_sessions
+                       END AS consecutive_sessions
+                FROM grouped
             )
             SELECT as_of_date, symbol, method,
                    CASE
@@ -1629,7 +1718,7 @@ class WatchlistRepository:
                        WHEN result <> 'PASS' AND previous_result = 'PASS' THEN 'RULES_NO_LONGER_PASS'
                    END AS reason,
                    origin
-            FROM grouped
+            FROM derived
             WHERE result = 'PASS'
                OR (previous_result = 'PASS' AND result <> 'PASS')
             """
@@ -1676,6 +1765,24 @@ class WatchlistRepository:
         with self.connect() as connection:
             row = connection.execute("SELECT MAX(as_of_date) FROM stock_method_daily_fact").fetchone()
         return str(row[0] or "") if row else ""
+
+    def weinstein_stage_baselines(
+        self, instrument_type: str
+    ) -> dict[str, dict[str, Any]]:
+        """Return retained-history seeds used by the 320-day market window."""
+
+        if instrument_type not in {"stock", "index"}:
+            raise ValueError("instrument_type must be stock or index")
+        self.initialize()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM weinstein_stage_baseline
+                WHERE instrument_type = ?
+                """,
+                (instrument_type,),
+            ).fetchall()
+        return {str(row["symbol"]): dict(row) for row in rows}
 
     def has_fact_date(self, as_of_date: str) -> bool:
         """Return whether a requested snapshot date exists without scanning history."""

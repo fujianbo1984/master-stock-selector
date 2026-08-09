@@ -68,8 +68,8 @@
     </div>
     <div class="evidence-ledger-cell">
       {% if minervini %}
-      <dl class="ledger-metrics ledger-metrics-dense">{% for key, value in minervini.profile.metrics.items() %}{% if loop.index <= 4 %}<div><dt>{{ minervini_metric_labels.get(key, key) }}</dt><dd>{{ value if value is not none else '暂无' }}</dd></div>{% endif %}{% endfor %}</dl>
-      <details class="ledger-more"><summary>展开均线指标</summary><dl class="ledger-metrics ledger-metrics-dense">{% for key, value in minervini.profile.metrics.items() %}{% if loop.index > 4 %}<div><dt>{{ minervini_metric_labels.get(key, key) }}</dt><dd>{{ value if value is not none else '暂无' }}</dd></div>{% endif %}{% endfor %}</dl></details>
+      <dl class="ledger-metrics ledger-metrics-dense">{% for key, value in minervini.profile.get('metrics', {}).items() %}{% if loop.index <= 4 %}<div><dt>{{ minervini_metric_labels.get(key, key) }}</dt><dd>{{ value if value is not none else '暂无' }}</dd></div>{% endif %}{% endfor %}</dl>
+      <details class="ledger-more"><summary>展开均线指标</summary><dl class="ledger-metrics ledger-metrics-dense">{% for key, value in minervini.profile.get('metrics', {}).items() %}{% if loop.index > 4 %}<div><dt>{{ minervini_metric_labels.get(key, key) }}</dt><dd>{{ value if value is not none else '暂无' }}</dd></div>{% endif %}{% endfor %}</dl></details>
       {% else %}—{% endif %}
     </div>
   </div>
@@ -80,7 +80,7 @@
       {% if weinstein %}<p class="ledger-conclusion">{{ weinstein.result_label }} · {{ weinstein.stage_label or weinstein.profile.stage }}</p><p class="muted">规则版本：{{ weinstein.policy_version }}</p>{% else %}—{% endif %}
     </div>
     <div class="evidence-ledger-cell">
-      {% if minervini %}<div class="rule-checks ledger-rule-checks">{% for key, passed in minervini.profile.checks.items() %}<span class="tag {{ 'tag-pass' if passed else 'tag-risk' }}">{{ '✓' if passed else '×' }} {{ minervini_check_labels.get(key, key) }}</span>{% endfor %}</div><p class="muted">规则版本：{{ minervini.policy_version }}</p>{% else %}—{% endif %}
+      {% if minervini %}<div class="rule-checks ledger-rule-checks">{% for key, passed in minervini.profile.get('checks', {}).items() %}<span class="tag {{ 'tag-pass' if passed else 'tag-risk' }}">{{ '✓' if passed else '×' }} {{ minervini_check_labels.get(key, key) }}</span>{% endfor %}</div><p class="muted">规则版本：{{ minervini.policy_version }}</p>{% else %}—{% endif %}
     </div>
   </div>
 

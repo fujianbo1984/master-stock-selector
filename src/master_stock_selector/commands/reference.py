@@ -22,6 +22,8 @@ def handle(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             market_target=Path(args.market_target),
             watchlist_source=Path(args.watchlist_source),
             watchlist_target=Path(args.watchlist_target),
+            market_retention_days=args.market_retention_days,
+            watchlist_retention_days=args.watchlist_retention_days,
         )
     elif args.command == "database-validate":
         payload = validate_database_equivalence(
@@ -29,6 +31,8 @@ def handle(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             market_target=Path(args.market_target),
             watchlist_source=Path(args.watchlist_source),
             watchlist_target=Path(args.watchlist_target),
+            market_retention_days=args.market_retention_days,
+            watchlist_retention_days=args.watchlist_retention_days,
         )
     elif args.command == "reference-backfill":
         payload = collect_reference_data(

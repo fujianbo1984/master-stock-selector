@@ -769,6 +769,45 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     market_path = tmp_path / "market.sqlite3"
     _seed_watchlist(watchlist_path)
     _seed_filter_cases(watchlist_path)
+    # Personal observations outlive daily public-pool membership. Add a stock
+    # with historical facts that is absent from the selected date.
+    with sqlite3.connect(watchlist_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date, symbol, method, result, policy_version,
+                evidence_json, source_digest, origin
+            ) VALUES (
+                '2026-07-30', '000006.SZ', 'minervini', 'PASS', ?,
+                '{}', 'historical-digest', 'RECONSTRUCTED'
+            )
+            """,
+            (MINERVINI_POLICY_VERSION,),
+        )
+        connection.execute(
+            """
+            INSERT INTO stock_method_transition (
+                as_of_date, symbol, method, state, policy_version,
+                first_qualified_on, streak_started_on, consecutive_sessions,
+                reason, origin
+            ) VALUES (
+                '2026-07-30', '000006.SZ', 'minervini', 'ENTERED', ?,
+                '2026-07-30', '2026-07-30', 1, '', 'RECONSTRUCTED'
+            )
+            """,
+            (MINERVINI_POLICY_VERSION,),
+        )
+        connection.execute(
+            """
+            INSERT INTO security_identity_history (
+                valid_from, symbol, name, industry, list_date, is_st,
+                is_suspended, listing_status, trading_status, source_digest, origin
+            ) VALUES (
+                '2026-07-30', '000006.SZ', '历史观察股', '测试行业', '2020-01-01',
+                0, 0, 'L', 'trading', 'historical-identity', 'RECONSTRUCTED'
+            )
+            """
+        )
     _seed_market_context(market_path)
     app = create_app(
         market_database=market_path,
@@ -781,11 +820,14 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     app.state.user_repository.save_review(
         user.user_id, "000001.SZ", "FOCUS", "保留既有备注"
     )
-    app.state.user_repository.save_review(user.user_id, "000003.SZ", "FOCUS", "")
+    app.state.user_repository.save_review(user.user_id, "000006.SZ", "FOCUS", "")
 
     workspace = client.get("/a/observations?date=2026-07-31&state=FOCUS")
     detail = client.get(
         "/a/stocks/000001.SZ?date=2026-07-31&manual=FOCUS&min_cap=0&section=personal-observations"
+    )
+    historical_detail = client.get(
+        "/a/stocks/000006.SZ?date=2026-07-31&manual=FOCUS&min_cap=0&section=personal-observations"
     )
     chart = client.get(
         "/a/stocks/000001.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0&section=personal-observations"
@@ -793,21 +835,29 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
 
     assert workspace.status_code == 200
     assert "section=personal-observations" in workspace.text
+    assert "当前日期不在公开观察池，个人记录仍保留" in workspace.text
     assert detail.status_code == 200
     assert "我的观察 · 1 / 2" in detail.text
-    assert "小盘示例 →" in detail.text
-    assert "/a/stocks/000003.SZ?date=2026-07-31" in detail.text
+    assert "历史观察股 →" in detail.text
+    assert "/a/stocks/000006.SZ?date=2026-07-31" in detail.text
+    assert historical_detail.status_code == 200
+    assert "我的观察 · 2 / 2" in historical_detail.text
+    assert "← ST未来名称" in historical_detail.text
     assert chart.status_code == 200
     assert "我的观察 <b>1 / 2</b>" in chart.text
+    assert (
+        'href="/a/observations?state=FOCUS&amp;date=2026-07-31"'
+        in chart.text
+    )
     assert "今日观察名单" in chart.text
     assert "Minervini：符合" in chart.text
     assert "Weinstein：符合" in chart.text
-    assert "/a/stocks/000003.SZ/chart?date=2026-07-31" in chart.text
+    assert "/a/stocks/000006.SZ/chart?date=2026-07-31" in chart.text
     assert "data-chart-next" in chart.text
     assert "data-chart-next href=" in chart.text
     assert "/chart?date=2026-07-31&amp;" in chart.text
-    assert 'aria-label="下一只：小盘示例"' in chart.text
-    assert ">下一只：小盘示例 →</a>" not in chart.text
+    assert 'aria-label="下一只：历史观察股"' in chart.text
+    assert ">下一只：历史观察股 →</a>" not in chart.text
     next_href = chart.text.split('data-chart-next href="', 1)[1].split('"', 1)[0]
     assert "#stock-chart" not in next_href
     assert "数据截至 2026-07-31 · 收盘后复盘" not in chart.text
@@ -820,15 +870,15 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert ">保存</button>" not in chart.text
 
     next_chart = client.get(
-        "/a/stocks/000003.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0"
+        "/a/stocks/000006.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0"
         "&section=personal-observations"
     )
     assert next_chart.status_code == 200
     assert "data-chart-previous" in next_chart.text
-    assert "平安银行" in next_chart.text
+    assert "/a/stocks/000001.SZ/chart?date=2026-07-31" in next_chart.text
 
     legacy_fragment = client.get(
-        "/a/stocks/000003.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0"
+        "/a/stocks/000006.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0"
         "&section=personal-observations%23stock-chart"
     )
     assert legacy_fragment.status_code == 200
@@ -836,7 +886,7 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
 
     malformed_nav_total = client.get(
         "/a/stocks/000001.SZ/chart?date=2026-07-31&min_cap=0"
-        "&nav_position=1&nav_total=2%23stock-chart&nav_next=000003.SZ"
+        "&nav_position=1&nav_total=2%23stock-chart&nav_next=000006.SZ"
     )
     assert malformed_nav_total.status_code == 200
     assert "当前列表 <b>1 / 2</b>" in malformed_nav_total.text
@@ -850,18 +900,18 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
             "return_to": "/a/stocks/000001.SZ/chart?date=2026-07-31&manual=FOCUS&min_cap=0&section=personal-observations#stock-chart",
             "nav_position": "1",
             "nav_total": "2",
-            "nav_next": "000003.SZ",
+            "nav_next": "000006.SZ",
         },
         follow_redirects=False,
     )
 
     assert updated.status_code == 303
     assert updated.headers["location"].endswith("#stock-chart")
-    assert "nav_next=000003.SZ" in updated.headers["location"]
+    assert "nav_next=000006.SZ" in updated.headers["location"]
     revised_chart = client.get(updated.headers["location"])
     assert 'manual-archived">已归档' in revised_chart.text
     assert "data-chart-next" in revised_chart.text
-    assert "/a/stocks/000003.SZ/chart?date=2026-07-31" in revised_chart.text
+    assert "/a/stocks/000006.SZ/chart?date=2026-07-31" in revised_chart.text
     assert "保留既有备注" in client.get("/a/stocks/000001.SZ").text
 
 

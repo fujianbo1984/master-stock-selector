@@ -206,7 +206,10 @@ def aggregate_completed_weeks(
     return weeks
 
 
-def weinstein_stage_series(weeks: list[WeeklyBar]) -> list[WeinsteinStageFact]:
+def weinstein_stage_series(
+    weeks: list[WeeklyBar],
+    baseline: Mapping[str, Any] | None = None,
+) -> list[WeinsteinStageFact]:
     closes = [week.close for week in weeks]
     prefix = [0.0]
     for value in closes:
@@ -216,8 +219,18 @@ def weinstein_stage_series(weeks: list[WeeklyBar]) -> list[WeinsteinStageFact]:
     duration = 0
     previous_stage = ""
     last_directional_stage = ""
+    baseline_date = str((baseline or {}).get("boundary_effective_date") or "")
+    baseline_applied = not baseline_date
     facts: list[WeinsteinStageFact] = []
     for index, week in enumerate(weeks):
+        if not baseline_applied and week.effective_date > baseline_date:
+            previous_stage = str((baseline or {}).get("previous_stage") or "")
+            last_directional_stage = str(
+                (baseline or {}).get("last_directional_stage") or ""
+            )
+            stage_started_on = str((baseline or {}).get("stage_started_on") or "")
+            duration = int((baseline or {}).get("duration_weeks") or 0)
+            baseline_applied = True
         if index < 33:
             stage = STAGE_UNKNOWN
             evidence = {

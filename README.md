@@ -394,16 +394,22 @@ scripts/manage_users.sh migrate-legacy \
   --market-target data/market_v2.sqlite3 \
   --watchlist-source data/master_watchlist.sqlite3 \
   --watchlist-target data/master_watchlist_v2.sqlite3 \
+  --market-retention-days 320 \
+  --watchlist-retention-days 130 \
   --apply
 
 .venv/bin/masterstock database-validate \
   --market-source data/market.sqlite3 \
   --market-target data/market_v2.sqlite3 \
   --watchlist-source data/master_watchlist.sqlite3 \
-  --watchlist-target data/master_watchlist_v2.sqlite3
+  --watchlist-target data/master_watchlist_v2.sqlite3 \
+  --market-retention-days 320 \
+  --watchlist-retention-days 130
 ```
 
-只有校验返回 `EQUIVALENT` 才可在停止 Web 和日常任务后切换文件。旧库应先改名保留为回滚副本；新库通过 `PRAGMA quick_check`、`/healthz` 及主要页面检查后，再决定是否删除旧库。
+保留窗口按交易日计数：行情库保留最近 320 日，观察事实保留最近 130 日；名称、ST、行业有效期历史不裁剪。候选库会保存截断边界的方法生命周期和 Weinstein 周阶段基线，供后续增量运行延续“首次进入／重新进入／持续符合”及阶段持续时间。
+
+不设保留参数时，校验状态仍为 `EQUIVALENT`；使用保留窗口时，只有校验返回 `RETENTION_EQUIVALENT` 才可考虑切换。切换前必须停止 Web 和日常任务，旧库先改名保留为回滚副本；新库通过 `PRAGMA quick_check`、`/healthz` 及主要页面检查后，再决定是否删除旧库。
 
 ### ECS 部署
 

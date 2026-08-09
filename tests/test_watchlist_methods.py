@@ -68,6 +68,36 @@ def test_weinstein_uses_weekly_30_week_average_and_path_to_distinguish_stage_thr
     assert "ma30_slope_4w_pct" in series[-1].evidence
 
 
+def test_weinstein_retention_baseline_preserves_stage_start_and_duration():
+    start = date(2025, 1, 3)
+    weeks = [
+        WeeklyBar(
+            effective_date=(start + timedelta(days=index * 7)).isoformat(),
+            open=100 + index * 3,
+            high=100 + index * 3,
+            low=100 + index * 3,
+            close=100 + index * 3,
+            volume=1000,
+        )
+        for index in range(34)
+    ]
+
+    series = weinstein_stage_series(
+        weeks,
+        {
+            "boundary_effective_date": weeks[32].effective_date,
+            "previous_stage": "STAGE_2",
+            "last_directional_stage": "STAGE_2",
+            "stage_started_on": "2024-01-05",
+            "duration_weeks": 100,
+        },
+    )
+
+    assert series[-1].stage == STAGE_2
+    assert series[-1].stage_started_on == "2024-01-05"
+    assert series[-1].duration_weeks == 101
+
+
 def test_latest_incomplete_week_is_not_treated_as_completed():
     dates = ["2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30"]
 

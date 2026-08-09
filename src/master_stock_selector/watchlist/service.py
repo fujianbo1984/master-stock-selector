@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
 from .methods import (
@@ -79,6 +79,8 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
             "watchlist facts are append-only and already exist through "
             f"{existing_latest}; append a later date or reconstruct into a new database"
         )
+    stock_stage_baselines = repository.weinstein_stage_baselines("stock")
+    index_stage_baselines = repository.weinstein_stage_baselines("index")
 
     started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     source_summary = reader.source_summary(as_of_date)
@@ -126,6 +128,7 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
         week_ends=week_ends,
         rs_percentiles=rs_percentiles,
         as_of_date=as_of_date,
+        stage_baselines=stock_stage_baselines,
         origin=origin,
         counts=counts,
     )
@@ -133,6 +136,7 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
         reader=reader,
         as_of_date=as_of_date,
         week_ends=week_ends,
+        stage_baselines=index_stage_baselines,
         origin=origin,
     )
     index_minervini_facts = build_index_minervini_facts(
@@ -188,6 +192,7 @@ def _stock_fact_stream(
     week_ends: dict[tuple[int, int], str],
     rs_percentiles: dict[str, dict[str, float]],
     as_of_date: str,
+    stage_baselines: Mapping[str, Mapping[str, Any]],
     origin: str,
     counts: dict[str, Any],
 ) -> Iterator[dict[str, Any]]:
@@ -200,7 +205,7 @@ def _stock_fact_stream(
         bars = normalized_daily_bars(raw_rows)
         minervini = minervini_base_profiles(bars, minervini_set)
         weekly = aggregate_completed_weeks(bars, week_ends)
-        stage_series = weinstein_stage_series(weekly)
+        stage_series = weinstein_stage_series(weekly, stage_baselines.get(symbol))
         weinstein = weinstein_profiles_for_dates(stage_series, evaluation_dates)
         digest = _bars_digest(symbol, raw_rows)
         eligibility = _eligibility_evidence(member)
@@ -346,6 +351,7 @@ def _index_facts(
     reader: MarketDataReader,
     as_of_date: str,
     week_ends: dict[tuple[int, int], str],
+    stage_baselines: Mapping[str, Mapping[str, Any]],
     origin: str,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
@@ -353,7 +359,7 @@ def _index_facts(
         raw_rows = reader.index_bars(index_symbol, as_of_date)
         bars = normalized_daily_bars(raw_rows)
         weeks = aggregate_completed_weeks(bars, week_ends)
-        series = weinstein_stage_series(weeks)
+        series = weinstein_stage_series(weeks, stage_baselines.get(index_symbol))
         digest = _bars_digest(index_symbol, raw_rows)
         if not series:
             result.append(

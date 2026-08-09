@@ -193,6 +193,24 @@ def build_watchlist_router(
             )
         return result
 
+    def personal_navigation_rows(request: Request) -> list[dict[str, Any]]:
+        """Mirror the complete personal workspace, including stocks absent today."""
+        user = current_user(request)
+        if user is None:
+            return []
+        reviews = users.reviews_for_user(user.user_id)
+        names = repository.stock_names(
+            {str(review.get("symbol") or "") for review in reviews}
+        )
+        return [
+            {
+                "symbol": str(review.get("symbol") or ""),
+                "name": names.get(str(review.get("symbol") or "")) or "名称待补",
+                "manual": review,
+            }
+            for review in reviews
+        ]
+
     def require_csrf(request: Request, user: AuthenticatedUser, supplied: str) -> None:
         if not users.csrf_valid(user, supplied):
             raise HTTPException(status_code=403, detail="CSRF 校验失败")
@@ -729,6 +747,11 @@ def build_watchlist_router(
             rows_for_date=lambda value: rows_for_user(
                 request, value, include_liquidity=False
             ),
+            personal_rows=(
+                personal_navigation_rows(request)
+                if section.partition("#")[0] == "personal-observations"
+                else None
+            ),
         )
         payload["market_metrics"] = market_reader.safe_stock_market_metrics(
             query_date,
@@ -825,6 +848,11 @@ def build_watchlist_router(
             section=section,
             rows_for_date=lambda value: rows_for_user(
                 request, value, include_liquidity=False
+            ),
+            personal_rows=(
+                personal_navigation_rows(request)
+                if section.partition("#")[0] == "personal-observations"
+                else None
             ),
         )
         submitted_position = _navigation_count(nav_position)
@@ -1819,6 +1847,7 @@ def _stock_navigation(
     q: str,
     section: str,
     rows_for_date: Callable[[str], list[dict[str, Any]]] | None = None,
+    personal_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Keep chart navigation inside the selected daily-list context, not a global rank."""
 
@@ -1853,6 +1882,10 @@ def _stock_navigation(
         industry=industry,
         q=q,
     )
+    if section == "personal-observations":
+        list_url = "/a/observations?" + urlencode(
+            {"state": manual, "date": query_date}
+        )
     labels = {
         "new-candidates": "新进 / 重进",
         "continuing-candidates": "持续符合",
@@ -1872,6 +1905,38 @@ def _stock_navigation(
     }
     if section not in labels or not query_date:
         return empty
+    if section == "personal-observations" and personal_rows is not None:
+        selected = [
+            row
+            for row in personal_rows
+            if manual == "all"
+            or str(row.get("manual", {}).get("manual_state") or "") == manual
+        ]
+        symbols = [str(row.get("symbol") or "").upper() for row in selected]
+        try:
+            index = symbols.index(symbol.upper())
+        except ValueError:
+            return empty
+
+        def personal_item_at(position: int) -> dict[str, str] | None:
+            if position < 0 or position >= len(selected):
+                return None
+            row = selected[position]
+            return {
+                "symbol": str(row["symbol"]),
+                "name": str(row.get("name") or row["symbol"]),
+            }
+
+        return {
+            "query": query,
+            "list_url": list_url,
+            "section_label": labels[section],
+            "position": index + 1,
+            "total": len(selected),
+            "previous": personal_item_at(index - 1),
+            "next": personal_item_at(index + 1),
+        }
+
     rows = (
         rows_for_date(query_date)
         if rows_for_date is not None

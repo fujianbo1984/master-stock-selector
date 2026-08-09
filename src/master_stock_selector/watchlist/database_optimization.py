@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .collector import COLLECTION_SCHEMA_SQL
+from .methods import completed_week_end_map
 from .repository import WATCHLIST_SCHEMA_SQL
 
 
@@ -17,6 +18,8 @@ def optimize_databases(
     market_target: Path,
     watchlist_source: Path,
     watchlist_target: Path,
+    market_retention_days: int | None = None,
+    watchlist_retention_days: int | None = None,
 ) -> dict[str, Any]:
     """Copy and normalize both public databases into new deployment candidates."""
     for source in (market_source, watchlist_source):
@@ -26,12 +29,18 @@ def optimize_databases(
         if target.exists():
             raise FileExistsError(f"target database already exists: {target}")
         target.parent.mkdir(parents=True, exist_ok=True)
+    _validate_retention_days("market", market_retention_days, minimum=252)
+    _validate_retention_days("watchlist", watchlist_retention_days, minimum=30)
 
     _backup(market_source, market_target)
     try:
-        market_counts = _optimize_market(market_target)
+        market_counts = _optimize_market(market_target, market_retention_days)
         _backup(watchlist_source, watchlist_target)
-        watchlist_counts = _optimize_watchlist(watchlist_target)
+        watchlist_counts = _optimize_watchlist(
+            watchlist_target,
+            watchlist_retention_days,
+            str(market_counts.get("weinstein_baseline_date") or ""),
+        )
         _quick_check(market_target)
         _quick_check(watchlist_target)
     except BaseException:
@@ -64,15 +73,31 @@ def validate_database_equivalence(
     market_target: Path,
     watchlist_source: Path,
     watchlist_target: Path,
+    market_retention_days: int | None = None,
+    watchlist_retention_days: int | None = None,
 ) -> dict[str, Any]:
     """Prove that compact histories reproduce every legacy snapshot date."""
     for path in (market_source, market_target, watchlist_source, watchlist_target):
         if not path.is_file():
             raise FileNotFoundError(f"database does not exist: {path}")
         _quick_check(path)
+    _validate_retention_days("market", market_retention_days, minimum=252)
+    _validate_retention_days("watchlist", watchlist_retention_days, minimum=30)
     market_dates = _validate_market_history(market_source, market_target)
     identity_dates = _validate_watchlist_identity(watchlist_source, watchlist_target)
     membership_dates = _validate_watchlist_membership(watchlist_source, watchlist_target)
+    if market_retention_days is not None or watchlist_retention_days is not None:
+        return _validate_retained_candidate(
+            market_source=market_source,
+            market_target=market_target,
+            watchlist_source=watchlist_source,
+            watchlist_target=watchlist_target,
+            market_retention_days=market_retention_days,
+            watchlist_retention_days=watchlist_retention_days,
+            market_history_dates=market_dates,
+            identity_dates=identity_dates,
+            membership_dates=membership_dates,
+        )
     core_tables = (
         "stock_method_daily_fact",
         "stock_method_transition",
@@ -111,7 +136,145 @@ def validate_database_equivalence(
     }
 
 
+def _validate_retained_candidate(
+    *,
+    market_source: Path,
+    market_target: Path,
+    watchlist_source: Path,
+    watchlist_target: Path,
+    market_retention_days: int | None,
+    watchlist_retention_days: int | None,
+    market_history_dates: int,
+    identity_dates: int,
+    membership_dates: int,
+) -> dict[str, Any]:
+    market_stats: dict[str, Any] = {}
+    with sqlite3.connect(f"file:{market_target.resolve()}?mode=ro", uri=True) as target:
+        target_dates = [
+            str(row[0])
+            for row in target.execute(
+                """
+                SELECT DISTINCT trade_date FROM daily_bars
+                WHERE market='ashare' AND adj_type='qfq' ORDER BY trade_date
+                """
+            )
+        ]
+        if market_retention_days is not None and len(target_dates) != market_retention_days:
+            raise ValueError(
+                f"market retained date count mismatch: {len(target_dates)} "
+                f"!= {market_retention_days}"
+            )
+        market_stats = {
+            "retained_dates": len(target_dates),
+            "cutoff": target_dates[0] if target_dates else "",
+            "latest_date": target_dates[-1] if target_dates else "",
+        }
+    with sqlite3.connect(f"file:{market_source.resolve()}?mode=ro", uri=True) as source:
+        latest = str(
+            source.execute(
+                """
+                SELECT MAX(trade_date) FROM daily_bars
+                WHERE market='ashare' AND adj_type='qfq'
+                """
+            ).fetchone()[0]
+            or ""
+        )
+    if market_stats["latest_date"] != latest:
+        raise ValueError("market candidate does not retain the latest source date")
+
+    core_tables = {
+        "stock_method_daily_fact": "as_of_date",
+        "stock_method_transition": "as_of_date",
+        "industry_observation_daily_fact": "as_of_date",
+        "index_weinstein_weekly_fact": "effective_date",
+        "index_minervini_stage2_daily_fact": "as_of_date",
+    }
+    core_counts: dict[str, int] = {}
+    with sqlite3.connect(f"file:{watchlist_target.resolve()}?mode=ro", uri=True) as target:
+        target_dates = [
+            str(row[0])
+            for row in target.execute(
+                """
+                SELECT DISTINCT as_of_date FROM stock_method_daily_fact
+                ORDER BY as_of_date
+                """
+            )
+        ]
+        if (
+            watchlist_retention_days is not None
+            and len(target_dates) != watchlist_retention_days
+        ):
+            raise ValueError(
+                f"watchlist retained date count mismatch: {len(target_dates)} "
+                f"!= {watchlist_retention_days}"
+            )
+        cutoff = target_dates[0] if target_dates else ""
+        latest_date = target_dates[-1] if target_dates else ""
+        for table in core_tables:
+            core_counts[table] = int(
+                target.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            )
+        lifecycle_baselines = int(
+            target.execute(
+                "SELECT COUNT(*) FROM stock_method_lifecycle_baseline"
+            ).fetchone()[0]
+        )
+        stage_baselines = int(
+            target.execute(
+                "SELECT COUNT(*) FROM weinstein_stage_baseline"
+            ).fetchone()[0]
+        )
+    with sqlite3.connect(f"file:{watchlist_source.resolve()}?mode=ro", uri=True) as source:
+        source_latest = str(
+            source.execute(
+                "SELECT MAX(as_of_date) FROM stock_method_daily_fact"
+            ).fetchone()[0]
+            or ""
+        )
+        for table, date_column in core_tables.items():
+            expected = int(
+                source.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {date_column} >= ?",
+                    (cutoff,),
+                ).fetchone()[0]
+            )
+            if core_counts[table] != expected:
+                raise ValueError(
+                    f"retained row count mismatch for {table}: "
+                    f"{core_counts[table]} != {expected}"
+                )
+    if latest_date != source_latest:
+        raise ValueError("watchlist candidate does not retain the latest source date")
+    if watchlist_retention_days is not None and lifecycle_baselines <= 0:
+        raise ValueError("watchlist candidate is missing lifecycle baselines")
+    if market_retention_days is not None and stage_baselines <= 0:
+        raise ValueError("watchlist candidate is missing Weinstein stage baselines")
+    return {
+        "status": "RETENTION_EQUIVALENT",
+        "market_snapshot_dates": market_history_dates,
+        "watchlist_identity_dates": identity_dates,
+        "watchlist_membership_dates": membership_dates,
+        "market": market_stats,
+        "watchlist": {
+            "retained_dates": len(target_dates),
+            "cutoff": cutoff,
+            "latest_date": latest_date,
+            "lifecycle_baselines": lifecycle_baselines,
+            "weinstein_stage_baselines": stage_baselines,
+        },
+        "core_table_counts": core_counts,
+    }
+
+
 def _validate_market_history(source_path: Path, target_path: Path) -> int:
+    with sqlite3.connect(f"file:{source_path.resolve()}?mode=ro", uri=True) as source:
+        if "security_master_snapshots" not in _tables(source):
+            return _validate_identical_history_table(
+                source_path,
+                target_path,
+                "security_master_history",
+                "valid_from, symbol",
+            )
     with sqlite3.connect(f"file:{target_path.resolve()}?mode=ro", uri=True) as target:
         target.row_factory = sqlite3.Row
         changes = _rows_by_date(
@@ -144,6 +307,14 @@ def _validate_market_history(source_path: Path, target_path: Path) -> int:
 
 
 def _validate_watchlist_identity(source_path: Path, target_path: Path) -> int:
+    with sqlite3.connect(f"file:{source_path.resolve()}?mode=ro", uri=True) as source:
+        if "security_identity_snapshot" not in _tables(source):
+            return _validate_identical_history_table(
+                source_path,
+                target_path,
+                "security_identity_history",
+                "valid_from, symbol",
+            )
     with sqlite3.connect(f"file:{target_path.resolve()}?mode=ro", uri=True) as target:
         target.row_factory = sqlite3.Row
         changes = _rows_by_date(
@@ -176,6 +347,14 @@ def _validate_watchlist_identity(source_path: Path, target_path: Path) -> int:
 
 
 def _validate_watchlist_membership(source_path: Path, target_path: Path) -> int:
+    with sqlite3.connect(f"file:{source_path.resolve()}?mode=ro", uri=True) as source:
+        if "security_industry_membership_snapshot" not in _tables(source):
+            return _validate_identical_history_table(
+                source_path,
+                target_path,
+                "security_industry_membership_history",
+                "valid_from, symbol, industry_code",
+            )
     with sqlite3.connect(f"file:{target_path.resolve()}?mode=ro", uri=True) as target:
         target.row_factory = sqlite3.Row
         history = [
@@ -212,6 +391,29 @@ def _validate_watchlist_membership(source_path: Path, target_path: Path) -> int:
                 raise ValueError(f"watchlist industry history mismatch on {as_of_date}")
             checked += 1
     return checked
+
+
+def _validate_identical_history_table(
+    source_path: Path,
+    target_path: Path,
+    table: str,
+    order_by: str,
+) -> int:
+    with sqlite3.connect(f"file:{source_path.resolve()}?mode=ro", uri=True) as source:
+        source_rows = (
+            source.execute(f"SELECT * FROM {table} ORDER BY {order_by}").fetchall()
+            if table in _tables(source)
+            else []
+        )
+    with sqlite3.connect(f"file:{target_path.resolve()}?mode=ro", uri=True) as target:
+        target_rows = (
+            target.execute(f"SELECT * FROM {table} ORDER BY {order_by}").fetchall()
+            if table in _tables(target)
+            else []
+        )
+    if source_rows != target_rows:
+        raise ValueError(f"history table mismatch for {table}")
+    return len(source_rows)
 
 
 def _rows_by_date(rows: Iterable[sqlite3.Row], column: str) -> dict[str, list[sqlite3.Row]]:
@@ -271,7 +473,7 @@ def _backup(source: Path, target: Path) -> None:
             source_db.backup(target_db)
 
 
-def _optimize_market(path: Path) -> dict[str, int]:
+def _optimize_market(path: Path, retention_days: int | None) -> dict[str, Any]:
     with sqlite3.connect(path) as connection:
         connection.row_factory = sqlite3.Row
         connection.executescript(COLLECTION_SCHEMA_SQL)
@@ -290,9 +492,48 @@ def _optimize_market(path: Path) -> dict[str, int]:
         history_count = int(
             connection.execute("SELECT COUNT(*) FROM security_master_history").fetchone()[0]
         )
+        cutoff = ""
+        if retention_days is not None:
+            cutoff = _retention_cutoff(
+                connection,
+                table="daily_bars",
+                date_column="trade_date",
+                retention_days=retention_days,
+                where="market='ashare' AND adj_type='qfq'",
+            )
+            for table in (
+                "daily_bars",
+                "daily_metrics",
+                "daily_adjustment_factors",
+                "market_index_daily_bars",
+                "security_st_daily_fact",
+            ):
+                if table in tables:
+                    connection.execute(
+                        f"DELETE FROM {table} WHERE trade_date < ?", (cutoff,)
+                    )
+        trading_dates = [
+            str(row[0])
+            for row in connection.execute(
+                """
+                SELECT DISTINCT trade_date FROM daily_bars
+                WHERE market='ashare' AND adj_type='qfq'
+                ORDER BY trade_date
+                """
+            )
+        ]
+        week_ends = sorted(set(completed_week_end_map(trading_dates).values()))
+        weinstein_baseline_date = week_ends[32] if len(week_ends) > 33 else ""
+        retained_dates = len(trading_dates)
         connection.commit()
         connection.execute("VACUUM")
-    return {"security_history_count": history_count}
+    return {
+        "security_history_count": history_count,
+        "retention_days": retention_days,
+        "retention_cutoff": cutoff,
+        "retained_dates": retained_dates,
+        "weinstein_baseline_date": weinstein_baseline_date,
+    }
 
 
 def _migrate_market_history(
@@ -354,7 +595,11 @@ def _insert_market_history(
     )
 
 
-def _optimize_watchlist(path: Path) -> dict[str, int]:
+def _optimize_watchlist(
+    path: Path,
+    retention_days: int | None,
+    weinstein_baseline_date: str,
+) -> dict[str, Any]:
     with sqlite3.connect(path) as connection:
         connection.row_factory = sqlite3.Row
         connection.executescript(WATCHLIST_SCHEMA_SQL)
@@ -396,7 +641,7 @@ def _optimize_watchlist(path: Path) -> dict[str, int]:
         ):
             if table in tables:
                 connection.execute(f"DROP TABLE {table}")
-        counts = {
+        counts: dict[str, Any] = {
             "identity_history_count": int(connection.execute(
                 "SELECT COUNT(*) FROM security_identity_history"
             ).fetchone()[0]),
@@ -407,6 +652,53 @@ def _optimize_watchlist(path: Path) -> dict[str, int]:
                 "SELECT COUNT(*) FROM security_industry_membership_history"
             ).fetchone()[0]),
         }
+        cutoff = ""
+        if retention_days is not None:
+            cutoff = _retention_cutoff(
+                connection,
+                table="stock_method_daily_fact",
+                date_column="as_of_date",
+                retention_days=retention_days,
+            )
+            _populate_lifecycle_baselines(connection, cutoff)
+            if weinstein_baseline_date:
+                _populate_weinstein_stage_baselines(
+                    connection, weinstein_baseline_date
+                )
+            _drop_retention_triggers(connection)
+            for table, column in (
+                ("stock_method_daily_fact", "as_of_date"),
+                ("stock_method_transition", "as_of_date"),
+                ("industry_observation_daily_fact", "as_of_date"),
+                ("index_weinstein_weekly_fact", "effective_date"),
+                ("index_minervini_stage2_daily_fact", "as_of_date"),
+            ):
+                if table in tables:
+                    connection.execute(
+                        f"DELETE FROM {table} WHERE {column} < ?", (cutoff,)
+                    )
+            connection.executescript(WATCHLIST_SCHEMA_SQL)
+        counts.update(
+            {
+                "retention_days": retention_days,
+                "retention_cutoff": cutoff,
+                "retained_dates": int(
+                    connection.execute(
+                        "SELECT COUNT(DISTINCT as_of_date) FROM stock_method_daily_fact"
+                    ).fetchone()[0]
+                ),
+                "lifecycle_baseline_count": int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM stock_method_lifecycle_baseline"
+                    ).fetchone()[0]
+                ),
+                "weinstein_baseline_count": int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM weinstein_stage_baseline"
+                    ).fetchone()[0]
+                ),
+            }
+        )
         connection.commit()
         connection.execute("VACUUM")
     return counts
@@ -461,6 +753,167 @@ def _insert_identity_history(
         """,
         rows,
     )
+
+
+def _validate_retention_days(
+    label: str, value: int | None, *, minimum: int
+) -> None:
+    if value is not None and value < minimum:
+        raise ValueError(f"{label} retention must be at least {minimum} trading days")
+
+
+def _retention_cutoff(
+    connection: sqlite3.Connection,
+    *,
+    table: str,
+    date_column: str,
+    retention_days: int,
+    where: str = "",
+) -> str:
+    where_sql = f"WHERE {where}" if where else ""
+    row = connection.execute(
+        f"""
+        SELECT MIN(retained_date) FROM (
+            SELECT DISTINCT {date_column} AS retained_date
+            FROM {table} {where_sql}
+            ORDER BY retained_date DESC LIMIT ?
+        )
+        """,
+        (retention_days,),
+    ).fetchone()
+    cutoff = str(row[0] or "") if row else ""
+    if not cutoff:
+        raise ValueError(f"cannot determine retention cutoff for {table}")
+    return cutoff
+
+
+def _populate_lifecycle_baselines(
+    connection: sqlite3.Connection, cutoff: str
+) -> None:
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO stock_method_lifecycle_baseline (
+            symbol, method, policy_version, boundary_date, previous_result,
+            ever_passed, first_qualified_on, streak_started_on,
+            consecutive_sessions
+        )
+        WITH boundary_facts AS (
+            SELECT f.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY symbol, method, policy_version
+                       ORDER BY as_of_date DESC
+                   ) AS row_number
+            FROM stock_method_daily_fact AS f
+            WHERE as_of_date < ?
+        ), latest_transitions AS (
+            SELECT t.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY symbol, method, policy_version
+                       ORDER BY as_of_date DESC
+                   ) AS row_number
+            FROM stock_method_transition AS t
+            WHERE as_of_date < ?
+        )
+        SELECT f.symbol, f.method, f.policy_version, f.as_of_date, f.result,
+               CASE WHEN t.symbol IS NULL THEN 0 ELSE 1 END,
+               t.first_qualified_on,
+               CASE WHEN f.result='PASS' THEN t.streak_started_on END,
+               CASE WHEN f.result='PASS' THEN COALESCE(t.consecutive_sessions, 0)
+                    ELSE 0 END
+        FROM boundary_facts AS f
+        LEFT JOIN latest_transitions AS t
+          ON t.symbol=f.symbol AND t.method=f.method
+         AND t.policy_version=f.policy_version AND t.row_number=1
+        WHERE f.row_number=1
+        """,
+        (cutoff, cutoff),
+    )
+
+
+def _populate_weinstein_stage_baselines(
+    connection: sqlite3.Connection, boundary_date: str
+) -> None:
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO weinstein_stage_baseline (
+            instrument_type, symbol, boundary_effective_date, previous_stage,
+            last_directional_stage, stage_started_on, duration_weeks,
+            policy_version
+        )
+        WITH ranked AS (
+            SELECT f.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY symbol, policy_version ORDER BY as_of_date DESC
+                   ) AS row_number
+            FROM stock_method_daily_fact AS f
+            WHERE method='weinstein' AND as_of_date <= ?
+        ), decoded AS (
+            SELECT *,
+                   COALESCE(NULLIF(json_extract(
+                       evidence_json, '$.profile.effective_week_end'
+                   ), ''), as_of_date) AS effective_week_end,
+                   COALESCE(json_extract(
+                       evidence_json, '$.profile.stage'
+                   ), 'UNKNOWN') AS stage,
+                   COALESCE(json_extract(
+                       evidence_json, '$.profile.stage_started_on'
+                   ), '') AS stage_started_on,
+                   COALESCE(json_extract(
+                       evidence_json, '$.profile.duration_weeks'
+                   ), 0) AS duration_weeks,
+                   COALESCE(json_extract(
+                       evidence_json, '$.profile.metrics.prior_directional_stage'
+                   ), '') AS prior_directional_stage
+            FROM ranked WHERE row_number=1
+        )
+        SELECT 'stock', symbol, effective_week_end, stage,
+               CASE WHEN stage IN ('STAGE_2','STAGE_4') THEN stage
+                    WHEN prior_directional_stage IN ('STAGE_2','STAGE_4')
+                    THEN prior_directional_stage ELSE '' END,
+               stage_started_on, duration_weeks, policy_version
+        FROM decoded
+        WHERE stage_started_on <> ''
+        """,
+        (boundary_date,),
+    )
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO weinstein_stage_baseline (
+            instrument_type, symbol, boundary_effective_date, previous_stage,
+            last_directional_stage, stage_started_on, duration_weeks,
+            policy_version
+        )
+        WITH ranked AS (
+            SELECT f.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY index_symbol, policy_version
+                       ORDER BY effective_date DESC
+                   ) AS row_number
+            FROM index_weinstein_weekly_fact AS f
+            WHERE effective_date <= ?
+        )
+        SELECT 'index', index_symbol, effective_date, stage,
+               CASE WHEN stage IN ('STAGE_2','STAGE_4') THEN stage
+                    WHEN json_extract(evidence_json, '$.prior_directional_stage')
+                         IN ('STAGE_2','STAGE_4')
+                    THEN json_extract(evidence_json, '$.prior_directional_stage')
+                    ELSE '' END,
+               stage_started_on, duration_weeks, policy_version
+        FROM ranked WHERE row_number=1
+        """,
+        (boundary_date,),
+    )
+
+
+def _drop_retention_triggers(connection: sqlite3.Connection) -> None:
+    for trigger in (
+        "trg_stock_method_daily_fact_no_delete",
+        "trg_stock_method_transition_no_delete",
+        "trg_index_weinstein_weekly_fact_no_delete",
+        "trg_index_minervini_stage2_daily_fact_no_delete",
+        "trg_industry_observation_daily_fact_no_delete",
+    ):
+        connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
 
 
 def _quick_check(path: Path) -> None:
