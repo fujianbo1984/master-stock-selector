@@ -286,6 +286,7 @@ def build_watchlist_router(
     def daily_watchlist(
         request: Request,
         date: str | None = None,
+        view: str | None = None,
         method: str = "all",
         state: str = "all",
         manual: str = "all",
@@ -300,34 +301,92 @@ def build_watchlist_router(
             if date:
                 query["date"] = date
             return RedirectResponse(f"/a/observations?{urlencode(query)}", status_code=307)
+        view_mode, method_mode, state_mode = _normalize_daily_query(
+            view=view,
+            method=method,
+            state=state,
+        )
         market_cap_floor = _market_cap_floor(min_cap)
         query_date = _selected_date(repository, date, market_reader)
         # 首页仍取总市值以执行默认的小市值过滤，但不加载流通市值和
         # 20 日成交额中位数，减少首次打开观察池的数据库工作量。
         rows = rows_for_user(request, query_date, include_liquidity=False)
-        filtered = _filter_rows(
+        base_rows = _base_filter_rows(
             rows,
-            method=method,
-            state=state,
             manual="all",
             min_cap=market_cap_floor,
             industry=industry,
             q=q,
         )
-        index_rows, industry_rows = cached_daily_auxiliary(query_date)
-        new_all = [row for row in filtered if row["has_new_state"]]
-        exit_all = [row for row in filtered if row["has_exit_state"]]
-        continuing_all = [
-            row for row in filtered
-            if row["has_pass"] and not row["has_new_state"] and not row["has_exit_state"]
-        ]
-        default_limit = 40
-        show_full_groups = state != "all" or bool(q.strip())
-        new_rows = new_all if show_full_groups else new_all[:default_limit]
-        continuing_rows = (
-            continuing_all if show_full_groups else continuing_all[:default_limit]
+        current_counts = {
+            "all": len(_current_rows(base_rows, "all")),
+            "weinstein": len(_current_rows(base_rows, "weinstein")),
+            "minervini": len(_current_rows(base_rows, "minervini")),
+            "both": len(_current_rows(base_rows, "both")),
+        }
+        method_ready = method_mode in METHOD_LABELS
+        change_counts = {
+            value: len(_change_rows(base_rows, method_mode, value))
+            if method_ready
+            else 0
+            for value in (
+                "NEW",
+                "ENTERED",
+                "REENTERED",
+                "CONTINUING",
+                "EXIT",
+                "EXITED",
+                "DATA_GAP",
+            )
+        }
+        filtered = (
+            _current_rows(base_rows, method_mode)
+            if view_mode == "current"
+            else _change_rows(base_rows, method_mode, state_mode)
+            if method_ready
+            else []
         )
-        exit_rows = exit_all if show_full_groups else exit_all[:default_limit]
+        filtered = _prepare_daily_rows(
+            _sort_daily_rows(filtered, view=view_mode, method=method_mode),
+            method=method_mode,
+        )
+        index_rows, _ = cached_daily_auxiliary(query_date)
+        date_fallback = date if date and date != query_date else ""
+        industry_name = next(
+            (
+                str(row.get("industry") or "")
+                for row in rows
+                if str(row.get("industry_code") or "") == industry
+            ),
+            "",
+        )
+
+        def daily_url(
+            *,
+            target_view: str,
+            target_method: str,
+            target_state: str = "",
+            target_industry: str | None = None,
+        ) -> str:
+            return "/a/daily?" + _daily_query_string(
+                query_date=query_date,
+                view=target_view,
+                method=target_method,
+                state=target_state,
+                min_cap=market_cap_floor,
+                industry=industry if target_industry is None else target_industry,
+                q=q,
+            )
+
+        canonical_query = _daily_query_string(
+            query_date=query_date,
+            view=view_mode,
+            method=method_mode,
+            state=state_mode,
+            min_cap=market_cap_floor,
+            industry=industry,
+            q=q,
+        )
         return render(
             request,
             "ashare/watchlist.html",
@@ -337,33 +396,26 @@ def build_watchlist_router(
                 "latest_date": repository.latest_fact_date(),
                 "available_dates": repository.available_dates(30),
                 "indices": index_rows,
-                "industry_rows": industry_rows,
                 "rows": filtered,
-                "new_rows": new_rows,
-                "continuing_rows": continuing_rows,
-                "exit_rows": exit_rows,
-                "section_totals": {
-                    "new": len(new_all),
-                    "continuing": len(continuing_all),
-                    "exited": len(exit_all),
-                },
+                "date_fallback": date_fallback,
+                "industry_name": industry_name,
+                "method_ready": method_ready,
                 "filters": {
-                    "method": method,
-                    "state": state,
+                    "view": view_mode,
+                    "method": method_mode,
+                    "state": state_mode,
                     "manual": "all",
                     "min_cap": market_cap_floor,
                     "industry": industry,
                     "q": q,
+                    "query": canonical_query,
                 },
                 "summary": {
-                    "total": sum(1 for row in filtered if row["has_pass"]),
-                    "related": len(filtered),
-                    "new": len(new_all),
-                    "continuing": len(continuing_all),
-                    "exited": len(exit_all),
-                    "both": sum(1 for row in filtered if row["both_pass"]),
+                    "current": current_counts,
+                    "changes": change_counts,
+                    "result_count": len(filtered),
                     "reconstructed": sum(
-                        1 for row in filtered if row.get("origin") == "RECONSTRUCTED"
+                        1 for row in base_rows if row.get("origin") == "RECONSTRUCTED"
                     ),
                     "excluded_st": sum(
                         1 for row in rows if row["has_pass"] and row.get("is_st")
@@ -381,6 +433,47 @@ def build_watchlist_router(
                         if row["has_pass"]
                         and not row.get("is_st")
                         and row.get("total_market_cap_yi") is None
+                    ),
+                },
+                "urls": {
+                    "current_view": daily_url(
+                        target_view="current",
+                        target_method=(
+                            method_mode if method_mode in {"all", "both", *METHOD_LABELS} else "all"
+                        ),
+                    ),
+                    "changes_view": daily_url(
+                        target_view="changes",
+                        target_method=method_mode if method_ready else "all",
+                        target_state=state_mode or "NEW",
+                    ),
+                    "current_methods": {
+                        value: daily_url(target_view="current", target_method=value)
+                        for value in ("all", "weinstein", "minervini", "both")
+                    },
+                    "change_methods": {
+                        value: daily_url(
+                            target_view="changes",
+                            target_method=value,
+                            target_state=state_mode or "NEW",
+                        )
+                        for value in ("weinstein", "minervini")
+                    },
+                    "change_states": {
+                        value: daily_url(
+                            target_view="changes",
+                            target_method=method_mode,
+                            target_state=value,
+                        )
+                        for value in change_counts
+                    }
+                    if method_ready
+                    else {},
+                    "clear_industry": daily_url(
+                        target_view=view_mode,
+                        target_method=method_mode,
+                        target_state=state_mode,
+                        target_industry="",
                     ),
                 },
             },
@@ -537,6 +630,7 @@ def build_watchlist_router(
         request: Request,
         symbol: str,
         date: str | None = None,
+        view: str | None = None,
         method: str = "all",
         state: str = "all",
         manual: str = "all",
@@ -624,6 +718,7 @@ def build_watchlist_router(
             market_reader,
             symbol=symbol,
             query_date=query_date,
+            view=view,
             method=method,
             state=state,
             manual=manual,
@@ -681,6 +776,7 @@ def build_watchlist_router(
         request: Request,
         symbol: str,
         date: str | None = None,
+        view: str | None = None,
         method: str = "all",
         state: str = "all",
         manual: str = "all",
@@ -719,6 +815,7 @@ def build_watchlist_router(
             market_reader,
             symbol=symbol,
             query_date=query_date,
+            view=view,
             method=method,
             state=state,
             manual=manual,
@@ -1088,6 +1185,74 @@ def _selected_date(
     return repository.latest_fact_date() or requested or _safe_market_date(market_reader)
 
 
+def _normalize_daily_query(
+    *, view: str | None, method: str, state: str
+) -> tuple[str, str, str]:
+    method_mode = method.lower().strip()
+    if method_mode not in {"all", "both", *METHOD_LABELS}:
+        method_mode = "all"
+
+    state_mode = state.upper().strip()
+    requested_view = str(view or "").lower().strip()
+    if requested_view not in {"current", "changes"}:
+        requested_view = (
+            "changes"
+            if state_mode
+            in {
+                "NEW",
+                "ENTERED",
+                "REENTERED",
+                "STABLE",
+                "CONTINUING",
+                "EXIT",
+                "EXITED",
+                "DATA_GAP",
+            }
+            else "current"
+        )
+    if requested_view == "current":
+        return "current", method_mode, ""
+
+    if state_mode == "STABLE":
+        state_mode = "CONTINUING"
+    if state_mode not in {
+        "NEW",
+        "ENTERED",
+        "REENTERED",
+        "CONTINUING",
+        "EXIT",
+        "EXITED",
+        "DATA_GAP",
+    }:
+        state_mode = "NEW"
+    return "changes", method_mode, state_mode
+
+
+def _daily_query_string(
+    *,
+    query_date: str,
+    view: str,
+    method: str,
+    state: str,
+    min_cap: int,
+    industry: str,
+    q: str,
+) -> str:
+    query: dict[str, str | int] = {
+        "date": query_date,
+        "view": view,
+        "method": method,
+        "min_cap": min_cap,
+    }
+    if view == "changes" and state:
+        query["state"] = state
+    if industry:
+        query["industry"] = industry
+    if q.strip():
+        query["q"] = q.strip()
+    return urlencode(query)
+
+
 def _safe_market_date(market_reader: MarketDataReader) -> str:
     return market_reader.safe_latest_market_date()
 
@@ -1452,11 +1617,9 @@ def _minervini_check_results(profile: dict[str, Any]) -> dict[str, bool]:
     return {key: key not in failed for key in MINERVINI_CHECKS}
 
 
-def _filter_rows(
+def _base_filter_rows(
     rows: list[dict[str, Any]],
     *,
-    method: str,
-    state: str,
     manual: str,
     min_cap: int,
     industry: str,
@@ -1470,6 +1633,134 @@ def _filter_rows(
         total_cap = row.get("total_market_cap_yi")
         if min_cap and (total_cap is None or float(total_cap) < min_cap):
             continue
+        manual_state = str(row.get("manual", {}).get("manual_state") or "UNREVIEWED")
+        if manual != "all" and manual_state != manual:
+            continue
+        if manual == "all" and manual_state == "DROPPED":
+            continue
+        if industry and str(row.get("industry_code") or "") != industry:
+            continue
+        if query and query not in " ".join(
+            [
+                str(row.get("symbol") or ""),
+                str(row.get("name") or ""),
+                str(row.get("industry") or ""),
+            ]
+        ).lower():
+            continue
+        result.append(row)
+    return result
+
+
+def _current_rows(rows: list[dict[str, Any]], method: str) -> list[dict[str, Any]]:
+    if method == "both":
+        return [row for row in rows if row["both_pass"]]
+    if method in METHOD_LABELS:
+        return [
+            row
+            for row in rows
+            if row.get("methods", {}).get(method, {}).get("result") == "PASS"
+        ]
+    return [row for row in rows if row["has_pass"]]
+
+
+def _change_rows(
+    rows: list[dict[str, Any]], method: str, state: str
+) -> list[dict[str, Any]]:
+    if method not in METHOD_LABELS:
+        return []
+
+    def matches(row: dict[str, Any]) -> bool:
+        method_state = str(row.get("methods", {}).get(method, {}).get("state") or "")
+        if state == "NEW":
+            return method_state in {"ENTERED", "REENTERED"}
+        if state == "EXIT":
+            return method_state in {"EXITED", "DATA_GAP"}
+        return method_state == state
+
+    return [row for row in rows if matches(row)]
+
+
+def _sort_daily_rows(
+    rows: list[dict[str, Any]], *, view: str, method: str
+) -> list[dict[str, Any]]:
+    if method not in METHOD_LABELS:
+        return sorted(rows, key=lambda row: str(row.get("symbol") or ""))
+    return sorted(
+        rows,
+        key=lambda row: (
+            0
+            if str(row.get("methods", {}).get(method, {}).get("state") or "")
+            in {"ENTERED", "REENTERED"}
+            else 1,
+            -int(
+                row.get("methods", {})
+                .get(method, {})
+                .get("consecutive_sessions")
+                or 0
+            ),
+            str(row.get("symbol") or ""),
+        ),
+    )
+
+
+def _prepare_daily_rows(
+    rows: list[dict[str, Any]], *, method: str
+) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        methods = dict(item.get("methods") or {})
+        if method in METHOD_LABELS:
+            method_items = [(method, methods.get(method, {}))]
+        else:
+            method_items = [
+                (key, value)
+                for key, value in methods.items()
+                if value.get("result") == "PASS"
+            ]
+        item["display_facts"] = [
+            {
+                "method_label": METHOD_LABELS.get(key, key),
+                "streak_started_on": str(value.get("streak_started_on") or ""),
+                "consecutive_sessions": int(value.get("consecutive_sessions") or 0),
+            }
+            for key, value in method_items
+        ]
+        item["display_start_sort"] = next(
+            (
+                str(value.get("streak_started_on") or "")
+                for _, value in method_items
+                if value.get("streak_started_on")
+            ),
+            "",
+        )
+        item["display_max_streak"] = max(
+            (int(value.get("consecutive_sessions") or 0) for _, value in method_items),
+            default=0,
+        )
+        prepared.append(item)
+    return prepared
+
+
+def _filter_rows(
+    rows: list[dict[str, Any]],
+    *,
+    method: str,
+    state: str,
+    manual: str,
+    min_cap: int,
+    industry: str,
+    q: str,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for row in _base_filter_rows(
+        rows,
+        manual=manual,
+        min_cap=min_cap,
+        industry=industry,
+        q=q,
+    ):
         methods = row["methods"]
         if method == "both" and not row["both_pass"]:
             continue
@@ -1488,17 +1779,6 @@ def _filter_rows(
         if state not in {"all", "PASSING", "NEW", "STABLE", "EXIT"} and not any(
             str(value.get("state") or "") == state for value in methods.values()
         ):
-            continue
-        manual_state = str(row.get("manual", {}).get("manual_state") or "UNREVIEWED")
-        if manual != "all" and manual_state != manual:
-            continue
-        if manual == "all" and manual_state == "DROPPED":
-            continue
-        if industry and str(row.get("industry_code") or "") != industry:
-            continue
-        if query and query not in " ".join(
-            [str(row.get("symbol") or ""), str(row.get("name") or ""), str(row.get("industry") or "")]
-        ).lower():
             continue
         result.append(row)
     return sorted(
@@ -1530,6 +1810,7 @@ def _stock_navigation(
     *,
     symbol: str,
     query_date: str,
+    view: str | None,
     method: str,
     state: str,
     manual: str,
@@ -1545,11 +1826,17 @@ def _stock_navigation(
     # clients have sent the trailing chart anchor as part of the query value.
     # Keep old/bookmarked links usable instead of losing the list context.
     section = section.partition("#")[0]
+    view_mode, method_mode, state_mode = _normalize_daily_query(
+        view=view,
+        method=method,
+        state=state,
+    )
     query = urlencode(
         {
             "date": query_date,
-            "method": method,
-            "state": state,
+            "view": view_mode,
+            "method": method_mode,
+            "state": state_mode,
             "manual": manual,
             "min_cap": min_cap,
             "industry": industry,
@@ -1557,15 +1844,26 @@ def _stock_navigation(
             "section": section,
         }
     )
+    list_url = "/a/daily?" + _daily_query_string(
+        query_date=query_date,
+        view=view_mode,
+        method=method_mode,
+        state=state_mode,
+        min_cap=min_cap,
+        industry=industry,
+        q=q,
+    )
     labels = {
         "new-candidates": "新进 / 重进",
         "continuing-candidates": "持续符合",
         "exit-candidates": "退出 / 中断",
+        "daily-results": "当前观察池" if view_mode == "current" else "方法状态变化",
         "focus-candidates": "我的重点观察",
         "personal-observations": "我的观察",
     }
     empty: dict[str, Any] = {
         "query": query,
+        "list_url": list_url,
         "section_label": labels.get(section, "当前列表"),
         "position": 0,
         "total": 0,
@@ -1581,33 +1879,54 @@ def _stock_navigation(
     )
     if rows_for_date is None:
         _attach_market_metrics(rows, market_reader, query_date, include_liquidity=False)
-    filtered = _filter_rows(
+    base_rows = _base_filter_rows(
         rows,
-        method=method,
-        state=state,
         manual=manual,
         min_cap=min_cap,
         industry=industry,
         q=q,
     )
-    if section == "new-candidates":
-        selected = filtered if state == "PASSING" else [row for row in filtered if row["has_new_state"]]
-    elif section == "continuing-candidates":
-        selected = [
-            row
-            for row in filtered
-            if row["has_pass"] and not row["has_new_state"] and not row["has_exit_state"]
-        ]
-    elif section == "exit-candidates":
-        selected = [row for row in filtered if row["has_exit_state"]]
-    elif section == "focus-candidates":
-        selected = [
-            row
-            for row in filtered
-            if str(row["manual"].get("manual_state") or "") == "FOCUS"
-        ]
+    if section == "daily-results":
+        selected = (
+            _current_rows(base_rows, method_mode)
+            if view_mode == "current"
+            else _change_rows(base_rows, method_mode, state_mode)
+        )
+        selected = _sort_daily_rows(selected, view=view_mode, method=method_mode)
     else:
+        filtered = _filter_rows(
+            base_rows,
+            method=method,
+            state=state,
+            manual="all",
+            min_cap=0,
+            industry="",
+            q="",
+        )
         selected = filtered
+    if section != "daily-results":
+        if section == "new-candidates":
+            selected = (
+                filtered
+                if state == "PASSING"
+                else [row for row in filtered if row["has_new_state"]]
+            )
+        elif section == "continuing-candidates":
+            selected = [
+                row
+                for row in filtered
+                if row["has_pass"]
+                and not row["has_new_state"]
+                and not row["has_exit_state"]
+            ]
+        elif section == "exit-candidates":
+            selected = [row for row in filtered if row["has_exit_state"]]
+        elif section == "focus-candidates":
+            selected = [
+                row
+                for row in filtered
+                if str(row["manual"].get("manual_state") or "") == "FOCUS"
+            ]
     symbols = [str(row.get("symbol") or "").upper() for row in selected]
     try:
         index = symbols.index(symbol.upper())
@@ -1622,6 +1941,7 @@ def _stock_navigation(
 
     return {
         "query": query,
+        "list_url": list_url,
         "section_label": labels[section],
         "position": index + 1,
         "total": len(selected),

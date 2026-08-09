@@ -30,7 +30,7 @@
       {% else %}{% set chart_actions = [('WATCH','恢复观察')] %}{% endif %}
       {% for value, label in chart_actions %}<button class="text-button" name="manual_state" value="{{ value }}" type="submit">{{ label }}</button>{% endfor %}
     </form>{% else %}<a class="button" href="/login?next=/a/stocks/{{ symbol }}/chart">登录后记录观察</a>{% endif %}
-    <a class="button button-secondary" href="{{ back_url }}">返回个股证据</a><a class="text-link" href="/a/daily?date={{ query_date }}">返回观察池 →</a>
+    <a class="button button-secondary" href="{{ back_url }}">返回个股证据</a><a class="text-link" href="{{ navigation.list_url }}">返回观察池 →</a>
   </div>
   </header>
   <div class="chart-toolbar" aria-label="图表设置">

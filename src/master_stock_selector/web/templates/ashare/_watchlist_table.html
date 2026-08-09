@@ -10,7 +10,7 @@
         <td data-sort="{{ row.symbol }}">
           <div class="stock-primary-link">
             {% if row.tradingview_url %}<a class="instrument-name-link" data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在外部行情网站打开 {{ row.name }} 价格图"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}
-            <span class="stock-secondary-links">{% if row.tonghuashun_url %}<a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.symbol }}">{{ row.symbol }}</a>{% else %}{{ row.symbol }}{% endif %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?date={{ query_date }}&amp;method={{ filters.method }}&amp;state={{ filters.state }}&amp;min_cap={{ filters.min_cap }}{% if filters.industry %}&amp;industry={{ filters.industry|urlencode }}{% endif %}{% if filters.q %}&amp;q={{ filters.q|urlencode }}{% endif %}&amp;section={{ navigation_section }}">详情</a></span>
+            <span class="stock-secondary-links">{% if row.tonghuashun_url %}<a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.symbol }}">{{ row.symbol }}</a>{% else %}{{ row.symbol }}{% endif %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?{{ filters.query }}&amp;section={{ navigation_section }}">详情</a></span>
           </div>
           {% if row.is_suspended %}<span class="tag tag-muted">停牌</span>{% endif %}
         </td>
@@ -30,15 +30,15 @@
           {% endfor %}
           </div>
         </td>
-        <td data-sort="{{ row.methods.values()|map(attribute='streak_started_on')|select|first or '' }}">
-          {% for method in row.methods.values() %}{% if method.result == 'PASS' %}<div>{{ method.method_label }}：{{ method.streak_started_on or '本日' }}</div>{% endif %}{% endfor %}
+        <td data-sort="{{ row.display_start_sort }}">
+          {% for fact in row.display_facts %}<div>{{ fact.method_label }}：{{ fact.streak_started_on or '—' }}</div>{% endfor %}
         </td>
-        <td data-sort="{{ row.max_streak }}"><strong>{{ row.max_streak }}</strong></td>
+        <td data-sort="{{ row.display_max_streak }}">{% for fact in row.display_facts %}<div>{{ fact.method_label }}：<strong>{{ fact.consecutive_sessions }}</strong></div>{% endfor %}</td>
         {% if current_user %}<td class="observation-quick-cell">
           {% if row.manual.manual_state == 'UNREVIEWED' %}
           <form method="post" action="/a/stocks/{{ row.symbol }}/review" class="inline-observation-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="manual_state" value="WATCH">
-            <input type="hidden" name="return_to" value="/a/daily?date={{ query_date }}&amp;method={{ filters.method }}&amp;state={{ filters.state }}&amp;min_cap={{ filters.min_cap }}{% if filters.industry %}&amp;industry={{ filters.industry|urlencode }}{% endif %}{% if filters.q %}&amp;q={{ filters.q|urlencode }}{% endif %}#{{ navigation_section }}">
+            <input type="hidden" name="return_to" value="/a/daily?{{ filters.query }}#{{ navigation_section }}">
             <button class="button button-secondary button-compact" type="submit">+加入观察</button>
           </form>
           {% else %}<span class="manual-state manual-{{ row.manual.manual_state|lower }}">{{ row.manual_label }}</span><a class="text-link" href="/a/observations?state={{ row.manual.manual_state }}">管理</a>{% endif %}

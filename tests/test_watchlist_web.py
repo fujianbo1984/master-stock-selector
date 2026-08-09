@@ -471,6 +471,176 @@ def _seed_filter_cases(path) -> None:
         )
 
 
+def _seed_method_scope_cases(path) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date, symbol, method, result, policy_version,
+                evidence_json, source_digest, origin
+            ) VALUES ('2026-07-31', ?, ?, ?, ?, '{}', 'scope-digest', 'RECONSTRUCTED')
+            """,
+            (
+                ("000004.SZ", "minervini", "PASS", MINERVINI_POLICY_VERSION),
+                ("000004.SZ", "weinstein", "TRANSITION", WEINSTEIN_POLICY_VERSION),
+                ("000005.SZ", "minervini", "PASS", MINERVINI_POLICY_VERSION),
+                ("000005.SZ", "weinstein", "PASS", WEINSTEIN_POLICY_VERSION),
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO stock_method_transition (
+                as_of_date, symbol, method, state, policy_version,
+                first_qualified_on, streak_started_on, consecutive_sessions,
+                reason, origin
+            ) VALUES (
+                '2026-07-31', ?, ?, ?, ?,
+                '2026-07-01', ?, ?, '', 'RECONSTRUCTED'
+            )
+            """,
+            (
+                (
+                    "000004.SZ",
+                    "minervini",
+                    "REENTERED",
+                    MINERVINI_POLICY_VERSION,
+                    "2026-07-31",
+                    1,
+                ),
+                (
+                    "000004.SZ",
+                    "weinstein",
+                    "EXITED",
+                    WEINSTEIN_POLICY_VERSION,
+                    "",
+                    0,
+                ),
+                (
+                    "000005.SZ",
+                    "minervini",
+                    "REENTERED",
+                    MINERVINI_POLICY_VERSION,
+                    "2026-07-31",
+                    1,
+                ),
+                (
+                    "000005.SZ",
+                    "weinstein",
+                    "CONTINUING",
+                    WEINSTEIN_POLICY_VERSION,
+                    "2026-07-01",
+                    23,
+                ),
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO security_identity_history (
+                valid_from, symbol, name, industry, list_date, is_st,
+                is_suspended, listing_status, trading_status, source_digest, origin
+            ) VALUES (
+                '2026-07-31', ?, ?, '测试行业', '2020-01-01', 0,
+                0, 'L', 'trading', 'scope-identity', 'RECONSTRUCTED'
+            )
+            """,
+            (
+                ("000004.SZ", "魏退米进"),
+                ("000005.SZ", "魏续米进"),
+            ),
+        )
+
+
+def test_daily_query_scopes_current_and_change_states_to_selected_method(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    _seed_method_scope_cases(watchlist_path)
+    client = TestClient(
+        create_app(
+            market_database=tmp_path / "market.sqlite3",
+            watchlist_database=watchlist_path,
+        )
+    )
+
+    weinstein_current = client.get(
+        "/a/daily?date=2026-07-31&view=current&method=weinstein&min_cap=0"
+    )
+    minervini_current = client.get(
+        "/a/daily?date=2026-07-31&view=current&method=minervini&min_cap=0"
+    )
+    weinstein_new = client.get(
+        "/a/daily?date=2026-07-31&view=changes&method=weinstein&state=NEW&min_cap=0"
+    )
+    minervini_new = client.get(
+        "/a/daily?date=2026-07-31&view=changes&method=minervini&state=NEW&min_cap=0"
+    )
+    weinstein_exit = client.get(
+        "/a/daily?date=2026-07-31&view=changes&method=weinstein&state=EXIT&min_cap=0"
+    )
+    weinstein_continuing = client.get(
+        "/a/daily?date=2026-07-31&view=changes&method=weinstein&state=CONTINUING&min_cap=0"
+    )
+
+    assert "魏续米进" in weinstein_current.text
+    assert "魏退米进" not in weinstein_current.text
+    assert "魏续米进" in minervini_current.text
+    assert "魏退米进" in minervini_current.text
+    assert "魏续米进" not in weinstein_new.text
+    assert "魏退米进" not in weinstein_new.text
+    assert "魏续米进" in minervini_new.text
+    assert "魏退米进" in minervini_new.text
+    assert "魏退米进" in weinstein_exit.text
+    assert "魏续米进" not in weinstein_exit.text
+    assert "魏续米进" in weinstein_continuing.text
+    assert "魏退米进" not in weinstein_continuing.text
+    assert "Weinstein：" in weinstein_continuing.text
+    assert "<strong>23</strong>" in weinstein_continuing.text
+
+
+def test_daily_query_preserves_filters_and_discloses_fallbacks(tmp_path):
+    client = _client(tmp_path)
+    query = (
+        "date=2026-07-31&view=changes&method=minervini&state=NEW"
+        "&min_cap=0&industry=851911.SI&q=平安"
+    )
+    page = client.get(
+        f"/a/daily?{query}"
+    )
+
+    assert page.status_code == 200
+    assert "当前行业：" in page.text
+    assert "股份制银行III" in page.text
+    assert (
+        "date=2026-07-31&amp;view=changes&amp;method=minervini&amp;min_cap=0"
+        "&amp;state=NEW&amp;q=%E5%B9%B3%E5%AE%89"
+    ) in page.text
+    assert (
+        "/a/stocks/000001.SZ?date=2026-07-31&amp;view=changes"
+        "&amp;method=minervini&amp;min_cap=0&amp;state=NEW"
+        "&amp;industry=851911.SI&amp;q=%E5%B9%B3%E5%AE%89&amp;section=daily-results"
+    ) in page.text
+
+    detail = client.get(f"/a/stocks/000001.SZ?{query}&section=daily-results")
+    chart = client.get(f"/a/stocks/000001.SZ/chart?{query}&section=daily-results")
+    canonical_return = (
+        "/a/daily?date=2026-07-31&amp;view=changes&amp;method=minervini"
+        "&amp;min_cap=0&amp;state=NEW&amp;industry=851911.SI"
+        "&amp;q=%E5%B9%B3%E5%AE%89"
+    )
+    assert f'href="{canonical_return}"' in detail.text
+    assert f'href="{canonical_return}"' in chart.text
+
+    fallback = client.get("/a/daily?date=2026-08-01&min_cap=0")
+    assert "请求日期 2026-08-01 没有观察事实" in fallback.text
+    assert "当前显示最新事实日期 2026-07-31" in fallback.text
+
+    legacy = client.get(
+        "/a/daily?date=2026-07-31&method=weinstein&state=STABLE&min_cap=0"
+    )
+    assert "方法状态变化" in legacy.text
+    assert "持续符合" in legacy.text
+    assert "state=CONTINUING" in legacy.text
+
+
 def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     client = _client(tmp_path)
 
@@ -481,26 +651,21 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     assert "Weinstein" in response.text
     assert "Minervini" in response.text
     assert "两法同时符合" in response.text
-    assert "行业聚集观察" in response.text
     assert "行业观察" in response.text
-    assert "股份制银行III" in response.text
-    assert 'role="tablist"' in response.text
-    assert 'aria-controls="new-candidates"' in response.text
-    assert 'id="continuing-candidates" role="tabpanel"' in response.text
-    assert 'id="continuing-candidates" role="tabpanel" aria-labelledby="tab-continuing-candidates" tabindex="0" hidden' in response.text
+    assert "当前观察池" in response.text
+    assert "方法状态变化" in response.text
+    assert 'id="daily-results"' in response.text
+    assert 'id="continuing-candidates"' not in response.text
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in response.text
     assert "https://stockpage.10jqka.com.cn/000001/" in response.text
     assert (
-        'href="/a/stocks/000001.SZ?date=2026-07-31&amp;method=all&amp;state=all'
-        '&amp;min_cap=0&amp;section=new-candidates"'
+        'href="/a/stocks/000001.SZ?date=2026-07-31&amp;view=current&amp;method=all'
+        '&amp;min_cap=0&amp;section=daily-results"'
     ) in response.text
-    assert 'href="/a/industries/851911.SI/chart?date=2026-07-31"' in response.text
-    assert response.text.count("kpi-link") >= 5
-    assert "state=PASSING" in response.text
-    assert "state=NEW" in response.text
-    assert "state=STABLE" in response.text
-    assert "state=EXIT" in response.text
-    assert "method=both&state=PASSING" in response.text
+    assert response.text.count("kpi-link") == 4
+    assert "view=current" in response.text
+    assert "view=changes" in response.text
+    assert '<select name="state">' not in response.text
     assert "manual=FOCUS" not in response.text
     assert "人工状态" not in response.text
     assert "+加入观察" in response.text
@@ -510,9 +675,6 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     assert "VCP" not in response.text
     assert "ETF" not in response.text
     assert "综合评分" not in response.text
-    assert response.text.index('id="new-candidates"') < response.text.index(
-        'id="industry-observation"'
-    )
     assert client.get("/").history[0].headers["location"] == "/a/daily"
     assert client.get("/a/dashboard").history[0].headers["location"] == "/a/daily"
     focus_redirect = client.get(
@@ -530,14 +692,14 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     review = client.get("/a/review")
     assert "个人数据 · 仅你可见" in review.text
     assert 'aria-label="当前个人工作区"' in review.text
-    for state in ("PASSING", "NEW", "STABLE", "EXIT"):
+    passing = client.get("/a/daily?date=2026-07-31&state=PASSING&min_cap=0")
+    assert "当前观察池" in passing.text
+    assert 'aria-current="page" href="/a/daily?date=2026-07-31&amp;view=current' in passing.text
+    for state in ("NEW", "STABLE", "EXIT"):
         filtered = client.get(f"/a/daily?date=2026-07-31&state={state}&min_cap=0")
         assert filtered.status_code == 200
-        assert f'value="{state}" selected' in filtered.text
-    passing = client.get("/a/daily?date=2026-07-31&state=PASSING&min_cap=0")
-    assert "当前符合" in passing.text
-    assert "当前仍符合 <strong>1</strong>" in passing.text
-    assert "显示 1 / 1" in passing.text
+        assert "请选择 Weinstein 或 Minervini" in filtered.text
+        assert "方法状态变化" in filtered.text
 
 
 def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composite(
@@ -873,8 +1035,8 @@ def test_watchlist_excludes_st_and_hides_small_cap_by_default(tmp_path):
     assert "收 12.5" in default_page.text
     assert "+0.500 / +4.17%" in default_page.text
     assert "20日成交中位" in stock_page.text
-    assert 'data-download-tradingview-list="new-candidates"' in default_page.text
-    assert 'data-copy-tradingview-list="new-candidates"' in default_page.text
+    assert 'data-download-tradingview-list="daily-results"' in default_page.text
+    assert 'data-copy-tradingview-list="daily-results"' in default_page.text
     assert 'data-tradingview-symbol="SZSE:000001"' in default_page.text
     assert "小盘示例" not in filtered_page.text
     assert {row["symbol"] for row in payload["rows"]} == {"000001.SZ"}

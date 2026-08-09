@@ -24,7 +24,7 @@
     {% if navigation.total %}<span class="hero-navigation-context">{{ navigation.section_label }} · {{ navigation.position }} / {{ navigation.total }}</span>{% endif %}
     {% if navigation.previous %}<a class="button button-secondary button-compact" href="/a/stocks/{{ navigation.previous.symbol }}?{{ navigation.query }}">← {{ navigation.previous.name }}</a>{% endif %}
     {% if navigation.next %}<a class="button button-secondary button-compact" href="/a/stocks/{{ navigation.next.symbol }}?{{ navigation.query }}">{{ navigation.next.name }} →</a>{% endif %}
-    <a class="button button-secondary" href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.query }}">站内日线图</a><a class="text-link" href="/a/review">查看交易复盘 →</a>
+    <a class="button button-secondary" href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.query }}">站内日线图</a><a class="text-link" href="{{ navigation.list_url }}">返回观察池 →</a>
   </div>
 </section>
 
