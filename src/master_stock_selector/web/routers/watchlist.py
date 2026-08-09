@@ -211,6 +211,28 @@ def build_watchlist_router(
             for review in reviews
         ]
 
+    def open_position_navigation_rows(request: Request) -> list[dict[str, Any]]:
+        """Mirror the current user's open-position table for chart navigation."""
+        user = current_user(request)
+        if user is None:
+            return []
+        names = repository.stock_names(users.trade_symbols(user.user_id))
+        review = users.trade_review(user.user_id, names)
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in review["open_positions"]:
+            symbol = str(item.get("symbol") or "").upper()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "name": str(item.get("stock_name") or symbol or "名称待补"),
+                }
+            )
+        return rows
+
     def require_csrf(request: Request, user: AuthenticatedUser, supplied: str) -> None:
         if not users.csrf_valid(user, supplied):
             raise HTTPException(status_code=403, detail="CSRF 校验失败")
@@ -752,6 +774,11 @@ def build_watchlist_router(
                 if section.partition("#")[0] == "personal-observations"
                 else None
             ),
+            position_rows=(
+                open_position_navigation_rows(request)
+                if section.partition("#")[0] == "open-positions"
+                else None
+            ),
         )
         payload["market_metrics"] = market_reader.safe_stock_market_metrics(
             query_date,
@@ -852,6 +879,11 @@ def build_watchlist_router(
             personal_rows=(
                 personal_navigation_rows(request)
                 if section.partition("#")[0] == "personal-observations"
+                else None
+            ),
+            position_rows=(
+                open_position_navigation_rows(request)
+                if section.partition("#")[0] == "open-positions"
                 else None
             ),
         )
@@ -1848,6 +1880,7 @@ def _stock_navigation(
     section: str,
     rows_for_date: Callable[[str], list[dict[str, Any]]] | None = None,
     personal_rows: list[dict[str, Any]] | None = None,
+    position_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Keep chart navigation inside the selected daily-list context, not a global rank."""
 
@@ -1886,6 +1919,8 @@ def _stock_navigation(
         list_url = "/a/observations?" + urlencode(
             {"state": manual, "date": query_date}
         )
+    elif section == "open-positions":
+        list_url = "/a/review#current-positions"
     labels = {
         "new-candidates": "新进 / 重进",
         "continuing-candidates": "持续符合",
@@ -1893,6 +1928,7 @@ def _stock_navigation(
         "daily-results": "当前观察池" if view_mode == "current" else "方法状态变化",
         "focus-candidates": "我的重点观察",
         "personal-observations": "我的观察",
+        "open-positions": "当前持仓",
     }
     empty: dict[str, Any] = {
         "query": query,
@@ -1935,6 +1971,32 @@ def _stock_navigation(
             "total": len(selected),
             "previous": personal_item_at(index - 1),
             "next": personal_item_at(index + 1),
+        }
+
+    if section == "open-positions" and position_rows is not None:
+        symbols = [str(row.get("symbol") or "").upper() for row in position_rows]
+        try:
+            index = symbols.index(symbol.upper())
+        except ValueError:
+            return empty
+
+        def position_item_at(position: int) -> dict[str, str] | None:
+            if position < 0 or position >= len(position_rows):
+                return None
+            row = position_rows[position]
+            return {
+                "symbol": str(row["symbol"]),
+                "name": str(row.get("name") or row["symbol"]),
+            }
+
+        return {
+            "query": query,
+            "list_url": list_url,
+            "section_label": labels[section],
+            "position": index + 1,
+            "total": len(position_rows),
+            "previous": position_item_at(index - 1),
+            "next": position_item_at(index + 1),
         }
 
     rows = (

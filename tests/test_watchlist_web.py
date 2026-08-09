@@ -1035,6 +1035,75 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
     assert "2026-07-31" in page.text
 
 
+def test_open_positions_support_previous_and_next_chart_navigation(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    market_path = tmp_path / "market.sqlite3"
+    _seed_watchlist(watchlist_path)
+    _seed_filter_cases(watchlist_path)
+    _seed_chart_market(market_path)
+    app = create_app(
+        market_database=market_path,
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+    )
+    client = _authenticated_client(app)
+    for symbol, price, setup in (
+        ("000001.SZ", "12.5", "PULLBACK"),
+        ("000001.SZ", "12.8", "BREAKOUT"),
+        ("000002.SZ", "8.0", "BREAKOUT"),
+        ("000003.SZ", "8.5", "PULLBACK"),
+    ):
+        response = client.post(
+            f"/a/stocks/{symbol}/trades",
+            data={
+                "csrf_token": _csrf(client),
+                "traded_on": "2026-07-31",
+                "side": "BUY",
+                "quantity": "100",
+                "price": price,
+                "fee": "0",
+                "setup_method": setup,
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    review = client.get("/a/review")
+    assert review.status_code == 200
+    assert 'id="current-positions"' in review.text
+    assert (
+        "/a/stocks/000001.SZ/chart?date=2026-07-31&amp;section=open-positions"
+        in review.text
+    )
+
+    first_chart = client.get(
+        "/a/stocks/000001.SZ/chart?date=2026-07-31&section=open-positions"
+    )
+    assert first_chart.status_code == 200
+    assert "当前持仓 <b>1 / 3</b>" in first_chart.text
+    assert 'aria-label="下一只：ST示例"' in first_chart.text
+    assert "/a/stocks/000002.SZ/chart?date=2026-07-31" in first_chart.text
+    assert 'href="/a/review#current-positions"' in first_chart.text
+
+    middle_chart = client.get(
+        "/a/stocks/000002.SZ/chart?date=2026-07-31&section=open-positions"
+    )
+    assert middle_chart.status_code == 200
+    assert "当前持仓 <b>2 / 3</b>" in middle_chart.text
+    assert 'aria-label="上一只：ST未来名称"' in middle_chart.text
+    assert 'aria-label="下一只：小盘示例"' in middle_chart.text
+    assert "/a/stocks/000001.SZ/chart?date=2026-07-31" in middle_chart.text
+    assert "/a/stocks/000003.SZ/chart?date=2026-07-31" in middle_chart.text
+
+    last_chart = client.get(
+        "/a/stocks/000003.SZ/chart?date=2026-07-31&section=open-positions"
+    )
+    assert last_chart.status_code == 200
+    assert "当前持仓 <b>3 / 3</b>" in last_chart.text
+    assert 'aria-label="上一只：ST示例"' in last_chart.text
+    assert "/a/stocks/000002.SZ/chart?date=2026-07-31" in last_chart.text
+
+
 def test_legacy_product_pages_are_not_mounted(tmp_path):
     client = _client(tmp_path)
 
