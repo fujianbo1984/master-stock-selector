@@ -195,3 +195,37 @@ def test_market_reader_builds_disclosed_equal_weight_industry_proxy(tmp_path):
         }
     ]
     assert MarketDataReader(path).trade_drawdown_low("000001.SZ", "2026-07-30", "2026-07-31") == 9.0
+
+
+def test_industry_proxy_calendar_ignores_unrelated_newer_symbols(tmp_path):
+    path = tmp_path / "market.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE daily_bars (
+                market TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
+                open REAL, high REAL, low REAL, close REAL,
+                adj_type TEXT NOT NULL,
+                PRIMARY KEY (market, symbol, trade_date, adj_type)
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO daily_bars VALUES ('ashare', ?, ?, ?, ?, ?, ?, 'qfq')",
+            (
+                ("000001.SZ", "2026-07-29", 10.0, 10.0, 10.0, 10.0),
+                ("000001.SZ", "2026-07-30", 10.0, 11.0, 9.0, 10.5),
+                ("000001.SZ", "2026-07-31", 10.5, 12.0, 10.0, 11.0),
+                ("999999.SZ", "2026-08-01", 20.0, 20.0, 20.0, 20.0),
+                ("999999.SZ", "2026-08-04", 20.0, 20.0, 20.0, 20.0),
+                ("999999.SZ", "2026-08-05", 20.0, 20.0, 20.0, 20.0),
+            ),
+        )
+
+    bars = MarketDataReader(path).industry_proxy_bars(
+        ["000001.SZ"],
+        "2026-08-05",
+        limit=2,
+    )
+
+    assert [bar["trade_date"] for bar in bars] == ["2026-07-30", "2026-07-31"]

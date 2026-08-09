@@ -109,12 +109,12 @@
 </section>
 {% else %}<section class="section panel private-login-panel"><p class="eyebrow">个人工作区</p><h2>登录后记录个人观察</h2><p class="muted">观察状态、备注、价格图绘制、买卖点、成交和复盘仅你本人可见。</p><a class="button" href="/login?next=/a/stocks/{{ stock.symbol }}">登录</a></section>{% endif %}
 
-{% if stock.industry_confirmation %}
+{% if stock.industry.industry_code %}
 <details class="section stock-disclosure industry-stock-context">
-  <summary><span><strong>行业背景（仅人工参考）</strong><small>{{ stock.industry.industry_name }}：{{ stock.industry_confirmation.summary }}</small></span><span class="disclosure-action">展开</span></summary>
+  <summary><span><strong>行业背景（仅人工参考）</strong><small>{{ stock.industry.industry_name }} · 需要时进入行业页计算技术确认</small></span><span class="disclosure-action">展开</span></summary>
   <div class="stock-disclosure-body">
     <div class="section-heading"><div><p class="eyebrow">行业背景</p><h2>行业确认详情</h2></div><a class="text-link" href="/a/industries/{{ stock.industry.industry_code }}/chart?date={{ query_date }}">查看行业确认 →</a></div>
-    <div class="quality-strip"><span>{{ stock.industry_confirmation.stage_label }}</span><span>30周斜率：{% if stock.industry_confirmation.metrics and stock.industry_confirmation.metrics.ma30_slope_4w_pct is not none %}{{ stock.industry_confirmation.metrics.ma30_slope_4w_pct }}%{% else %}暂无{% endif %}</span><span>W 宽度：{{ stock.industry_confirmation.weinstein_pass_count }} / {{ stock.industry_confirmation.weinstein_evaluable_count }}</span><span>新进/重进：{{ stock.industry_confirmation.weinstein_entered_count }}</span><span>价格覆盖：{{ stock.industry_confirmation.price_coverage_pct_label }}</span></div>
+    <p class="reading-note">所属 {{ stock.industry.industry_name }}（{{ stock.industry.industry_code }}）。行业等权代理与技术确认只在行业页按需计算。</p>
     <p class="muted">行业代理不参与 {{ stock.symbol }} 的 Weinstein 或 Minervini 结论。</p>
   </div>
 </details>

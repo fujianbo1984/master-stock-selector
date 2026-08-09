@@ -859,21 +859,30 @@ class MarketDataReader:
             required = {"symbol", "trade_date", "open", "high", "low", "close"}
             if not required.issubset(columns):
                 return []
-            date_rows = connection.execute(
-                """
-                SELECT DISTINCT trade_date
-                FROM daily_bars
-                WHERE market = 'ashare' AND adj_type = 'qfq' AND trade_date <= ?
-                ORDER BY trade_date DESC
-                LIMIT ?
-                """,
-                (end_date, limit + 1),
-            ).fetchall()
-            dates = sorted(str(row[0]) for row in date_rows)
+            # Restrict calendar discovery to the requested members.  The previous
+            # market-wide DISTINCT scanned every A-share bar (millions of rows)
+            # whenever a stock detail page built its industry context.
+            recent_dates: set[str] = set()
+            for start in range(0, len(requested), 700):
+                batch = requested[start : start + 700]
+                symbol_placeholders = ",".join("?" for _ in batch)
+                date_rows = connection.execute(
+                    f"""
+                    SELECT DISTINCT trade_date
+                    FROM daily_bars
+                    WHERE market = 'ashare' AND adj_type = 'qfq'
+                      AND symbol IN ({symbol_placeholders}) AND trade_date <= ?
+                    ORDER BY trade_date DESC
+                    LIMIT ?
+                    """,
+                    (*batch, end_date, limit + 1),
+                ).fetchall()
+                recent_dates.update(str(row[0]) for row in date_rows)
+            dates = sorted(recent_dates, reverse=True)[: limit + 1]
+            dates.sort()
             if len(dates) < 2:
                 return []
             rows: list[sqlite3.Row] = []
-            date_placeholders = ",".join("?" for _ in dates)
             for start in range(0, len(requested), 700):
                 batch = requested[start : start + 700]
                 symbol_placeholders = ",".join("?" for _ in batch)
@@ -884,10 +893,10 @@ class MarketDataReader:
                         FROM daily_bars
                         WHERE market = 'ashare' AND adj_type = 'qfq'
                           AND symbol IN ({symbol_placeholders})
-                          AND trade_date IN ({date_placeholders})
+                          AND trade_date BETWEEN ? AND ?
                         ORDER BY symbol, trade_date
                         """,
-                        (*batch, *dates),
+                        (*batch, dates[0], dates[-1]),
                     ).fetchall()
                 )
 

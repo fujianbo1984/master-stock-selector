@@ -784,23 +784,6 @@ def build_watchlist_router(
             query_date,
             [symbol],
         ).get(symbol.upper(), {})
-        industry_code = str(payload["industry"].get("industry_code") or "")
-        if industry_code:
-            industry_payload = repository.industry_detail(query_date, industry_code)
-            if industry_payload:
-                industry_observation = _decorate_industry(
-                    dict(industry_payload["observation"])
-                )
-                industry_bars = market_reader.safe_industry_proxy_bars(
-                    [str(row.get("symbol") or "") for row in industry_payload["members"]],
-                    query_date,
-                    limit=320,
-                )
-                payload["industry_confirmation"] = _decorate_industry_confirmation(
-                    build_industry_weinstein_confirmation(
-                        industry_bars, industry_observation
-                    )
-                )
         payload["external_urls"] = _stock_external_urls(symbol)
         return render(
             request,

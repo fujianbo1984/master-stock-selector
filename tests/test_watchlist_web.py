@@ -998,6 +998,31 @@ def test_stock_industry_context_is_optional_and_does_not_replace_method_evidence
     assert "行业代理不参与 000001.SZ 的 Weinstein 或 Minervini 结论。" in page.text
 
 
+def test_stock_detail_defers_industry_confirmation_until_requested(tmp_path, monkeypatch):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    app = create_app(
+        market_database=tmp_path / "market.sqlite3",
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+    )
+
+    def reject_industry_detail(*_args, **_kwargs):
+        raise AssertionError("stock detail must defer industry confirmation")
+
+    monkeypatch.setattr(
+        app.state.watchlist_repository,
+        "industry_detail",
+        reject_industry_detail,
+    )
+
+    response = _authenticated_client(app).get("/a/stocks/000001.SZ?date=2026-07-31")
+
+    assert response.status_code == 200
+    assert "行业背景（仅人工参考）" in response.text
+    assert "需要时进入行业页计算技术确认" in response.text
+
+
 def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_path):
     client = _client(tmp_path)
 
