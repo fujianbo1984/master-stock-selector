@@ -13,7 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..watchlist.repository import MarketDataReader, WatchlistRepository
+from .routers.agent_api import build_agent_api_router
 from .routers.auth import build_auth_router, current_user
+from .routers.content import build_content_router
 from .routers.watchlist import build_watchlist_router
 from .users import SESSION_COOKIE, UserRepository
 
@@ -51,7 +53,7 @@ def create_app(
     repository.initialize()
     market_reader = MarketDataReader(market_path)
     users = UserRepository(user_path)
-    users.initialize()
+    users.require_schema()
     app.state.watchlist_repository = repository
     app.state.market_reader = market_reader
     app.state.user_repository = users
@@ -74,9 +76,13 @@ def create_app(
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
         if request.url.path.startswith("/static/") and request.url.path.endswith((".css", ".js")):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif current_user(request) is not None or request.url.path.startswith(("/login", "/a/focus", "/a/review", "/api/me/")):
+        elif current_user(request) is not None or request.url.path.startswith(
+            ("/login", "/a/focus", "/a/review", "/api/me/", "/api/v1/")
+        ):
             response.headers["Cache-Control"] = "private, no-store"
-            response.headers["Vary"] = "Cookie"
+            response.headers["Vary"] = (
+                "Authorization" if request.url.path.startswith("/api/v1/") else "Cookie"
+            )
         return response
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
@@ -96,7 +102,6 @@ def create_app(
         private_items = [
             ("我的观察", "/a/observations"),
             ("交易复盘", "/a/review"),
-            ("账户设置", "/account/password"),
         ] if user is not None else []
         nav_groups = [{"label": "公开研究", "items": public_items}]
         if private_items:
@@ -133,6 +138,8 @@ def create_app(
             users=users,
         )
     )
+    app.include_router(build_content_router(render=render))
+    app.include_router(build_agent_api_router(repository=repository, users=users))
 
     return app
 

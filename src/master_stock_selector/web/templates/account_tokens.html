@@ -1,0 +1,108 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block title %}Agent Token · 龙场悟道{% endblock %}
+{% block heading %}账户设置{% endblock %}
+{% block subtitle %}登录凭据与 Agent 授权{% endblock %}
+{% block content %}
+<section class="section account-settings-shell">
+  {% include "_account_settings_nav.html" %}
+  <div class="account-settings-content">
+    <header class="account-settings-heading">
+      <p class="eyebrow">Agent 接入</p>
+      <h1>Agent Token</h1>
+      <p>为 CLI 或 Agent 创建可撤销的独立凭据，不需要共享网站密码。</p>
+    </header>
+
+    {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+    {% if new_token %}
+    <div class="token-created-notice" role="status">
+      <div><span class="settings-status-badge">仅显示一次</span><h2>复制并妥善保存新 Token</h2><p>离开本页后无法再次查看；遗失时请撤销并重新生成。</p></div>
+      <div class="token-copy-row">
+        <label class="sr-only" for="new-agent-token">新 Agent Token</label>
+        <input id="new-agent-token" value="{{ new_token }}" readonly autocomplete="off" spellcheck="false">
+        <button class="button button-secondary" type="button" data-copy-input="new-agent-token">复制 Token</button>
+      </div>
+      <p class="token-copy-status" aria-live="polite" data-copy-status></p>
+    </div>
+    {% endif %}
+
+    <div class="account-token-grid">
+      <div class="panel settings-card token-create-card">
+        <div class="settings-card-heading"><div><h2>创建新 Token</h2><p>建议为每个 Agent 分别创建，停用时只需撤销对应凭据。</p></div></div>
+        <form method="post" action="/account/tokens" class="auth-form settings-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>用途名称<input name="name" maxlength="80" placeholder="例如：MacBook 上的 Codex" required></label>
+          <label>有效期
+            <select name="expires_days">
+              <option value="30" selected>30 天</option>
+              <option value="90">90 天</option>
+            </select>
+          </label>
+          <fieldset class="token-scope-fieldset">
+            <legend>允许的操作</legend>
+            <label><input type="checkbox" name="trades:read" checked><span><strong>读取交易</strong><small>查询成交、持仓和提交验收结果</small></span></label>
+            <label><input type="checkbox" name="trades:write" checked><span><strong>写入交易</strong><small>预检、批量录入和更新既有 BUY 止损</small></span></label>
+          </fieldset>
+          <button class="button auth-submit" type="submit">生成 Token</button>
+        </form>
+      </div>
+      <aside class="token-safety-card" aria-labelledby="token-safety-title">
+        <p class="eyebrow">使用边界</p>
+        <h2 id="token-safety-title">Token 不是网站密码</h2>
+        <ul class="settings-checklist">
+          <li>服务端只保存 Token 摘要</li>
+          <li>不要发送到聊天或写进命令参数</li>
+          <li>不要提交到 Git、截图或日志</li>
+          <li>远程调用必须使用 HTTPS</li>
+        </ul>
+        <p>发现泄露或设备遗失时，立即在下方撤销对应 Token。</p>
+      </aside>
+    </div>
+
+    <section class="panel agent-quickstart" aria-labelledby="agent-quickstart-title">
+      <div class="settings-card-heading"><div><p class="eyebrow">CLI 使用说明</p><h2 id="agent-quickstart-title">三步连接 Agent</h2><p>先验证身份，再预检交易；只有显式添加 <code>--commit</code> 才会写入。</p></div><span class="settings-status-badge">默认不写入</span></div>
+      <ol class="agent-steps">
+        <li><div><span>01</span><strong>安全加载凭据</strong></div><p>将地址和 Token 注入当前终端会话，不把 Token 写入命令历史。</p><pre><code>export MASTERSTOCK_AGENT_URL="https://your-masterstock.example.com"
+read -s MASTERSTOCK_AGENT_TOKEN
+export MASTERSTOCK_AGENT_TOKEN
+.venv/bin/masterstock agent me</code></pre></li>
+        <li><div><span>02</span><strong>预检交易文件</strong></div><p>检查字段、重复记录和可卖数量，不写入系统。</p><pre><code>.venv/bin/masterstock agent trades validate trades.json</code></pre></li>
+        <li><div><span>03</span><strong>确认后提交并核验</strong></div><p>提交使用稳定幂等键，网络重试不会重复创建同一批交易。</p><pre><code>.venv/bin/masterstock agent trades import trades.json --commit
+.venv/bin/masterstock agent trades list --symbol 600988.SH</code></pre></li>
+      </ol>
+      <details class="agent-help-details">
+        <summary>查看交易 JSON 示例与止损命令</summary>
+        <div class="agent-help-grid">
+          <div><h3>交易文件</h3><pre><code>{
+  "trades": [{
+    "symbol": "600988.SH",
+    "traded_on": "2026-08-06",
+    "traded_at": "09:30:24",
+    "side": "BUY",
+    "quantity": 1000,
+    "price": 43.18
+  }]
+}</code></pre></div>
+          <div><h3>更新既有 BUY 止损</h3><pre><code>.venv/bin/masterstock agent trades set-stop \
+  EXECUTION_ID 37.56 --expected-revision 1 --commit</code></pre><p>该命令只修改匹配 BUY 的止损价；版本冲突时会拒绝更新，不会创建新 BUY 或 SELL。</p></div>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel token-list-section" aria-labelledby="token-list-title">
+      <div class="settings-card-heading"><div><p class="eyebrow">凭据管理</p><h2 id="token-list-title">已有 Token</h2><p>只显示安全元数据，不会再次展示完整 Token。</p></div><span class="muted">{{ tokens|length }} 个</span></div>
+      {% if tokens %}
+      <div class="token-list">
+        {% for token in tokens %}
+        <article class="token-item">
+          <div class="token-item-main"><span class="token-status {{ 'active' if token.active else 'inactive' }}">{{ '有效' if token.active else ('已撤销' if token.revoked_at_epoch else '已过期') }}</span><h3>{{ token.name }}</h3><code>{{ token.token_prefix }}…</code></div>
+          <div class="token-item-meta"><div><span>权限</span><strong>{{ token.scopes|join(' · ') }}</strong></div><div><span>创建</span><strong>{{ token.created_at_label }}</strong></div><div><span>到期</span><strong>{{ token.expires_at_label }}</strong></div><div><span>最近使用</span><strong>{{ token.last_used_label }}</strong></div></div>
+          <div class="token-item-action">{% if token.active %}<form method="post" action="/account/tokens/{{ token.token_id }}/revoke" data-confirm="确认撤销“{{ token.name }}”？使用该 Token 的 Agent 将立即失去访问权限。"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary button-compact danger-button" type="submit">撤销 Token</button></form>{% else %}<span class="muted">无需操作</span>{% endif %}</div>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}<div class="token-empty-state"><strong>还没有 Agent Token</strong><p>填写上方用途、有效期和权限，生成第一枚独立凭据。</p></div>{% endif %}
+    </section>
+  </div>
+</section>
+{% endblock %}

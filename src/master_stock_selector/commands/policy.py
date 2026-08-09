@@ -11,6 +11,7 @@ class CommandPolicy:
 
 
 COMMAND_POLICIES: dict[str, CommandPolicy] = {
+    "agent": CommandPolicy("authenticated_agent_api_client"),
     "database-optimize": CommandPolicy("deployment_database_candidate", requires_apply=True),
     "database-validate": CommandPolicy("deployment_database_validation"),
     "daily": CommandPolicy("market_and_master_watchlist_fact", requires_apply=True),

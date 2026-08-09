@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from .parser_agent import REGISTRARS as AGENT_REGISTRARS
 from .parser_backfill import REGISTRARS as BACKFILL_REGISTRARS
 from .parser_daily import REGISTRARS as DAILY_REGISTRARS
 from .parser_reference import REGISTRARS as REFERENCE_REGISTRARS
@@ -10,13 +11,14 @@ from .parser_watchlist import REGISTRARS as WATCHLIST_REGISTRARS
 from .parser_web import REGISTRARS as WEB_REGISTRARS
 
 COMMAND_ORDER = (
-    "daily", "market-backfill", "reference-backfill", "reference-materialize",
+    "agent", "daily", "market-backfill", "reference-backfill", "reference-materialize",
     "database-optimize", "database-validate", "watchlist", "web",
 )
 
 
 def _registrars() -> dict[str, ParserRegistrar]:
     registrars = {
+        **AGENT_REGISTRARS,
         **DAILY_REGISTRARS,
         **BACKFILL_REGISTRARS,
         **REFERENCE_REGISTRARS,

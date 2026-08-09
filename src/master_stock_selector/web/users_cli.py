@@ -25,6 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
     for action in ("enable", "disable", "reset-password"):
         command = subparsers.add_parser(action)
         command.add_argument("username")
+    subparsers.add_parser("schema-check")
+    schema_migrate = subparsers.add_parser("schema-migrate")
+    schema_migrate.add_argument("--apply", action="store_true")
+    schema_migrate.add_argument("--backup", default="")
     migrate = subparsers.add_parser("migrate-legacy")
     migrate.add_argument("--source", required=True)
     migrate.add_argument("--username", required=True)
@@ -35,7 +39,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repository = UserRepository(Path(args.database))
-    repository.initialize()
+    if args.action == "schema-check":
+        status = repository.schema_status()
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+        return 0 if status["compatible"] else 2
+    if args.action == "schema-migrate":
+        result = migrate_user_schema(
+            repository,
+            apply=bool(args.apply),
+            backup=Path(args.backup) if args.backup else None,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    repository.require_schema()
     if args.action == "create":
         password = _confirmed_password()
         user_id = repository.create_user(args.username, password, args.display_name)
@@ -66,6 +82,138 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     raise AssertionError(f"unhandled action: {args.action}")
+
+
+def migrate_user_schema(
+    repository: UserRepository,
+    *,
+    apply: bool,
+    backup: Path | None,
+) -> dict[str, Any]:
+    before = _database_inventory(repository.path) if repository.path.is_file() else None
+    status = repository.schema_status()
+    if not apply:
+        return {
+            "status": "ready" if status["compatible"] else "dry-run",
+            "schema": status,
+            "inventory": before,
+            "next": (
+                "无需迁移"
+                if status["compatible"]
+                else (
+                    "使用 --apply 创建新用户库"
+                    if status["status"] == "MISSING"
+                    else "对现有数据库执行时必须指定 --apply 和未存在的 --backup 路径"
+                )
+            ),
+        }
+    if status["compatible"]:
+        return {"status": "already-ready", "schema": status, "inventory": before}
+    backup_result: dict[str, Any] | None = None
+    if repository.path.is_file():
+        if backup is None:
+            raise ValueError("迁移现有用户库必须指定 --backup 路径")
+        backup_result = _backup_database(repository.path, backup)
+    after_schema = repository.migrate_schema()
+    after = _database_inventory(repository.path)
+    changed_counts = {
+        table: {"before": count, "after": after["table_counts"].get(table)}
+        for table, count in (before or {}).get("table_counts", {}).items()
+        if table != "user_stock_review" or not status.get("legacy_observation_states")
+        if after["table_counts"].get(table) != count
+    }
+    if status.get("legacy_observation_states"):
+        before_states = (before or {}).get("observation_state_counts", {})
+        expected_reviews = sum(
+            int(before_states.get(state, 0))
+            for state in ("WATCH", "FOCUS", "DROPPED", "ARCHIVED")
+        )
+        actual_reviews = int(after["table_counts"].get("user_stock_review", 0))
+        if actual_reviews != expected_reviews:
+            changed_counts["user_stock_review"] = {
+                "expected_after": expected_reviews,
+                "actual_after": actual_reviews,
+            }
+    if changed_counts:
+        raise RuntimeError(
+            "迁移改变了既有表行数；请停止 Web 并使用备份回滚："
+            + json.dumps(changed_counts, ensure_ascii=False, sort_keys=True)
+        )
+    return {
+        "status": "migrated",
+        "backup": backup_result,
+        "schema": after_schema,
+        "before": before,
+        "after": after,
+        "existing_row_counts_preserved": True,
+    }
+
+
+def _database_inventory(path: Path) -> dict[str, Any]:
+    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    try:
+        quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
+        if quick_check != "ok":
+            raise ValueError(f"用户数据库 quick_check 失败：{quick_check}")
+        tables = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        indexes = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='index' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        counts = {
+            table: int(
+                connection.execute(
+                    f'SELECT COUNT(*) FROM "{table.replace(chr(34), chr(34) * 2)}"'
+                ).fetchone()[0]
+            )
+            for table in tables
+        }
+        observation_state_counts = (
+            {
+                str(row[0]): int(row[1])
+                for row in connection.execute(
+                    "SELECT manual_state, COUNT(*) FROM user_stock_review "
+                    "GROUP BY manual_state"
+                )
+            }
+            if "user_stock_review" in tables
+            else {}
+        )
+        return {
+            "quick_check": quick_check,
+            "tables": tables,
+            "indexes": indexes,
+            "table_counts": counts,
+            "observation_state_counts": observation_state_counts,
+        }
+    finally:
+        connection.close()
+
+
+def _backup_database(source: Path, backup: Path) -> dict[str, Any]:
+    if backup.exists():
+        raise ValueError(f"备份目标已存在，拒绝覆盖：{backup}")
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    source_connection = sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True)
+    target_connection = sqlite3.connect(backup)
+    try:
+        source_connection.backup(target_connection)
+        quick_check = str(target_connection.execute("PRAGMA quick_check").fetchone()[0])
+    finally:
+        target_connection.close()
+        source_connection.close()
+    if quick_check != "ok":
+        raise ValueError(f"用户库备份 quick_check 失败：{quick_check}")
+    return {"path": str(backup.resolve()), "quick_check": quick_check}
 
 
 def migrate_legacy_private_data(

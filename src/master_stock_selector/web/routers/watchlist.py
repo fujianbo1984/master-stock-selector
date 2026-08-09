@@ -690,8 +690,8 @@ def build_watchlist_router(
         section: str = "",
         nav_previous: str = "",
         nav_next: str = "",
-        nav_position: int = Query(default=0, ge=0),
-        nav_total: int = Query(default=0, ge=0),
+        nav_position: str = "",
+        nav_total: str = "",
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
@@ -730,13 +730,19 @@ def build_watchlist_router(
                 request, value, include_liquidity=False
             ),
         )
-        if navigation["total"] == 0 and (nav_previous or nav_next):
+        submitted_position = _navigation_count(nav_position)
+        submitted_total = _navigation_count(nav_total)
+        if 0 < submitted_position <= submitted_total and (nav_previous or nav_next):
+            submitted_symbols = {
+                value.upper().strip() for value in (nav_previous, nav_next) if value.strip()
+            }
+            submitted_names = repository.stock_names(submitted_symbols)
             navigation.update(
                 {
-                    "position": nav_position,
-                    "total": nav_total,
-                    "previous": _navigation_item(nav_previous),
-                    "next": _navigation_item(nav_next),
+                    "position": submitted_position,
+                    "total": submitted_total,
+                    "previous": _navigation_item(nav_previous, submitted_names),
+                    "next": _navigation_item(nav_next, submitted_names),
                 }
             )
         chart_methods = _chart_method_statuses(payload["history"], query_date)
@@ -1060,12 +1066,12 @@ def build_watchlist_router(
         )
         payload = {
             "status": "ok" if healthy else "degraded",
-            "product": "master-watchlist-v1",
-            "scope": "process_database_and_latest_fact_only",
-            "runtime": runtime,
-            "market": market_runtime,
-            "users": user_runtime,
-            "note": "健康检查不代表大师方法结论已经过人工语义验收。",
+            "data_date": runtime.get("latest_fact_date") or market_runtime.get("latest_date") or "",
+            "databases": {
+                "market": bool(market_runtime.get("exists") and "error" not in market_runtime),
+                "watchlist": bool(runtime.get("connected")),
+                "users": bool(user_runtime.get("connected")),
+            },
         }
         return JSONResponse(payload, status_code=200 if healthy else 503)
 
@@ -1200,6 +1206,15 @@ def _attach_quote_changes(
             else "down" if change_pct is not None and float(change_pct) < 0
             else "flat"
         )
+
+
+def _navigation_count(value: str) -> int:
+    """Tolerate installed-web-app URLs that fold the chart anchor into a value."""
+
+    try:
+        return max(0, int(value.partition("#")[0]))
+    except ValueError:
+        return 0
 
 
 def _market_cap_floor(value: int) -> int:
@@ -1497,9 +1512,16 @@ def _filter_rows(
     )
 
 
-def _navigation_item(symbol: str) -> dict[str, str] | None:
+def _navigation_item(
+    symbol: str, names: dict[str, str] | None = None
+) -> dict[str, str] | None:
     normalized = symbol.upper().strip()
-    return {"symbol": normalized, "name": normalized} if normalized else None
+    if not normalized:
+        return None
+    return {
+        "symbol": normalized,
+        "name": str((names or {}).get(normalized) or normalized),
+    }
 
 
 def _stock_navigation(

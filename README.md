@@ -13,6 +13,7 @@
 
 ## 本版更新
 
+- 增加 Agent API 与远程 CLI：用户在网站生成最小权限 Token，Agent 可先预检再以幂等、原子批次录入实际成交，并按成交 ID 更新 BUY 止损。
 - 增加“交易复盘”页面：记录实际成交、持仓、已实现盈亏及描述性统计；方法事实会按成交日快照保存，不能改写当时观察结论。
 - 增加 `market-backfill`：仅补齐本地已有原始日线日期缺失的复权因子、市值指标和四指数数据；先输出计划，只有显式 `--apply` 才写入。
 - 优化观察池、指数、行业与个股证据页的桌面和窄屏阅读体验。
@@ -133,6 +134,7 @@ uv pip install --python .venv/bin/python -e .
 
 ```bash
 .venv/bin/masterstock --help
+.venv/bin/masterstock agent --help
 .venv/bin/masterstock daily --help
 .venv/bin/masterstock market-backfill --help
 .venv/bin/masterstock watchlist --help
@@ -155,6 +157,86 @@ TUSHARE_TOKEN=你的token
 ```
 
 CLI 会从项目工作目录读取 `.env`，不会输出 token。
+
+## Agent API 与交易 CLI
+
+登录网站后进入“个人工作区 → 账户设置 → Agent Token”，创建带 `trades:read`、
+`trades:write` 权限的 Token。建议每个 Agent 或设备单独创建一枚 Token：Token 只显示一次，
+服务端仅保存摘要，设备遗失或凭据疑似泄露时可单独撤销，不影响网站密码和其他 Agent。
+当前 ECS 采用双入口隔离：公网 `8888` 只提供公开只读页面，Agent API 和登录只允许通过
+SSH 隧道访问回环地址。CLI 只允许本机地址使用 HTTP；若未来公开 Agent API，必须使用 HTTPS。
+
+| 权限 | 允许的操作 | 建议场景 |
+|---|---|---|
+| `trades:read` | 验证账户、查询成交及提交验收结果 | 只读核验 Agent |
+| `trades:write` | 预检、批量录入成交、更新既有 BUY 止损 | 交易录入 Agent；通常同时保留读取权限 |
+
+Token 不支持命令行参数，避免进入 Shell 历史。可通过进程环境或标准输入提供：
+
+```bash
+ssh -N -T \
+  -L 127.0.0.1:8888:127.0.0.1:8000 \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -i ~/.ssh/id_ed25519 root@47.110.74.48
+
+export MASTERSTOCK_AGENT_URL=http://127.0.0.1:8888
+read -s MASTERSTOCK_AGENT_TOKEN
+export MASTERSTOCK_AGENT_TOKEN
+.venv/bin/masterstock agent me
+```
+
+也可以让 CLI 从标准输入读取 Token；不要把 Token 拼在命令参数、脚本、聊天、截图或日志中：
+
+```bash
+printf '%s\n' "$MASTERSTOCK_AGENT_TOKEN" | \
+  .venv/bin/masterstock agent --token-stdin me
+```
+
+交易 JSON 可以是数组，也可以是包含 `trades` 数组的对象：
+
+```json
+{
+  "trades": [
+    {
+      "client_id": "screenshot-20260809-1",
+      "source_ref": "broker-order-20260806-001",
+      "symbol": "600988.SH",
+      "traded_on": "2026-08-06",
+      "traded_at": "09:30:24",
+      "side": "BUY",
+      "quantity": 1000,
+      "price": 43.18
+    }
+  ]
+}
+```
+
+先预检，再显式提交：
+
+```bash
+.venv/bin/masterstock agent trades validate trades.json
+.venv/bin/masterstock agent trades import trades.json --commit
+.venv/bin/masterstock agent trades list --symbol 600988.SH
+.venv/bin/masterstock agent trades set-stop EXECUTION_ID 37.56 \
+  --expected-revision 1 --commit
+```
+
+`import --commit` 默认根据规范化 JSON 生成稳定的幂等键，也可显式传入
+`--idempotency-key`。服务端按成交时间模拟 FIFO，整批存在无效字段或超卖时不写入任何
+记录；同一 API 请求由 `Idempotency-Key` 去重，成交优先由调用方稳定的 `source_ref`
+识别，缺少时身份包含完整 `traded_at`。完全重复的成交返回 `DUPLICATE`，不会再次创建。
+止损接口只接受既有 BUY 的 `execution_id` 和当前整数 `revision`，版本冲突返回 `409`，
+不创建替代 BUY 或 SELL。仅有 `trades:write` 的 Token 只获得编号、状态和版本等最小回执；
+读取完整成交必须具有 `trades:read`。
+
+常见故障边界：
+
+- `401`：Token 无效、过期或已撤销；回到网站重新创建，不要重试旧 Token。
+- `403`：Token 缺少对应权限；创建最小充分权限的新 Token，不修改网站密码。
+- `422`：字段、重复、超卖或止损规则未通过；修正输入后重新预检，服务端不会部分写入。
+- 公网 HTTP 地址：CLI 会拒绝连接；先建立 SSH 隧道并使用 `http://127.0.0.1:8888`，
+  不要关闭这一保护。
 
 ## 运行每日闭环
 
@@ -226,12 +308,26 @@ scripts/restart_web.sh
 `master_watchlist.sqlite3` 保存公开方法事实，`users.sqlite3` 保存账号、会话以及每个
 用户自己的观察列表、备注、K 线绘图、买卖点、成交和复盘。一个用户就是一个独立租户，不支持团队共享。
 
-首次使用前创建账号（密码通过终端安全提示输入，不进入命令历史）：
+Web 启动只校验用户库结构，不会建表或迁移。首次使用前先显式检查和创建结构，再创建账号
+（密码通过终端安全提示输入，不进入命令历史）：
 
 ```bash
+scripts/manage_users.sh schema-check
+scripts/manage_users.sh schema-migrate
+scripts/manage_users.sh schema-migrate --apply
 scripts/manage_users.sh create your-name --display-name "显示名称"
 scripts/manage_users.sh list
 ```
+
+迁移现有用户库时，`--apply` 必须同时给出一个尚不存在的备份路径；命令先通过 SQLite
+Backup API 生成备份并执行 `quick_check`，再迁移并核对既有表行数：
+
+```bash
+scripts/manage_users.sh schema-migrate --apply \
+  --backup /var/backups/masterstock/users-before-schema-v2.sqlite3
+```
+
+线上执行前必须停止 Web；只能迁移 ECS 现有 `users.sqlite3`，不得上传本机用户库替换。
 
 禁用账号或重置密码：
 
@@ -240,9 +336,13 @@ scripts/manage_users.sh disable your-name
 scripts/manage_users.sh reset-password your-name
 ```
 
+修改密码、管理员重置密码或禁用账号都会在同一用户库事务中撤销该账号的全部 Session
+和 Agent Token。Token 默认有效 30 天、最长 90 天。
+
 公开行情、指数、行业和方法证据无需登录；`/a/focus`、`/a/review`、人工备注、成交、
-止损和图表标注必须登录，并以服务端会话中的 `user_id` 隔离。生产环境必须保持
-`MASTERSTOCK_SECURE_COOKIES=1` 并由 HTTPS 访问。
+止损和图表标注必须登录，并以服务端会话中的 `user_id` 隔离。当前双入口部署只允许通过
+SSH 隧道登录，设置 `MASTERSTOCK_SECURE_COOKIES=0`；公网 Nginx 必须阻断全部登录和个人
+接口。若未来允许公网登录，必须改用 HTTPS 并设置 `MASTERSTOCK_SECURE_COOKIES=1`。
 
 常用页面：
 
@@ -307,9 +407,10 @@ scripts/manage_users.sh migrate-legacy \
 
 ### ECS 部署
 
-`deploy/systemd/` 提供 Web 常驻进程、交易日采集定时器和用户数据库备份定时器，
-`deploy/nginx/` 提供 HTTPS 反向代理示例。安装、权限、首次备份和恢复检查见
-[`deploy/README.md`](deploy/README.md)。模板中的域名和证书路径是占位值，不能原样用于生产。
+`deploy/systemd/` 提供 Web 常驻进程、交易日采集定时器和用户数据库备份定时器；
+`deploy/nginx/masterstock-public-readonly.conf.example` 提供公网 `8888` 只读入口，
+完整应用只监听回环地址并通过 SSH 隧道访问。域名和 HTTPS 示例仍保留供未来使用。
+安装、权限、首次备份和恢复检查见 [`deploy/README.md`](deploy/README.md)。
 
 ### 开发、ECS 与 GitHub 同步流程
 
@@ -317,7 +418,7 @@ scripts/manage_users.sh migrate-legacy \
 2. 本地验证通过不代表自动发布。只有在收到明确的同步或部署指令后，才把已验证的代码与配置同步到 ECS。
 3. ECS 上的 `market.sqlite3`、`master_watchlist.sqlite3` 和 `users.sqlite3` 是线上权威数据。日常部署不再从本地上传或覆盖这三个数据库。
 4. 如代码改动需要数据库结构迁移，必须先备份 ECS 用户库，再在 ECS 数据上执行明确的迁移和回滚检查；不得用本地数据库替换。
-5. ECS 验收通过后，提交同一批代码与文档并推送到 GitHub，保持本地、ECS 代码和 GitHub 版本一致。运行数据、密钥、会话和个人数据不进入 GitHub。
+5. ECS 只部署本机已提交版本；验收通过后仅在收到明确要求时推送 GitHub。运行数据、密钥、会话和个人数据不进入 GitHub。
 
 ## 验证
 

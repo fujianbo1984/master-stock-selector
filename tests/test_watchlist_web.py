@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from master_stock_selector.watchlist.methods import (
@@ -11,8 +12,18 @@ from master_stock_selector.watchlist.methods import (
     WEINSTEIN_POLICY_VERSION,
 )
 from master_stock_selector.watchlist.repository import WatchlistRepository
-from master_stock_selector.web.app import PROJECT_ROOT, _resolve_database_path, create_app
-from master_stock_selector.web.users import SESSION_COOKIE
+from master_stock_selector.web.app import PROJECT_ROOT, _resolve_database_path
+from master_stock_selector.web.app import create_app as _production_create_app
+from master_stock_selector.web.users import SESSION_COOKIE, UserRepository
+
+
+def create_app(**kwargs):
+    watchlist_path = _resolve_database_path(kwargs["watchlist_database"])
+    user_path = _resolve_database_path(
+        kwargs.get("user_database") or watchlist_path.with_name("users.sqlite3")
+    )
+    UserRepository(user_path).migrate_schema()
+    return _production_create_app(**kwargs)
 
 
 def _seed_watchlist(path):
@@ -229,6 +240,24 @@ def test_relative_database_paths_are_rooted_at_project_directory() -> None:
     ).resolve()
 
 
+def test_web_startup_rejects_unmigrated_user_database_without_modifying_it(tmp_path) -> None:
+    user_path = tmp_path / "users.sqlite3"
+    with sqlite3.connect(user_path) as connection:
+        connection.execute("CREATE TABLE legacy_marker(value TEXT)")
+        connection.execute("INSERT INTO legacy_marker VALUES ('preserve-me')")
+    before = user_path.read_bytes()
+
+    with pytest.raises(RuntimeError, match="Web 启动不会自动迁移"):
+        _production_create_app(
+            market_database=tmp_path / "market.sqlite3",
+            watchlist_database=tmp_path / "watchlist.sqlite3",
+            user_database=user_path,
+            secure_cookies=False,
+        )
+
+    assert user_path.read_bytes() == before
+
+
 def test_healthz_is_degraded_when_market_or_watchlist_facts_are_missing(tmp_path) -> None:
     client = TestClient(
         create_app(
@@ -243,8 +272,10 @@ def test_healthz_is_degraded_when_market_or_watchlist_facts_are_missing(tmp_path
 
     assert response.status_code == 503
     assert response.json()["status"] == "degraded"
-    assert response.json()["runtime"]["has_facts"] is False
-    assert response.json()["market"]["exists"] is False
+    assert response.json()["databases"]["market"] is False
+    assert response.json()["databases"]["watchlist"] is True
+    assert "runtime" not in response.json()
+    assert "market" not in response.json()
 
 
 def test_healthz_is_ok_with_market_data_and_watchlist_facts(tmp_path) -> None:
@@ -613,8 +644,15 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert "data-chart-next" in chart.text
     assert "data-chart-next href=" in chart.text
     assert "/chart?date=2026-07-31&amp;" in chart.text
+    assert 'aria-label="下一只：小盘示例"' in chart.text
+    assert ">下一只：小盘示例 →</a>" not in chart.text
     next_href = chart.text.split('data-chart-next href="', 1)[1].split('"', 1)[0]
     assert "#stock-chart" not in next_href
+    assert "数据截至 2026-07-31 · 收盘后复盘" not in chart.text
+    assert "<summary><span>通道设置</span></summary>" in chart.text
+    assert chart.text.index("kc-settings-panel") < chart.text.index("data-kc-summary")
+    assert "data-volume checked" not in chart.text
+    assert "data-chart-status" not in chart.text
     assert 'aria-label="我的观察"' in chart.text
     assert "归档" in chart.text
     assert ">保存</button>" not in chart.text
@@ -633,6 +671,14 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     )
     assert legacy_fragment.status_code == 200
     assert "data-chart-previous" in legacy_fragment.text
+
+    malformed_nav_total = client.get(
+        "/a/stocks/000001.SZ/chart?date=2026-07-31&min_cap=0"
+        "&nav_position=1&nav_total=2%23stock-chart&nav_next=000003.SZ"
+    )
+    assert malformed_nav_total.status_code == 200
+    assert "当前列表 <b>1 / 2</b>" in malformed_nav_total.text
+    assert "data-chart-next" in malformed_nav_total.text
 
     updated = client.post(
         "/a/stocks/000001.SZ/review",
@@ -655,6 +701,51 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert "data-chart-next" in revised_chart.text
     assert "/a/stocks/000003.SZ/chart?date=2026-07-31" in revised_chart.text
     assert "保留既有备注" in client.get("/a/stocks/000001.SZ").text
+
+
+def test_chart_review_keeps_position_when_manual_state_changes_sort_order(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    market_path = tmp_path / "market.sqlite3"
+    _seed_watchlist(watchlist_path)
+    _seed_filter_cases(watchlist_path)
+    _seed_market_context(market_path)
+    app = create_app(
+        market_database=market_path,
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+    )
+    client = _authenticated_client(app)
+    user = app.state.user_repository.session_user(client.cookies.get(SESSION_COOKIE))
+    assert user is not None
+    app.state.user_repository.save_review(user.user_id, "000001.SZ", "WATCH", "")
+    app.state.user_repository.save_review(user.user_id, "000003.SZ", "FOCUS", "")
+
+    chart_url = (
+        "/a/stocks/000001.SZ/chart?date=2026-07-31&manual=all&min_cap=0"
+        "&section=new-candidates"
+    )
+    before = client.get(chart_url)
+    assert "新进 / 重进 <b>2 / 2</b>" in before.text
+    assert 'aria-label="上一只：小盘示例"' in before.text
+
+    updated = client.post(
+        "/a/stocks/000001.SZ/review",
+        data={
+            "csrf_token": _csrf(client),
+            "manual_state": "FOCUS",
+            "return_to": f"{chart_url}#stock-chart",
+            "nav_position": "2",
+            "nav_total": "2",
+            "nav_previous": "000003.SZ",
+        },
+        follow_redirects=False,
+    )
+
+    assert updated.status_code == 303
+    after = client.get(updated.headers["location"])
+    assert 'manual-focus">重点' in after.text
+    assert "新进 / 重进 <b>2 / 2</b>" in after.text
+    assert 'aria-label="上一只：小盘示例"' in after.text
 
 
 def test_industry_observation_page_and_api_are_fact_only(tmp_path):
@@ -1104,6 +1195,13 @@ def test_authenticated_user_can_change_password_from_account_settings(tmp_path):
         secure_cookies=False,
     )
     client = _authenticated_client(app)
+    authenticated = app.state.user_repository.session_user(
+        client.cookies.get(SESSION_COOKIE)
+    )
+    assert authenticated is not None
+    api_token, _ = app.state.user_repository.create_api_token(
+        authenticated.user_id, "password-change"
+    )
 
     page = client.get("/account/password")
     assert page.status_code == 200
@@ -1111,6 +1209,10 @@ def test_authenticated_user_can_change_password_from_account_settings(tmp_path):
     assert "账户设置" in page.text
     assert 'autocomplete="current-password"' in page.text
     assert page.headers["cache-control"] == "private, no-store"
+    daily = client.get("/a/daily")
+    assert 'href="/account/password"' in daily.text
+    assert daily.text.count('href="/account/password"') == 1
+    assert ">账户设置</a>" not in daily.text
 
     wrong = client.post(
         "/account/password",
@@ -1139,6 +1241,9 @@ def test_authenticated_user_can_change_password_from_account_settings(tmp_path):
     assert changed.headers["location"] == "/login?password_changed=1"
     assert client.cookies.get(SESSION_COOKIE) is None
     assert client.get("/a/observations", follow_redirects=False).status_code == 303
+    assert client.get(
+        "/api/v1/me", headers={"Authorization": f"Bearer {api_token}"}
+    ).status_code == 401
 
     notice = client.get(changed.headers["location"])
     assert "密码已更新" in notice.text

@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from master_stock_selector.web.users import UserRepository
-from master_stock_selector.web.users_cli import migrate_legacy_private_data
+from master_stock_selector.web.users_cli import migrate_legacy_private_data, migrate_user_schema
 
 
 def test_accounts_sessions_and_sqlite_security_settings(tmp_path):
@@ -30,6 +30,7 @@ def test_accounts_sessions_and_sqlite_security_settings(tmp_path):
     assert account is not None
 
     token, csrf = repository.create_session(user_id)
+    api_token, _ = repository.create_api_token(user_id, "disable-account")
     user = repository.session_user(token)
     assert user is not None
     assert user.user_id == user_id
@@ -38,6 +39,7 @@ def test_accounts_sessions_and_sqlite_security_settings(tmp_path):
 
     repository.set_user_status("alice", "DISABLED")
     assert repository.session_user(token) is None
+    assert repository.api_token_user(api_token) is None
     assert repository.authenticate("alice", "Secure-password-123") is None
 
 
@@ -47,6 +49,7 @@ def test_user_can_change_password_and_all_existing_sessions_are_revoked(tmp_path
     user_id = repository.create_user("alice", "Secure-password-123")
     first_token, _ = repository.create_session(user_id)
     second_token, _ = repository.create_session(user_id)
+    api_token, _ = repository.create_api_token(user_id, "password-change")
 
     assert not repository.change_password(
         user_id, "wrong-password", "New-secure-password-456"
@@ -59,6 +62,7 @@ def test_user_can_change_password_and_all_existing_sessions_are_revoked(tmp_path
     )
     assert repository.session_user(first_token) is None
     assert repository.session_user(second_token) is None
+    assert repository.api_token_user(api_token) is None
     assert repository.authenticate("alice", "Secure-password-123") is None
     assert repository.authenticate("alice", "New-secure-password-456") is not None
 
@@ -66,6 +70,63 @@ def test_user_can_change_password_and_all_existing_sessions_are_revoked(tmp_path
         repository.change_password(
             user_id, "New-secure-password-456", "New-secure-password-456"
         )
+
+
+def test_admin_password_reset_revokes_sessions_and_api_tokens(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("alice", "Secure-password-123")
+    session, _ = repository.create_session(user_id)
+    api_token, _ = repository.create_api_token(user_id, "password-reset")
+
+    repository.reset_password("alice", "Reset-password-456")
+
+    assert repository.session_user(session) is None
+    assert repository.api_token_user(api_token) is None
+    assert repository.authenticate("alice", "Reset-password-456") is not None
+
+
+def test_explicit_user_schema_migration_backs_up_and_preserves_rows(tmp_path):
+    path = tmp_path / "users.sqlite3"
+    repository = UserRepository(path)
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    repository.record_trade(
+        user_id,
+        traded_on="2026-08-01",
+        traded_at="09:30:00",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=10.0,
+        fee=1.0,
+        method="MANUAL",
+    )
+    with repository.connect() as connection:
+        connection.execute("DROP INDEX idx_user_trade_source_ref")
+        connection.execute("DROP TABLE user_api_audit")
+        connection.execute("DROP TABLE user_trade_batch")
+        connection.execute("DROP TABLE user_api_token")
+        connection.execute("ALTER TABLE user_trade_execution DROP COLUMN source_ref")
+        connection.execute("ALTER TABLE user_trade_execution DROP COLUMN revision")
+        connection.execute("PRAGMA user_version=1")
+
+    assert repository.schema_status()["status"] == "MIGRATION_REQUIRED"
+    dry_run = migrate_user_schema(repository, apply=False, backup=None)
+    assert dry_run["status"] == "dry-run"
+    backup = tmp_path / "users.before-schema-v2.sqlite3"
+    migrated = migrate_user_schema(repository, apply=True, backup=backup)
+
+    assert migrated["status"] == "migrated"
+    assert migrated["backup"] == {"path": str(backup.resolve()), "quick_check": "ok"}
+    assert migrated["existing_row_counts_preserved"] is True
+    assert repository.schema_status()["compatible"] is True
+    with repository.connect(read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
+        trade = connection.execute(
+            "SELECT source_ref, revision FROM user_trade_execution"
+        ).fetchone()
+    assert tuple(trade) == (None, 1)
 
 
 def test_private_rows_are_scoped_by_user_id(tmp_path):
@@ -146,8 +207,12 @@ def test_observation_states_are_compact_and_legacy_rows_migrate_in_place(tmp_pat
             (user_id,),
         )
 
-    repository.initialize()
+    assert repository.schema_status()["status"] == "MIGRATION_REQUIRED"
+    backup = tmp_path / "users.before-observation-migration.sqlite3"
+    result = migrate_user_schema(repository, apply=True, backup=backup)
 
+    assert result["status"] == "migrated"
+    assert result["backup"] == {"path": str(backup.resolve()), "quick_check": "ok"}
     assert repository.review(user_id, "000001.SZ")["manual_state"] == "ARCHIVED"
     assert repository.review(user_id, "000002.SZ")["manual_state"] == "UNREVIEWED"
     assert [row["symbol"] for row in repository.reviews_for_user(user_id)] == ["000001.SZ"]

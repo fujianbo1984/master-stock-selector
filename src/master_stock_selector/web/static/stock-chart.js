@@ -4,7 +4,7 @@
   const chartNode = root.querySelector("[data-chart-canvas]");
   const overlay = root.querySelector("[data-drawing-overlay]");
   const context = overlay.getContext("2d");
-  const status = root.querySelector("[data-chart-status]");
+  const volumeInput = root.querySelector("[data-volume]");
   const kcSummary = root.querySelector("[data-kc-summary]");
   const drawingActions = root.querySelector("[data-drawing-actions]");
   const drawingHint = root.querySelector("[data-drawing-hint]");
@@ -38,9 +38,9 @@
   const lower = chart.addSeries(LightweightCharts.LineSeries, { color: "#a9b0b7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
   const ma20 = chart.addSeries(LightweightCharts.LineSeries, { color: "#d28b18", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
   const ma50 = chart.addSeries(LightweightCharts.LineSeries, { color: "#5b6fc7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-  const volumePane = chart.addPane();
-  volumePane.setHeight(132);
-  const volume = chart.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, base: 0 }, volumePane.paneIndex());
+  const initialVolumePane = chart.addPane();
+  initialVolumePane.setHeight(132);
+  const volume = chart.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, base: 0 }, initialVolumePane.paneIndex());
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0 } });
   const markersApi = LightweightCharts.createSeriesMarkers(candles, []);
 
@@ -76,11 +76,18 @@
     drawingHint.textContent = ({ browse: "拖拽缩放或查看价格", select: "点击画线选中；按删除键、退格键或右键删除", trendline: "点击起点，再点击终点", horizontal: "点击图表设置水平线" })[activeTool] || "选择工具后在图上点击";
     renderDrawings();
   };
+  const syncVolumePane = () => {
+    const targetPaneIndex = volumeInput.checked ? 1 : 0;
+    if (volume.getPane().paneIndex() !== targetPaneIndex) volume.moveToPane(targetPaneIndex);
+    volume.applyOptions({ visible: volumeInput.checked });
+  };
   const resize = () => {
     const rect = chartNode.getBoundingClientRect();
-    const drawingHeight = 508;
-    chart.applyOptions({ width: Math.max(320, Math.floor(rect.width)), height: 640 });
-    volumePane.setHeight(132);
+    const chartHeight = Math.max(520, Math.floor(rect.height || 640));
+    const volumeHeight = volumeInput.checked ? Math.max(104, Math.round(chartHeight * 0.2)) : 0;
+    const drawingHeight = chartHeight - volumeHeight;
+    chart.applyOptions({ width: Math.max(320, Math.floor(rect.width)), height: chartHeight });
+    if (volumeInput.checked) volume.getPane().setHeight(volumeHeight);
     const ratio = window.devicePixelRatio || 1;
     overlay.width = Math.floor(rect.width * ratio); overlay.height = Math.floor(drawingHeight * ratio);
     overlay.style.width = `${rect.width}px`; overlay.style.height = `${drawingHeight}px`;
@@ -184,7 +191,8 @@
     }).filter(Boolean);
     ma20.setData(root.querySelector('[data-ma="20"]').checked ? simpleMa(20) : []);
     ma50.setData(root.querySelector('[data-ma="50"]').checked ? simpleMa(50) : []);
-    volume.setData(root.querySelector('[data-volume]').checked ? payload.bars.map(row => ({ time: row.trade_date, value: row.volume || 0, color: row.close >= row.open ? "rgba(201,78,71,.48)" : "rgba(37,132,96,.48)" })) : []);
+    volume.setData(payload.bars.map(row => ({ time: row.trade_date, value: row.volume || 0, color: row.close >= row.open ? "rgba(201,78,71,.48)" : "rgba(37,132,96,.48)" })));
+    syncVolumePane();
     markersApi.setMarkers((payload.trade_overlay?.executions || []).map(item => ({
       id: item.execution_id, time: item.traded_on,
       position: item.side === "BUY" ? "belowBar" : "aboveBar",
@@ -195,21 +203,19 @@
     drawings = (payload.drawings || []).map(canonicalizeDrawing);
     if (!selectedDrawing()) selectedDrawingId = null;
     updateDrawingActions(); resize(); fitBarsToViewport();
-    status.textContent = `前复权 · ${payload.bars[0].trade_date} 至 ${payload.bars.at(-1).trade_date} · ${payload.bars.length} 日`;
   };
   const request = async () => {
     const url = chartRequest(symbol, date, settings());
     const cached = cachedPayload(url);
     if (cached?.status === "OK") drawPayload(await withPrivateOverlay(cached));
-    else status.textContent = "正在加载本地日线…";
     try {
       const response = await fetch(url);
       const nextPayload = await response.json();
-      if (!response.ok || nextPayload.status !== "OK") { status.textContent = `无法绘图：${nextPayload.reason || "数据不足"}`; return; }
+      if (!response.ok || nextPayload.status !== "OK") return;
       storePayload(url, nextPayload);
       drawPayload(await withPrivateOverlay(nextPayload));
     } catch (_) {
-      if (!cached?.status) status.textContent = "本地日线加载失败，请重试";
+      return;
     }
   };
   const prefetchAdjacentCharts = () => {
@@ -306,7 +312,12 @@
     recordButton.setAttribute("aria-pressed", String(recordMode));
     drawingHint.textContent = recordMode ? "点击价格图预填成交日与价格；保存前仍可修改" : "拖拽缩放或查看价格";
   });
-  root.querySelectorAll("[data-ma], [data-volume]").forEach(input => input.addEventListener("change", () => { if (payload) drawPayload(payload); }));
+  root.querySelectorAll("[data-ma]").forEach(input => input.addEventListener("change", () => { if (payload) drawPayload(payload); }));
+  volumeInput.addEventListener("change", () => {
+    syncVolumePane();
+    if (payload) drawPayload(payload);
+    else resize();
+  });
   chart.subscribeClick((param) => {
     if (!payload || !param.time) return;
     const chartDate = typeof param.time === "string" ? param.time : `${param.time.year}-${String(param.time.month).padStart(2, "0")}-${String(param.time.day).padStart(2, "0")}`;
@@ -331,7 +342,7 @@
   root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); root.querySelectorAll("[data-chart-limit]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); request(); }));
   root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { interval = button.dataset.chartInterval; root.querySelectorAll("[data-chart-interval]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); request(); }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
-  chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); resize(); request();
+  chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); syncVolumePane(); resize(); request();
   if ("requestIdleCallback" in window) window.requestIdleCallback(prefetchAdjacentCharts, { timeout: 1200 });
   else window.setTimeout(prefetchAdjacentCharts, 250);
 })();

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from time import monotonic
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -96,6 +97,88 @@ def build_auth_router(
             "account_password.html",
             {"active": "账户设置", "error": ""},
         )
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    def token_page_context(
+        user: AuthenticatedUser, *, new_token: str = "", error: str = ""
+    ) -> dict[str, Any]:
+        tokens = users.list_api_tokens(user.user_id)
+        for item in tokens:
+            item["created_at_label"] = datetime.fromtimestamp(
+                int(item["created_at_epoch"])
+            ).strftime("%Y-%m-%d %H:%M")
+            item["expires_at_label"] = datetime.fromtimestamp(
+                int(item["expires_at_epoch"])
+            ).strftime("%Y-%m-%d %H:%M")
+            item["last_used_label"] = (
+                datetime.fromtimestamp(int(item["last_used_epoch"])).strftime("%Y-%m-%d %H:%M")
+                if item["last_used_epoch"] is not None
+                else "尚未使用"
+            )
+        return {
+            "active": "账户设置",
+            "tokens": tokens,
+            "new_token": new_token,
+            "error": error,
+        }
+
+    @router.get("/account/tokens", response_class=HTMLResponse, include_in_schema=False)
+    def api_tokens_page(request: Request) -> Response:
+        user = current_user(request)
+        if user is None:
+            return RedirectResponse("/login?next=/account/tokens", status_code=303)
+        response = render(request, "account_tokens.html", token_page_context(user))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    @router.post("/account/tokens", response_class=HTMLResponse, include_in_schema=False)
+    async def create_api_token(request: Request) -> Response:
+        user = require_user(request)
+        values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+        supplied = str((values.get("csrf_token") or [""])[0])
+        if not users.csrf_valid(user, supplied):
+            raise HTTPException(status_code=403, detail="CSRF 校验失败")
+        name = str((values.get("name") or [""])[0])
+        try:
+            expires_days = int(str((values.get("expires_days") or ["30"])[0]))
+            scopes = [
+                scope
+                for scope in ("trades:read", "trades:write")
+                if scope in values
+            ]
+            raw_token, _ = users.create_api_token(
+                user.user_id,
+                name,
+                expires_days=expires_days,
+                scopes=scopes,
+            )
+        except (TypeError, ValueError) as exc:
+            response = render(
+                request,
+                "account_tokens.html",
+                token_page_context(user, error=str(exc)),
+            )
+            response.status_code = 400
+        else:
+            response = render(
+                request,
+                "account_tokens.html",
+                token_page_context(user, new_token=raw_token),
+            )
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    @router.post("/account/tokens/{token_id}/revoke", include_in_schema=False)
+    async def revoke_api_token(request: Request, token_id: str) -> RedirectResponse:
+        user = require_user(request)
+        values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+        supplied = str((values.get("csrf_token") or [""])[0])
+        if not users.csrf_valid(user, supplied):
+            raise HTTPException(status_code=403, detail="CSRF 校验失败")
+        if not users.revoke_api_token(user.user_id, token_id):
+            raise HTTPException(status_code=404, detail="Token 不存在或已撤销")
+        response = RedirectResponse("/account/tokens", status_code=303)
         response.headers["Cache-Control"] = "private, no-store"
         return response
 

@@ -1,5 +1,6 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
+{% set suppress_research_date_note = true %}
 {% block heading %}{{ stock_name }} 日线图{% endblock %}
 {% block subtitle %}{{ symbol }} · 前复权 · 数据截至 {{ query_date }}{% endblock %}
 {% block content %}
@@ -14,8 +15,8 @@
     {% if navigation.total %}
     <nav class="list-stock-navigation chart-list-navigation" aria-label="{{ navigation.section_label }}快速切换">
       <span class="chart-navigation-context">{{ navigation.section_label }} <b>{{ navigation.position }} / {{ navigation.total }}</b></span>
-      {% if navigation.previous %}<a class="button button-secondary button-compact" data-chart-previous href="/a/stocks/{{ navigation.previous.symbol }}/chart?{{ navigation.query }}">← 上一只：{{ navigation.previous.name }}</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">← 已是第一只</span>{% endif %}
-      {% if navigation.next %}<a class="button button-compact" data-chart-next href="/a/stocks/{{ navigation.next.symbol }}/chart?{{ navigation.query }}">下一只：{{ navigation.next.name }} →</a>{% else %}<span class="button button-secondary button-compact is-disabled" aria-disabled="true">已是最后一只 →</span>{% endif %}
+      {% if navigation.previous %}<a class="button button-secondary button-compact chart-navigation-button" data-chart-previous href="/a/stocks/{{ navigation.previous.symbol }}/chart?{{ navigation.query }}" aria-label="上一只：{{ navigation.previous.name }}" title="上一只：{{ navigation.previous.name }}"><img src="/static/vendor/lucide-chevron-left.svg" alt="" aria-hidden="true"></a>{% else %}<span class="button button-secondary button-compact chart-navigation-button is-disabled" aria-label="已是第一只" title="已是第一只" aria-disabled="true"><img src="/static/vendor/lucide-chevron-left.svg" alt="" aria-hidden="true"></span>{% endif %}
+      {% if navigation.next %}<a class="button button-secondary button-compact chart-navigation-button" data-chart-next href="/a/stocks/{{ navigation.next.symbol }}/chart?{{ navigation.query }}" aria-label="下一只：{{ navigation.next.name }}" title="下一只：{{ navigation.next.name }}"><img src="/static/vendor/lucide-chevron-right.svg" alt="" aria-hidden="true"></a>{% else %}<span class="button button-secondary button-compact chart-navigation-button is-disabled" aria-label="已是最后一只" title="已是最后一只" aria-disabled="true"><img src="/static/vendor/lucide-chevron-right.svg" alt="" aria-hidden="true"></span>{% endif %}
     </nav>
     {% endif %}
     {% if private_workspace %}<form method="post" action="/a/stocks/{{ symbol }}/review" class="chart-review-control" aria-label="我的观察">
@@ -35,11 +36,12 @@
   <div class="chart-toolbar" aria-label="图表设置">
     <div class="chart-periods" role="group" aria-label="周期与显示区间"><span class="chart-group-label">周期</span><button class="button button-secondary button-compact" type="button" data-chart-interval="day" aria-pressed="true">日线</button><button class="button button-secondary button-compact" type="button" data-chart-interval="week" aria-pressed="false">周线</button><span class="chart-group-divider" aria-hidden="true"></span><span class="chart-group-label">区间</span><button class="button button-secondary button-compact" type="button" data-chart-limit="260" aria-pressed="true">一年</button><button class="button button-secondary button-compact" type="button" data-chart-limit="all" aria-pressed="false">全部</button></div>
     <div class="drawing-tool-group" role="group" aria-label="操作与绘图"><span class="chart-group-label">操作</span><button class="button button-secondary button-compact" type="button" data-draw-tool="browse" aria-pressed="true">浏览</button>{% if private_workspace %}<button class="button button-secondary button-compact" type="button" data-chart-record aria-pressed="false">录入成交</button><button class="button button-secondary button-compact" type="button" data-draw-tool="select" aria-pressed="false">选择</button><span class="chart-group-divider" aria-hidden="true"></span><span class="chart-group-label">绘图</span><button class="button button-secondary button-compact" type="button" data-draw-tool="trendline" aria-pressed="false">趋势线</button><button class="button button-secondary button-compact" type="button" data-draw-tool="horizontal" aria-pressed="false">水平线</button>{% endif %}</div>
-    <div class="chart-indicators" role="group" aria-label="指标图层"><span class="chart-group-label">图层</span><label><input type="checkbox" data-ma="20"> 20日均线</label><label><input type="checkbox" data-ma="50"> 50日均线</label><label><input type="checkbox" data-volume checked> 成交量</label></div>
+    <div class="chart-indicators" role="group" aria-label="指标图层"><span class="chart-group-label">图层</span><label><input type="checkbox" data-ma="20"> 20日均线</label><label><input type="checkbox" data-ma="50"> 50日均线</label><label><input type="checkbox" data-volume> 成交量</label></div>
     <span class="drawing-hint" data-drawing-hint>选择工具后在图上点击</span><span class="drawing-destructive-actions" data-drawing-actions hidden><button class="text-button" type="button" data-delete-selected disabled>删除选中</button><button class="text-button" type="button" data-clear-drawings>清空全部</button></span>
     <details class="kc-settings">
-      <summary><span data-kc-summary>肯特纳通道：20日指数移动平均 · 10日平均真实波幅 · 2.25倍 · 收盘价</span><b>设置</b></summary>
+      <summary><span>通道设置</span></summary>
       <div class="kc-settings-panel">
+        <p class="kc-settings-current" data-kc-summary>肯特纳通道：20日指数移动平均 · 10日平均真实波幅 · 2.25倍 · 收盘价</p>
         <label>通道基准<select data-kc-ma><option value="ema" selected>指数移动平均</option><option value="sma">简单移动平均</option></select></label>
         <label>波幅算法<select data-kc-style><option value="atr" selected>平均真实波幅</option><option value="tr">真实波幅</option><option value="range">最高最低价差</option></select></label>
         <label>均线周期 <input data-kc-length type="number" min="1" max="250" value="20"></label>
@@ -48,12 +50,11 @@
         <label>来源<select data-kc-source><option value="close" selected>收盘价</option><option value="open">开盘价</option><option value="high">最高价</option><option value="low">最低价</option></select></label>
       </div>
     </details>
-    <output class="chart-range-status" data-chart-status>正在加载本地日线…</output>
   </div>
-  <div class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>肯特纳通道 <span class="legend-buy">▲</span>买入 <span class="legend-sell">▼</span>卖出 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
+  <div class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>KC <span class="legend-buy">▲</span>买入 <span class="legend-sell">▼</span>卖出 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
   <div class="stock-chart-stage"><div class="stock-chart-canvas" data-chart-canvas></div><canvas class="drawing-overlay" data-drawing-overlay aria-label="趋势线与水平线绘图区"></canvas></div>
   <p class="muted chart-boundary">画线仅保存为个人观察标注，并绑定当前前复权尺度；若本地复权尺度不一致，系统不会加载或套用旧标注。</p>
 </section>
 <script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-<script src="/static/stock-chart.js?v=20260808-chinese-ui-v17"></script>
+<script src="/static/stock-chart.js?v=20260809-volume-pane-v19"></script>
 {% endblock %}

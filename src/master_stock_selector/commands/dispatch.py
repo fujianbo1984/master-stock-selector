@@ -11,6 +11,7 @@ Handler = Callable[[argparse.Namespace, argparse.ArgumentParser], int]
 # The mapping is deliberately explicit and lazy: unrelated command domains are
 # not imported until their command is dispatched.
 COMMAND_HANDLERS: dict[str, str] = {
+    "agent": "agent",
     "database-optimize": "reference",
     "database-validate": "reference",
     "daily": "daily",

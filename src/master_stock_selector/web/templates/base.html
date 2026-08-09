@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}龙场悟道 · 大师选股{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260808-observation-workspace-v12">
+  <link rel="stylesheet" href="/static/app.css?v=20260809-private-reading-v20">
 </head>
 <body class="app-body">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -21,6 +21,31 @@
         button.textContent = reveal ? "隐藏" : "显示";
         button.setAttribute("aria-pressed", reveal ? "true" : "false");
         input.focus();
+      });
+    });
+
+    document.querySelectorAll("[data-copy-input]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const input = document.getElementById(button.dataset.copyInput);
+        const status = button.closest("[role='status']")?.querySelector("[data-copy-status]");
+        if (!input || !navigator.clipboard) {
+          if (status) status.textContent = "浏览器不支持自动复制，请手动选择 Token。";
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(input.value);
+          button.textContent = "已复制";
+          if (status) status.textContent = "Token 已复制到剪贴板。";
+        } catch (_) {
+          input.select();
+          if (status) status.textContent = "自动复制被浏览器阻止，已为你选中 Token。";
+        }
+      });
+    });
+
+    document.querySelectorAll("form[data-confirm]").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        if (!window.confirm(form.dataset.confirm)) event.preventDefault();
       });
     });
 
