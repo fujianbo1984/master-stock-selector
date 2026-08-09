@@ -1,16 +1,16 @@
 # ECS 部署资产
 
-这些模板适用于单台 Ubuntu ECS：FastAPI 只监听 `127.0.0.1:8000`，三个
-SQLite 数据库放在 `/var/lib/masterstock`。可以通过 SSH 隧道直接访问，也可以在
-需要公网发布时另行配置 Nginx 和 HTTPS。
+这些模板适用于单台 Ubuntu ECS：FastAPI 监听 `0.0.0.0:8888`，三个
+SQLite 数据库放在 `/var/lib/masterstock`。安全组只需放行 TCP 8888，
+数据库端口不对外暴露。当前为直连 HTTP；未配置 HTTPS 时，不应在不可信网络中输入密码。
 
-部署前必须替换 Nginx 模板中的域名和证书路径，并创建：
+如后续改用 HTTPS，再替换 Nginx 模板中的域名和证书路径。基础部署需要创建：
 
 - 系统账号 `masterstock`；
 - `/opt/masterstock` 代码与项目虚拟环境；
 - `/var/lib/masterstock` 及 `/var/backups/masterstock`，所有者为 `masterstock`；
 - `/etc/masterstock/masterstock.env`，权限 `0600`，至少包含数据采集所需的密钥；
-  SSH 隧道下使用 HTTP 时设置 `MASTERSTOCK_SECURE_COOKIES=0`。
+  直连 HTTP 时设置 `MASTERSTOCK_SECURE_COOKIES=0`；切换到 HTTPS 后改为 `1`。
 
 安装模板后执行 `systemctl daemon-reload`，先启动 Web 并检查 `/healthz`，再启用
 `masterstock-daily.timer` 和 `masterstock-backup.timer`。首次备份必须手动运行
