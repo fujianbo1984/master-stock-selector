@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block body_class %}realtime-chart-body{% endblock %}
+{% block title %}{{ stock_name }} · 同花顺实时行情{% endblock %}
+{% block body %}
+<section class="realtime-chart-page" data-realtime-page aria-label="{{ stock_name }} 同花顺实时行情" tabindex="-1">
+  <header class="realtime-chart-header">
+    <a class="realtime-chart-brand" href="/" aria-label="返回龙场悟道首页">龙场悟道<span aria-hidden="true">悟</span></a>
+    <div class="realtime-chart-identity">
+      <strong>{{ stock_name }} <small>{{ symbol }}</small></strong>
+      <span>同花顺实时行情{% if industry_name %} · {{ industry_name }}{% endif %}</span>
+    </div>
+    <nav class="realtime-chart-navigation" aria-label="{{ navigation.section_label }}股票切换">
+      {% if navigation.total %}<span class="realtime-chart-position">{{ navigation.position }} / {{ navigation.total }}</span>{% endif %}
+      {% if navigation.previous %}<a class="button button-secondary button-compact realtime-stock-button" data-realtime-previous href="/a/stocks/{{ navigation.previous.symbol }}/realtime?{{ navigation.query }}" aria-label="上一只：{{ navigation.previous.name }}" aria-keyshortcuts="ArrowLeft" title="上一只：{{ navigation.previous.name }} · 键盘 ←"><img src="/static/vendor/lucide-chevron-left.svg" alt="" aria-hidden="true"><span>{{ navigation.previous.name }}</span></a>{% else %}<span class="button button-secondary button-compact realtime-stock-button is-disabled" aria-disabled="true"><img src="/static/vendor/lucide-chevron-left.svg" alt="" aria-hidden="true"><span>上一只</span></span>{% endif %}
+      {% if navigation.next %}<a class="button button-secondary button-compact realtime-stock-button" data-realtime-next href="/a/stocks/{{ navigation.next.symbol }}/realtime?{{ navigation.query }}" aria-label="下一只：{{ navigation.next.name }}" aria-keyshortcuts="ArrowRight" title="下一只：{{ navigation.next.name }} · 键盘 →"><span>{{ navigation.next.name }}</span><img src="/static/vendor/lucide-chevron-right.svg" alt="" aria-hidden="true"></a>{% else %}<span class="button button-secondary button-compact realtime-stock-button is-disabled" aria-disabled="true"><span>下一只</span><img src="/static/vendor/lucide-chevron-right.svg" alt="" aria-hidden="true"></span>{% endif %}
+      <a class="button button-secondary button-compact" href="/a/stocks/{{ symbol }}/chart?{{ navigation.query }}">站内日线</a>
+      <a class="text-link realtime-detail-link" href="/a/stocks/{{ symbol }}?{{ navigation.query }}">返回详情</a>
+    </nav>
+  </header>
+  <div class="realtime-chart-frame-shell">
+    <div class="realtime-chart-loading" data-realtime-loading>正在加载同花顺实时行情…</div>
+    <iframe title="{{ stock_name }} {{ symbol }} 同花顺实时行情" data-realtime-frame src="{{ tonghuashun_url }}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" allow="fullscreen" allowfullscreen></iframe>
+  </div>
+</section>
+<script src="/static/realtime-chart.js?v=20260810-keyboard-nav-v2"></script>
+{% endblock %}

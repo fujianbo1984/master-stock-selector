@@ -8,8 +8,18 @@
   <div class="page-ledger-meta"><span>Weinstein 方法规则</span><span>Minervini 方法规则</span></div>
 </section>
 
+{% if indices %}<section class="section index-stage-grid index-overview-grid" aria-label="四指数阶段摘要">
+  {% for row in indices %}<article class="index-stage-card stage-{{ row.stage|lower }}">
+    <span class="index-instrument-links"><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_name }}</a><a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_symbol }}</a></span>
+    <div class="index-method-result"><span>Weinstein</span><strong>{{ row.stage_label }}</strong></div>
+    <div class="index-method-result index-minervini-result"><span>Minervini 第二阶段</span><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></div>
+  </article>{% endfor %}
+</section>{% endif %}
+
 <section class="section panel index-ledger-panel">
   {% if indices %}
+  <details class="index-evidence-disclosure">
+    <summary><span><strong>完整指标证据</strong><small>有效周、均线、斜率、回报与价格位置</small></span><span class="disclosure-action">展开</span></summary>
   <div class="index-detail-grid">
     {% for row in indices %}
     <article class="panel index-detail-card stage-{{ row.stage|lower }}">
@@ -33,6 +43,7 @@
     </article>
     {% endfor %}
   </div>
+  </details>
   {% else %}<div class="empty">暂无指数阶段事实。请先运行后台计算任务。</div>{% endif %}
 </section>
 

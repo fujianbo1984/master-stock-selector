@@ -24,15 +24,13 @@
 
 <section class="section panel ledger-table-panel">
   <div class="section-heading"><div><p class="eyebrow">行业事实</p><h2>行业方法宽度</h2></div><span class="muted">显示 {{ rows|length }} 条 · 按入选数量排列，非行业排名</span></div>
-  {% if rows %}<div class="table-wrap"><table class="industry-observation-table" data-sortable="true"><thead><tr><th>行业</th><th>成员</th><th>Weinstein 符合</th><th>Weinstein 新入/重进</th><th>Weinstein 退出/中断</th><th>Minervini 符合</th><th>Minervini 新入/重进</th><th>Minervini 退出/中断</th><th>两法同时</th><th>并集</th><th>质量</th></tr></thead><tbody>
+  {% if rows %}<div class="table-wrap"><table class="industry-observation-table industry-observation-table-compact" data-sortable="true"><thead><tr><th>行业</th><th>成员</th><th>Weinstein</th><th>Minervini</th><th>两法同时</th><th>质量</th></tr></thead><tbody>
   {% for row in rows %}<tr>
     <td><a href="/a/industries/{{ row.industry_code }}/chart?date={{ query_date }}" title="打开 {{ row.industry_name }} 行业日线"><strong>{{ row.industry_name }}</strong><small>{{ row.industry_code }} · 申万2021三级</small></a></td>
     <td data-sort="{{ row.eligible_member_count }}">{{ row.eligible_member_count }}</td>
-    <td data-sort="{{ row.weinstein_pass_count }}"><strong>{{ row.weinstein_pass_count }}</strong> / {{ row.weinstein_evaluable_count }}{% if row.weinstein_pass_rate_pct is not none %}<small>{{ row.weinstein_pass_rate_pct }}%</small>{% endif %}</td>
-    <td>{{ row.w_entered_count + row.w_reentered_count }}</td><td>{{ row.w_exited_count + row.w_data_gap_count }}</td>
-    <td data-sort="{{ row.minervini_pass_count }}"><strong>{{ row.minervini_pass_count }}</strong> / {{ row.minervini_evaluable_count }}{% if row.minervini_pass_rate_pct is not none %}<small>{{ row.minervini_pass_rate_pct }}%</small>{% endif %}</td>
-    <td>{{ row.m_entered_count + row.m_reentered_count }}</td><td>{{ row.m_exited_count + row.m_data_gap_count }}</td>
-    <td data-sort="{{ row.both_pass_count }}"><strong>{{ row.both_pass_count }}</strong></td><td>{{ row.union_pass_count }}</td>
+    <td data-sort="{{ row.weinstein_pass_count }}"><strong>{{ row.weinstein_pass_count }}</strong> / {{ row.weinstein_evaluable_count }}{% if row.weinstein_pass_rate_pct is not none %}<small>{{ row.weinstein_pass_rate_pct }}% · 新/重 {{ row.w_entered_count + row.w_reentered_count }} · 退/断 {{ row.w_exited_count + row.w_data_gap_count }}</small>{% endif %}</td>
+    <td data-sort="{{ row.minervini_pass_count }}"><strong>{{ row.minervini_pass_count }}</strong> / {{ row.minervini_evaluable_count }}{% if row.minervini_pass_rate_pct is not none %}<small>{{ row.minervini_pass_rate_pct }}% · 新/重 {{ row.m_entered_count + row.m_reentered_count }} · 退/断 {{ row.m_exited_count + row.m_data_gap_count }}</small>{% endif %}</td>
+    <td data-sort="{{ row.both_pass_count }}"><strong>{{ row.both_pass_count }}</strong><small>并集 {{ row.union_pass_count }}</small></td>
     <td><span class="tag tag-{{ 'risk' if row.quality_state == 'UNKNOWN' else 'muted' if row.quality_state == 'SMALL_SAMPLE' else 'pass' }}">{{ row.quality_label }}</span></td>
   </tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">该日期没有符合当前筛选条件的行业事实。</div>{% endif %}
 </section>

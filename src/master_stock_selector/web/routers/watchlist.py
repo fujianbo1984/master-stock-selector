@@ -914,6 +914,71 @@ def build_watchlist_router(
             },
         )
 
+    @router.get("/a/stocks/{symbol}/realtime", response_class=HTMLResponse)
+    def stock_realtime(
+        request: Request,
+        symbol: str,
+        date: str | None = None,
+        view: str | None = None,
+        method: str = "all",
+        state: str = "all",
+        manual: str = "all",
+        min_cap: int = Query(default=50),
+        industry: str = "",
+        q: str = "",
+        section: str = "",
+    ) -> HTMLResponse:
+        payload = repository.stock_detail(symbol)
+        if not payload["latest"]:
+            raise HTTPException(status_code=404, detail="stock has no watchlist facts")
+        query_date = date or max(
+            (str(row.get("as_of_date") or "") for row in payload["latest"].values()),
+            default="",
+        )
+        navigation = _stock_navigation(
+            repository,
+            market_reader,
+            symbol=symbol,
+            query_date=query_date,
+            view=view,
+            method=method,
+            state=state,
+            manual=manual,
+            min_cap=_market_cap_floor(min_cap),
+            industry=industry,
+            q=q,
+            section=section,
+            rows_for_date=lambda value: rows_for_user(
+                request, value, include_liquidity=False
+            ),
+            personal_rows=(
+                personal_navigation_rows(request)
+                if section.partition("#")[0] == "personal-observations"
+                else None
+            ),
+            position_rows=(
+                open_position_navigation_rows(request)
+                if section.partition("#")[0] == "open-positions"
+                else None
+            ),
+        )
+        external_urls = _stock_external_urls(symbol)
+        if not external_urls["tonghuashun_url"]:
+            raise HTTPException(status_code=404, detail="realtime page is unavailable")
+        return render(
+            request,
+            "ashare/watchlist_stock_realtime.html",
+            {
+                "query_date": query_date,
+                "latest_date": repository.latest_fact_date(),
+                "symbol": symbol.upper(),
+                "stock_name": str(payload["identity"].get("name") or symbol.upper()),
+                "industry_name": str(payload["industry"].get("industry_name") or ""),
+                "tonghuashun_url": external_urls["tonghuashun_url"],
+                "navigation": navigation,
+            },
+        )
+
     @router.post("/a/stocks/{symbol}/review", response_class=RedirectResponse)
     async def save_stock_review(request: Request, symbol: str) -> RedirectResponse:
         user = require_user(request)
@@ -1727,24 +1792,17 @@ def _change_rows(
 def _sort_daily_rows(
     rows: list[dict[str, Any]], *, view: str, method: str
 ) -> list[dict[str, Any]]:
-    if method not in METHOD_LABELS:
-        return sorted(rows, key=lambda row: str(row.get("symbol") or ""))
-    return sorted(
-        rows,
-        key=lambda row: (
-            0
-            if str(row.get("methods", {}).get(method, {}).get("state") or "")
-            in {"ENTERED", "REENTERED"}
-            else 1,
-            -int(
-                row.get("methods", {})
-                .get(method, {})
-                .get("consecutive_sessions")
-                or 0
-            ),
-            str(row.get("symbol") or ""),
-        ),
-    )
+    del view, method
+
+    def change_key(row: dict[str, Any]) -> tuple[bool, float, str]:
+        value = row.get("change_pct")
+        try:
+            change_pct = float(value)
+        except (TypeError, ValueError):
+            return True, 0.0, str(row.get("symbol") or "")
+        return False, -change_pct, str(row.get("symbol") or "")
+
+    return sorted(rows, key=change_key)
 
 
 def _prepare_daily_rows(

@@ -44,6 +44,14 @@
     {% endif %}
   </div>
 </header>
+{% if prominent_investment_notice %}
+<aside class="investment-notice investment-notice-prominent" role="note" aria-label="投资风险提示">
+  <strong>仅供研究，不构成投资建议</strong>
+  <span>本网站仅用于股票研究、方法规则核验与个人观察记录，不构成任何投资建议、收益承诺或自动买卖指令。投资决策及风险由用户自行承担。</span>
+</aside>
+{% else %}
+<aside class="investment-notice investment-notice-compact" role="note"><strong>研究工具</strong><span>不构成投资建议或自动买卖指令</span></aside>
+{% endif %}
 {% if not suppress_page_intro %}
 <section class="page-intro" aria-labelledby="page-title">
   <div>

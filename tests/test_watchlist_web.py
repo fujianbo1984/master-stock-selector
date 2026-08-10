@@ -628,6 +628,7 @@ def test_daily_query_preserves_filters_and_discloses_fallbacks(tmp_path):
     )
     assert f'href="{canonical_return}"' in detail.text
     assert f'href="{canonical_return}"' in chart.text
+    assert "/a/stocks/000001.SZ/realtime?date=2026-07-31" in detail.text
 
     fallback = client.get("/a/daily?date=2026-08-01&min_cap=0")
     assert "请求日期 2026-08-01 没有观察事实" in fallback.text
@@ -648,6 +649,12 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
 
     assert response.status_code == 200
     assert "大师观察池" in response.text
+    assert 'aria-label="投资风险提示"' in response.text
+    assert "仅供研究，不构成投资建议" in response.text
+    assert "不构成任何投资建议、收益承诺或自动买卖指令" in response.text
+    assert response.text.index("投资风险提示") < response.text.index("今日观察池")
+    assert 'class="section grid kpi-grid watchlist-summary query-summary home-summary"' in response.text
+    assert "数据与方法说明" in response.text
     assert "Weinstein" in response.text
     assert "Minervini" in response.text
     assert "两法同时符合" in response.text
@@ -722,6 +729,9 @@ def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composit
     assert "399006.SZ" in response.text
     assert "000688.SH" in response.text
     assert "市场总分" not in response.text
+    assert "不构成投资建议或自动买卖指令" in response.text
+    assert 'class="section index-stage-grid index-overview-grid"' in response.text
+    assert 'class="index-evidence-disclosure"' in response.text
     payload = client.get("/api/a/indices/2026-07-31").json()
     assert payload["methods"] == {
         "weinstein": "full_stage",
@@ -754,6 +764,9 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
         "manual-review-panel"
     )
     assert "两种方法逐项对照" in detail.text
+    assert "不构成投资建议或自动买卖指令" in detail.text
+    assert 'class="evidence-ledger-details"' in detail.text
+    assert detail.text.index("当前判定") < detail.text.index("展开日期、指标与规则证据")
     assert '<details class="section stock-disclosure trade-journal-panel"' in detail.text
     assert saved.status_code == 200
     assert 'manual-focus">重点' in saved.text
@@ -977,6 +990,10 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert "industry-weinstein-confirmation-v1" in chart.text
     assert 'href="/a/daily?date=2026-07-31&industry=851911.SI"' in chart.text
     assert "不计分、不判定“主线”" in page.text
+    assert "不构成投资建议或自动买卖指令" in page.text
+    assert "industry-observation-table-compact" in page.text
+    assert "<th>Weinstein 新入/重进</th>" not in page.text
+    assert "新/重" in page.text
     assert "小样本，仅看数量" in page.text
     assert "行业总分" not in page.text
     assert 'aria-current="page" href="/a/industries?date=2026-07-31"' in page.text
@@ -1120,6 +1137,22 @@ def test_open_positions_support_previous_and_next_chart_navigation(tmp_path):
     assert "/a/stocks/000001.SZ/chart?date=2026-07-31" in middle_chart.text
     assert "/a/stocks/000003.SZ/chart?date=2026-07-31" in middle_chart.text
 
+    middle_realtime = client.get(
+        "/a/stocks/000002.SZ/realtime?date=2026-07-31&section=open-positions"
+    )
+    assert middle_realtime.status_code == 200
+    assert "ST示例 · 同花顺实时行情" in middle_realtime.text
+    assert "2 / 3" in middle_realtime.text
+    assert 'aria-label="上一只：ST未来名称"' in middle_realtime.text
+    assert 'aria-label="下一只：小盘示例"' in middle_realtime.text
+    assert 'aria-keyshortcuts="ArrowLeft"' in middle_realtime.text
+    assert 'aria-keyshortcuts="ArrowRight"' in middle_realtime.text
+    assert "/a/stocks/000001.SZ/realtime?date=2026-07-31" in middle_realtime.text
+    assert "/a/stocks/000003.SZ/realtime?date=2026-07-31" in middle_realtime.text
+    assert 'src="https://stockpage.10jqka.com.cn/000002/"' in middle_realtime.text
+    assert 'sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"' in middle_realtime.text
+    assert 'class="app-body realtime-chart-body"' in middle_realtime.text
+
     last_chart = client.get(
         "/a/stocks/000003.SZ/chart?date=2026-07-31&section=open-positions"
     )
@@ -1196,6 +1229,36 @@ def test_watchlist_excludes_st_and_hides_small_cap_by_default(tmp_path):
     assert client.get("/a/daily?min_cap=42").status_code == 422
 
 
+def test_daily_watchlist_orders_quotes_by_change_pct_descending(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    market_path = tmp_path / "market.sqlite3"
+    _seed_watchlist(watchlist_path)
+    _seed_filter_cases(watchlist_path)
+    _seed_market_context(market_path)
+    with sqlite3.connect(market_path) as connection:
+        connection.execute(
+            """
+            UPDATE daily_bars
+            SET pct_chg = 9.5
+            WHERE market = 'ashare' AND symbol = '000003.SZ'
+              AND trade_date = '2026-07-31'
+            """
+        )
+    client = TestClient(
+        create_app(
+            market_database=market_path,
+            watchlist_database=watchlist_path,
+        )
+    )
+
+    page = client.get(
+        "/a/daily?date=2026-07-31&view=current&method=minervini&min_cap=0"
+    )
+
+    assert page.status_code == 200
+    assert page.text.index("小盘示例") < page.text.index("平安银行")
+
+
 def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path):
     watchlist_path = tmp_path / "master_watchlist.sqlite3"
     market_path = tmp_path / "market.sqlite3"
@@ -1229,6 +1292,11 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'class="chart-workbench-title"' in page.text
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in page.text
     assert "https://stockpage.10jqka.com.cn/000001/" in page.text
+    assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
+    assert 'data-chart-source=' not in page.text
+    assert 'data-chart-pane=' not in page.text
+    assert "stock-chart.js?v=20260809-volume-pane-v19" in page.text
+    assert "stock-chart-source.js" not in page.text
     assert 'data-kc-source' in page.text
     assert 'data-chart-limit="all"' in page.text
     assert chart.status_code == 200
@@ -1245,6 +1313,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert all_payload["bars"][0]["close"] == 10.4
     assert payload["keltner"][-1]["upper"] is not None
     assert "trade_overlay" not in payload
+
     overlay = client.get(
         "/api/me/stocks/000001.SZ/overlay"
         "?date=2026-06-30&price_scale_id=qfq-scale-v1"
@@ -1333,6 +1402,14 @@ def test_private_review_overlays_public_cache_and_exposes_timing(tmp_path):
     static = client.get("/static/vendor/lightweight-charts-5.1.0.js")
     assert static.status_code == 200
     assert static.headers["cache-control"] == "public, max-age=31536000, immutable"
+    realtime_controller = client.get("/static/realtime-chart.js")
+    assert realtime_controller.status_code == 200
+    assert realtime_controller.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert 'frame.addEventListener("load"' in realtime_controller.text
+    assert 'window.addEventListener("keydown"' in realtime_controller.text
+    assert 'event.key === "ArrowLeft"' in realtime_controller.text
+    assert "window.location.assign(target.href)" in realtime_controller.text
+    assert "page?.focus({ preventScroll: true })" in realtime_controller.text
 
 
 def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(tmp_path):
