@@ -1107,6 +1107,7 @@ def build_watchlist_router(
             bars = _weekly_bars(bars)
         if len(bars) < 2:
             return {"status": "DATA_GAP", "reason": "INSUFFICIENT_DAILY_OHLC", "bars": []}
+        bars = _with_period_changes(bars)
         scale_ids = {str(row.get("price_scale_id") or "") for row in bars}
         if len(scale_ids) != 1 or not next(iter(scale_ids)):
             return {"status": "DATA_GAP", "reason": "INCONSISTENT_PRICE_SCALE", "bars": []}
@@ -1622,6 +1623,28 @@ def _weekly_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "amount": sum(float(item.get("amount") or 0) for item in values),
         })
     return weekly
+
+
+def _with_period_changes(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach close-to-close changes on the chart's existing adjusted-price scale."""
+
+    decorated: list[dict[str, Any]] = []
+    previous_close: float | None = None
+    for row in bars:
+        item = dict(row)
+        close = float(item["close"])
+        item["previous_close"] = previous_close
+        item["change_amount"] = (
+            round(close - previous_close, 6) if previous_close is not None else None
+        )
+        item["change_pct"] = (
+            round((close / previous_close - 1) * 100, 2)
+            if previous_close is not None and previous_close != 0.0
+            else None
+        )
+        decorated.append(item)
+        previous_close = close
+    return decorated
 
 
 def _build_candlestick_chart(bars: list[dict[str, Any]]) -> dict[str, Any]:

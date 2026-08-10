@@ -1295,8 +1295,10 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260809-volume-pane-v19" in page.text
+    assert "stock-chart.js?v=20260810-period-change-v20" in page.text
     assert "stock-chart-source.js" not in page.text
+    assert 'data-chart-period-change' in page.text
+    assert "当日涨跌幅" in page.text
     assert 'data-kc-source' in page.text
     assert 'data-chart-limit="all"' in page.text
     assert chart.status_code == 200
@@ -1305,6 +1307,10 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert payload["adjustment"] == "qfq"
     assert payload["price_scale_id"] == "qfq-scale-v1"
     assert len(payload["bars"]) == 30
+    assert payload["bars"][0]["change_pct"] is None
+    assert payload["bars"][-1]["previous_close"] == 13.4
+    assert payload["bars"][-1]["change_amount"] == 0.1
+    assert payload["bars"][-1]["change_pct"] == 0.75
     all_payload = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30"
     ).json()
@@ -1325,6 +1331,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     ).json()
     assert weekly["interval"] == "week"
     assert len(weekly["bars"]) < len(payload["bars"])
+    assert weekly["bars"][-1]["change_pct"] is not None
     open_source = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&source=open"
     ).json()

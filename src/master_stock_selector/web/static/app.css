@@ -882,6 +882,10 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-legend .legend-ma20 { background: #d28b18; }
 .chart-legend .legend-ma50 { background: #5b6fc7; }
 .chart-legend .legend-kc { background: #a9b0b7; }
+.chart-period-change { display: inline-flex; align-items: baseline; gap: 7px; margin-right: 5px; padding-right: 12px; border-right: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
+.chart-period-change strong { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 13px; }
+.chart-period-change.is-up strong { color: #c94e47; }
+.chart-period-change.is-down strong { color: #258460; }
 .chart-page-hero h1 small { color: var(--muted); font-family: Georgia, "Times New Roman", serif; font-size: 16px; white-space: nowrap; }
 .chart-page-hero { min-height: 0; padding: 12px 22px; }
 .chart-page-hero h1 { margin: 0; font-size: 30px; }

@@ -53,10 +53,10 @@
       </div>
     </details>
   </div>
-  <div class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>KC <span class="legend-buy">▲</span>买入 <span class="legend-sell">▼</span>卖出 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
+  <div class="chart-legend"><span class="chart-period-change" data-chart-period-change aria-live="polite"><span data-chart-change-date>—</span><strong data-chart-change-value>当日涨跌幅 —</strong></span><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>KC <span class="legend-buy">▲</span>买入 <span class="legend-sell">▼</span>卖出 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
   <div class="stock-chart-stage"><div class="stock-chart-canvas" data-chart-canvas></div><canvas class="drawing-overlay" data-drawing-overlay aria-label="趋势线与水平线绘图区"></canvas></div>
   <p class="muted chart-boundary">画线仅保存为个人观察标注，并绑定当前前复权尺度；若本地复权尺度不一致，系统不会加载或套用旧标注。</p>
 </section>
 <script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-<script src="/static/stock-chart.js?v=20260809-volume-pane-v19"></script>
+<script src="/static/stock-chart.js?v=20260810-period-change-v20"></script>
 {% endblock %}

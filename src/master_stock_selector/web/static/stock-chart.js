@@ -6,6 +6,9 @@
   const context = overlay.getContext("2d");
   const volumeInput = root.querySelector("[data-volume]");
   const kcSummary = root.querySelector("[data-kc-summary]");
+  const changeReadout = root.querySelector("[data-chart-period-change]");
+  const changeDate = root.querySelector("[data-chart-change-date]");
+  const changeValue = root.querySelector("[data-chart-change-value]");
   const drawingActions = root.querySelector("[data-drawing-actions]");
   const drawingHint = root.querySelector("[data-drawing-hint]");
   const deleteSelectedButton = root.querySelector("[data-delete-selected]");
@@ -163,6 +166,16 @@
   const storePayload = (url, value) => {
     try { window.sessionStorage.setItem(chartCacheKey(url), JSON.stringify(value)); } catch (_) { /* Browser storage can be unavailable. */ }
   };
+  const chartDate = (value) => typeof value === "string" ? value : `${value.year}-${String(value.month).padStart(2, "0")}-${String(value.day).padStart(2, "0")}`;
+  const updateChangeReadout = (row) => {
+    if (!row) return;
+    const label = interval === "week" ? "本周涨跌幅" : "当日涨跌幅";
+    const value = typeof row.change_pct === "number" ? row.change_pct : null;
+    changeDate.textContent = row.trade_date;
+    changeValue.textContent = `${label} ${value === null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`}`;
+    changeReadout.classList.toggle("is-up", value !== null && value > 0);
+    changeReadout.classList.toggle("is-down", value !== null && value < 0);
+  };
   const withPrivateOverlay = async (publicPayload) => {
     const combined = { ...publicPayload, drawings: [], trade_overlay: { executions: [], open_stops: [] } };
     if (!privateOverlayUrl || publicPayload.status !== "OK") return combined;
@@ -202,6 +215,7 @@
     })));
     drawings = (payload.drawings || []).map(canonicalizeDrawing);
     if (!selectedDrawing()) selectedDrawingId = null;
+    updateChangeReadout(payload.bars[payload.bars.length - 1]);
     updateDrawingActions(); resize(); fitBarsToViewport();
   };
   const request = async () => {
@@ -320,12 +334,17 @@
   });
   chart.subscribeClick((param) => {
     if (!payload || !param.time) return;
-    const chartDate = typeof param.time === "string" ? param.time : `${param.time.year}-${String(param.time.month).padStart(2, "0")}-${String(param.time.day).padStart(2, "0")}`;
-    const matches = (payload.trade_overlay?.executions || []).filter(item => item.traded_on === chartDate);
+    const selectedDate = chartDate(param.time);
+    const matches = (payload.trade_overlay?.executions || []).filter(item => item.traded_on === selectedDate);
     if (matches.length && !recordMode) { window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?edit_trade=${encodeURIComponent(matches[0].execution_id)}#trade-journal`); return; }
     if (!recordMode || !param.point) return;
     const price = candles.coordinateToPrice(param.point.y);
-    if (price) window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?traded_on=${encodeURIComponent(chartDate)}&trade_price=${encodeURIComponent(price.toFixed(3))}#trade-journal`);
+    if (price) window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?traded_on=${encodeURIComponent(selectedDate)}&trade_price=${encodeURIComponent(price.toFixed(3))}#trade-journal`);
+  });
+  chart.subscribeCrosshairMove((param) => {
+    if (!payload?.bars?.length) return;
+    const selectedDate = param.time ? chartDate(param.time) : "";
+    updateChangeReadout(payload.bars.find(row => row.trade_date === selectedDate) || payload.bars[payload.bars.length - 1]);
   });
   deleteSelectedButton.addEventListener("click", async () => { const drawing = selectedDrawing(); if (!drawing) return; try { await removeDrawing(drawing); drawingHint.textContent = "已删除选中画线"; } catch (_) { drawingHint.textContent = "删除失败，请重试"; } });
   root.querySelector("[data-clear-drawings]").addEventListener("click", async () => { if (!payload || !drawings.length || !window.confirm("清空当前复权尺度下的全部个人画线？")) return; for (const drawing of [...drawings]) await removeDrawing(drawing); });
