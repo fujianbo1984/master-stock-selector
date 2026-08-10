@@ -1796,9 +1796,11 @@ def _sort_daily_rows(
 
     def change_key(row: dict[str, Any]) -> tuple[bool, float, str]:
         value = row.get("change_pct")
+        if value is None:
+            return True, 0.0, str(row.get("symbol") or "")
         try:
-            change_pct = float(value)
-        except (TypeError, ValueError):
+            change_pct = float(str(value))
+        except ValueError:
             return True, 0.0, str(row.get("symbol") or "")
         return False, -change_pct, str(row.get("symbol") or "")
 
