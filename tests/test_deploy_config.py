@@ -24,5 +24,6 @@ def test_public_nginx_entry_is_read_only_and_blocks_private_routes() -> None:
     assert 'proxy_set_header Authorization "";' in config
     assert "location / {\n        return 404;\n    }" in config
     assert "api/a/" in config
+    assert "stocks/[^/]+(?:/(?:chart|realtime))?" in config
     assert "api/v1" not in config
     assert "api/me" not in config

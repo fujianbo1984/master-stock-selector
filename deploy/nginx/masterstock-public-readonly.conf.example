@@ -16,7 +16,7 @@ server {
 
     # Strict allowlist for public facts and assets. Authentication headers are
     # stripped so mixed public/private FastAPI pages always render anonymously.
-    location ~ ^/(?:favicon\.ico|static/.*|healthz|a/(?:daily|industries|indices|runs|industries/[^/]+/chart|stocks/[^/]+(?:/chart)?)|api/a/(?:stocks/[^/]+/chart|watchlist/[^/]+|industries/[^/]+(?:/[^/]+)?|indices/[^/]+))$ {
+    location ~ ^/(?:favicon\.ico|static/.*|healthz|a/(?:daily|industries|indices|runs|industries/[^/]+/chart|stocks/[^/]+(?:/(?:chart|realtime))?)|api/a/(?:stocks/[^/]+/chart|watchlist/[^/]+|industries/[^/]+(?:/[^/]+)?|indices/[^/]+))$ {
         limit_except GET HEAD {
             deny all;
         }
