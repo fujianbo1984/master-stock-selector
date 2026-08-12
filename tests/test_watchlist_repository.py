@@ -4,7 +4,10 @@ import sqlite3
 
 import pytest
 
-from master_stock_selector.watchlist.methods import MINERVINI_POLICY_VERSION
+from master_stock_selector.watchlist.methods import (
+    MINERVINI_POLICY_VERSION,
+    WEINSTEIN_POLICY_VERSION,
+)
 from master_stock_selector.watchlist.repository import MarketDataReader, WatchlistRepository
 
 
@@ -59,6 +62,93 @@ def test_repository_derives_enter_continue_exit_and_reentry(tmp_path):
         ("2026-07-04", "EXITED", "2026-07-02", None, 0),
         ("2026-07-05", "REENTERED", "2026-07-02", "2026-07-05", 1),
     ]
+
+
+def test_repository_returns_retained_method_events_for_chart(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    facts = []
+    minervini_results = ["FAIL", "PASS", "UNKNOWN", "PASS"]
+    weinstein_results = ["FAIL", "PASS", "TRANSITION", "PASS"]
+    weinstein_stages = ["STAGE_1", "STAGE_2", "STAGE_3", "STAGE_2"]
+    for index, day in enumerate(range(1, 5)):
+        as_of_date = f"2026-07-{day:02d}"
+        facts.extend(
+            [
+                {
+                    "as_of_date": as_of_date,
+                    "symbol": "000001.SZ",
+                    "method": "minervini",
+                    "result": minervini_results[index],
+                    "policy_version": MINERVINI_POLICY_VERSION,
+                    "evidence": {
+                        "profile": {
+                            "failed_checks": (
+                                ["close_above_sma50"]
+                                if minervini_results[index] == "FAIL"
+                                else []
+                            )
+                        }
+                    },
+                    "source_digest": "digest",
+                    "origin": "RECONSTRUCTED",
+                },
+                {
+                    "as_of_date": as_of_date,
+                    "symbol": "000001.SZ",
+                    "method": "weinstein",
+                    "result": weinstein_results[index],
+                    "policy_version": WEINSTEIN_POLICY_VERSION,
+                    "evidence": {
+                        "profile": {
+                            "stage": weinstein_stages[index],
+                            "stage_started_on": as_of_date,
+                            "duration_weeks": 1,
+                            "effective_week_end": as_of_date,
+                        }
+                    },
+                    "source_digest": "digest",
+                    "origin": "RECONSTRUCTED",
+                },
+            ]
+        )
+    repository.persist_run(
+        stock_facts=facts,
+        index_facts=[],
+        receipt={
+            "run_id": "chart-events",
+            "as_of_date": "2026-07-04",
+            "from_date": "2026-07-01",
+            "origin": "RECONSTRUCTED",
+            "minervini_policy_version": MINERVINI_POLICY_VERSION,
+            "weinstein_policy_version": WEINSTEIN_POLICY_VERSION,
+            "market_database": "/tmp/market.sqlite3",
+            "source_digest": "source",
+            "counts": {},
+            "status": "SUCCESS",
+            "started_at": "2026-07-04T10:00:00+08:00",
+            "finished_at": "",
+        },
+    )
+
+    result = repository.stock_method_chart_events(
+        "000001.sz", "2026-07-02", "2026-07-04"
+    )
+
+    assert result["coverage"]["weinstein"] == {
+        "from_date": "2026-07-01",
+        "to_date": "2026-07-04",
+        "policy_version": WEINSTEIN_POLICY_VERSION,
+    }
+    assert [(item["method"], item["state"]) for item in result["events"]] == [
+        ("minervini", "ENTERED"),
+        ("weinstein", "ENTERED"),
+        ("minervini", "DATA_GAP"),
+        ("weinstein", "EXITED"),
+        ("minervini", "REENTERED"),
+        ("weinstein", "REENTERED"),
+    ]
+    assert result["events"][3]["summary"].endswith("Stage 3")
+    assert result["events"][4]["label"] == "M再"
 
 
 def test_repository_keeps_system_facts_immutable_but_allows_manual_review(tmp_path):

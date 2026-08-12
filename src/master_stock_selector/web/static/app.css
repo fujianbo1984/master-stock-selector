@@ -882,6 +882,9 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-legend .legend-ma20 { background: #d28b18; }
 .chart-legend .legend-ma50 { background: #5b6fc7; }
 .chart-legend .legend-kc { background: #a9b0b7; }
+.legend-method { font-weight: 800; }
+.legend-weinstein { color: #315a9a; }
+.legend-minervini { color: #986719; }
 .chart-period-change { display: inline-flex; align-items: baseline; gap: 7px; margin-right: 5px; padding-right: 12px; border-right: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
 .chart-period-change strong { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 13px; }
 .chart-period-change.is-up strong { color: #c94e47; }
@@ -937,7 +940,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .kc-settings-current { grid-column: 1 / -1; margin: 0; padding-bottom: 9px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; white-space: nowrap; }
 .drawing-tool-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-right: 12px; border-right: 1px solid var(--line); }
 .drawing-tool-group [aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
-.chart-toolbar .chart-indicators { display: inline-flex; flex: 0 0 auto; flex-wrap: nowrap; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.chart-toolbar .chart-indicators { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .chart-toolbar .chart-indicators label { display: inline-flex; grid-template-columns: none; align-items: center; gap: 4px; color: var(--text); font-size: 11px; line-height: 1; white-space: nowrap; }
 .chart-toolbar .chart-indicators input[type="checkbox"] { box-sizing: border-box; width: 13px; min-width: 13px; height: 13px; min-height: 13px; margin: 0; padding: 0; accent-color: var(--accent); }
 .legend-buy { color: #c94e47; font-weight: 800; }.legend-sell { color: #258460; font-weight: 800; }
@@ -947,7 +950,10 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .stock-chart-stage { position: relative; height: clamp(520px, calc(100vh - 245px), 680px); min-height: 520px; border: 1px solid var(--line); background: #fffdfa; }
 .stock-chart-canvas { width: 100%; height: 100%; }
 .drawing-overlay { position: absolute; z-index: 2; top: 0; right: 0; left: 0; pointer-events: none; }
-.chart-boundary { margin: 10px 0 0; font-size: 11px; }
+.chart-method-event-detail { display: grid; gap: 3px; margin-top: 8px; padding: 9px 11px; border-left: 3px solid var(--accent); background: var(--panel-soft); color: var(--text); font-size: 11px; line-height: 1.45; }
+.chart-method-event-detail[hidden] { display: none; }
+.chart-method-event-detail strong { font-family: "Songti SC", "STSong", serif; font-size: 13px; }
+.chart-method-event-detail small { color: var(--muted); }
 .industry-chart-wrap { overflow-x: auto; border-top: 1px solid var(--line); background: #fffdfa; }
 .industry-kline { display: block; min-width: 760px; width: 100%; height: auto; }
 .chart-grid-line { stroke: #e5dfd5; stroke-width: 1; }

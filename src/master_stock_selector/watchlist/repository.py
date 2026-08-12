@@ -1816,6 +1816,158 @@ class WatchlistRepository:
             ).fetchall()
         return [str(row[0]) for row in reversed(rows)]
 
+    def stock_method_chart_events(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+    ) -> dict[str, Any]:
+        """Return retained PIT method transitions for a stock chart.
+
+        The event date is the date on which the stored conclusion was available.
+        Weinstein's completed-week date is returned separately and must never be
+        used to move a marker earlier than that availability date.
+        """
+
+        self.initialize()
+        symbol = symbol.upper()
+        methods = ("weinstein", "minervini")
+        empty_coverage = {
+            method: {
+                "from_date": "",
+                "to_date": "",
+                "policy_version": "",
+            }
+            for method in methods
+        }
+        if not start_date or not end_date or start_date > end_date:
+            return {"events": [], "coverage": empty_coverage}
+
+        with self.connect() as connection:
+            policies = self._chart_policy_versions(connection, end_date)
+            coverage: dict[str, dict[str, Any]] = {}
+            events: list[dict[str, Any]] = []
+            for method in methods:
+                policy_version = str(policies.get(method) or "")
+                if not policy_version:
+                    coverage[method] = empty_coverage[method]
+                    continue
+                bounds = connection.execute(
+                    """
+                    SELECT MIN(as_of_date) AS from_date, MAX(as_of_date) AS to_date
+                    FROM stock_method_daily_fact
+                    WHERE symbol = ? AND method = ? AND policy_version = ?
+                      AND as_of_date <= ?
+                    """,
+                    (symbol, method, policy_version, end_date),
+                ).fetchone()
+                coverage[method] = {
+                    "from_date": str(bounds["from_date"] or "") if bounds else "",
+                    "to_date": str(bounds["to_date"] or "") if bounds else "",
+                    "policy_version": policy_version,
+                }
+                rows = connection.execute(
+                    """
+                    SELECT t.as_of_date, t.method, t.state, t.policy_version,
+                           t.reason, t.origin, f.result, f.evidence_json
+                    FROM stock_method_transition AS t
+                    JOIN stock_method_daily_fact AS f
+                      ON f.as_of_date=t.as_of_date AND f.symbol=t.symbol
+                     AND f.method=t.method AND f.policy_version=t.policy_version
+                    WHERE t.symbol = ? AND t.method = ? AND t.policy_version = ?
+                      AND t.as_of_date BETWEEN ? AND ?
+                      AND t.state IN ('ENTERED', 'REENTERED', 'EXITED', 'DATA_GAP')
+                    ORDER BY t.as_of_date, t.method, t.state
+                    """,
+                    (symbol, method, policy_version, start_date, end_date),
+                ).fetchall()
+                for row in rows:
+                    evidence = json.loads(str(row["evidence_json"] or "{}"))
+                    profile = dict(evidence.get("profile") or {})
+                    state = str(row["state"])
+                    as_of_date = str(row["as_of_date"])
+                    effective_date = (
+                        str(profile.get("effective_week_end") or as_of_date)
+                        if method == "weinstein"
+                        else as_of_date
+                    )
+                    event: dict[str, Any] = {
+                        "id": (
+                            f"method:{method}:{policy_version}:"
+                            f"{as_of_date}:{state}"
+                        ),
+                        "method": method,
+                        "state": state,
+                        "result": str(row["result"]),
+                        "label": _chart_event_label(method, state),
+                        "as_of_date": as_of_date,
+                        "effective_date": effective_date,
+                        "policy_version": policy_version,
+                        "summary": _chart_event_summary(method, state, profile),
+                        "origin": str(row["origin"]),
+                    }
+                    if method == "weinstein":
+                        event.update(
+                            {
+                                "stage": str(profile.get("stage") or "UNKNOWN"),
+                                "stage_started_on": str(
+                                    profile.get("stage_started_on") or ""
+                                ),
+                                "duration_weeks": int(
+                                    profile.get("duration_weeks") or 0
+                                ),
+                            }
+                        )
+                    else:
+                        event["failed_checks"] = list(
+                            profile.get("failed_checks") or []
+                        )
+                    events.append(event)
+        events.sort(key=lambda item: (item["as_of_date"], item["method"], item["state"]))
+        return {"events": events, "coverage": coverage}
+
+    @staticmethod
+    def _chart_policy_versions(
+        connection: sqlite3.Connection, end_date: str
+    ) -> dict[str, str]:
+        receipt = connection.execute(
+            """
+            SELECT minervini_policy_version, weinstein_policy_version
+            FROM watchlist_run_receipt
+            WHERE status = 'SUCCESS' AND as_of_date <= ?
+            ORDER BY as_of_date DESC, created_at DESC LIMIT 1
+            """,
+            (end_date,),
+        ).fetchone()
+        if receipt:
+            return {
+                "minervini": str(receipt["minervini_policy_version"]),
+                "weinstein": str(receipt["weinstein_policy_version"]),
+            }
+
+        policies: dict[str, str] = {}
+        for method in ("weinstein", "minervini"):
+            latest = connection.execute(
+                """
+                SELECT MAX(as_of_date) FROM stock_method_daily_fact
+                WHERE method = ? AND as_of_date <= ?
+                """,
+                (method, end_date),
+            ).fetchone()
+            latest_date = str(latest[0] or "") if latest else ""
+            if not latest_date:
+                continue
+            versions = connection.execute(
+                """
+                SELECT DISTINCT policy_version FROM stock_method_daily_fact
+                WHERE method = ? AND as_of_date = ?
+                """,
+                (method, latest_date),
+            ).fetchall()
+            if len(versions) == 1:
+                policies[method] = str(versions[0][0])
+        return policies
+
     def watchlist_rows(self, as_of_date: str) -> list[dict[str, Any]]:
         self.initialize()
         with self.connect() as connection:
@@ -2682,6 +2834,40 @@ def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "expectancy": round(sum(pnl_values) / count, 2) if count else None,
         "avg_holding_days": round(sum(int(item["holding_days"]) for item in trades) / count, 1) if count else None,
     }
+
+
+def _chart_event_label(method: str, state: str) -> str:
+    prefix = "W" if method == "weinstein" else "M"
+    suffix = {
+        "ENTERED": "入",
+        "REENTERED": "再",
+        "EXITED": "出",
+        "DATA_GAP": "?",
+    }.get(state, "?")
+    return f"{prefix}{suffix}"
+
+
+def _chart_event_summary(
+    method: str, state: str, profile: Mapping[str, Any]
+) -> str:
+    if state == "DATA_GAP":
+        return (
+            "周线历史不足，暂不能判断阶段"
+            if method == "weinstein"
+            else "必要历史或横截面 RS 数据不足"
+        )
+    if method == "weinstein":
+        stage = str(profile.get("stage") or "UNKNOWN").replace("STAGE_", "Stage ")
+        if state == "ENTERED":
+            return "进入 Weinstein Stage 2"
+        if state == "REENTERED":
+            return "重新进入 Weinstein Stage 2"
+        return f"离开 Weinstein Stage 2，当前为 {stage}"
+    if state == "ENTERED":
+        return "Minervini 趋势模板全部满足"
+    if state == "REENTERED":
+        return "重新满足 Minervini 趋势模板"
+    return "Minervini 趋势模板不再全部满足"
 
 
 def _json(value: Any) -> str:

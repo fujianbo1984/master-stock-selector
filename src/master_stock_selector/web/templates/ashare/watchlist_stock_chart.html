@@ -36,7 +36,7 @@
   <div class="chart-toolbar" aria-label="图表设置">
     <div class="chart-toolbar-main">
       <div class="chart-periods" role="group" aria-label="周期与显示区间"><span class="chart-group-label">周期</span><button class="button button-secondary button-compact" type="button" data-chart-interval="day" aria-pressed="true">日线</button><button class="button button-secondary button-compact" type="button" data-chart-interval="week" aria-pressed="false">周线</button><span class="chart-group-divider" aria-hidden="true"></span><span class="chart-group-label">区间</span><button class="button button-secondary button-compact" type="button" data-chart-limit="260" aria-pressed="true">一年</button><button class="button button-secondary button-compact" type="button" data-chart-limit="all" aria-pressed="false">全部</button></div>
-      <div class="chart-indicators" role="group" aria-label="指标图层"><span class="chart-group-label">图层</span><label><input type="checkbox" data-ma="20"> 20日均线</label><label><input type="checkbox" data-ma="50"> 50日均线</label><label><input type="checkbox" data-volume> 成交量</label></div>
+      <div class="chart-indicators" role="group" aria-label="指标图层"><span class="chart-group-label">图层</span><label><input type="checkbox" data-method-layer="weinstein"> Weinstein 状态</label><label><input type="checkbox" data-method-layer="minervini"> Minervini 状态</label><label><input type="checkbox" data-ma="20"> 20日均线</label><label><input type="checkbox" data-ma="50"> 50日均线</label><label><input type="checkbox" data-volume> 成交量</label></div>
     </div>
     {% if private_workspace %}<div class="drawing-tool-group" role="group" aria-label="操作与绘图"><span class="chart-group-label">操作</span><button class="button button-secondary button-compact" type="button" data-draw-tool="browse" aria-pressed="true">浏览</button><button class="button button-secondary button-compact" type="button" data-chart-record aria-pressed="false">录入成交</button><button class="button button-secondary button-compact" type="button" data-draw-tool="select" aria-pressed="false">选择</button><span class="chart-group-divider" aria-hidden="true"></span><span class="chart-group-label">绘图</span><button class="button button-secondary button-compact" type="button" data-draw-tool="trendline" aria-pressed="false">趋势线</button><button class="button button-secondary button-compact" type="button" data-draw-tool="horizontal" aria-pressed="false">水平线</button></div>{% endif %}
     <span class="drawing-hint" data-drawing-hint>选择工具后在图上点击</span><span class="drawing-destructive-actions" data-drawing-actions hidden><button class="text-button" type="button" data-delete-selected disabled>删除选中</button><button class="text-button" type="button" data-clear-drawings>清空全部</button></span>
@@ -53,10 +53,10 @@
       </div>
     </details>
   </div>
-  <div class="chart-legend"><span class="chart-period-change" data-chart-period-change aria-live="polite"><span data-chart-change-date>—</span><strong data-chart-change-value>当日涨跌幅 —</strong></span><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>KC <span class="legend-buy">▲</span>买入 <span class="legend-sell">▼</span>卖出 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
+  <div class="chart-legend"><span class="chart-period-change" data-chart-period-change aria-live="polite"><span data-chart-change-date>—</span><strong data-chart-change-value>当日涨跌幅 —</strong></span><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-kc"></i>KC <span class="legend-method legend-weinstein">● W</span>温斯坦状态 <span class="legend-method legend-minervini">■ M</span>米涅尔维尼状态 <span class="legend-buy">▲</span>实际买入 <span class="legend-sell">▼</span>实际卖出 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
   <div class="stock-chart-stage"><div class="stock-chart-canvas" data-chart-canvas></div><canvas class="drawing-overlay" data-drawing-overlay aria-label="趋势线与水平线绘图区"></canvas></div>
-  <p class="muted chart-boundary">画线仅保存为个人观察标注，并绑定当前前复权尺度；若本地复权尺度不一致，系统不会加载或套用旧标注。</p>
+  <div class="chart-method-event-detail" data-method-event-detail aria-live="polite" hidden></div>
 </section>
 <script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-<script src="/static/stock-chart.js?v=20260810-period-change-v20"></script>
+<script src="/static/stock-chart.js?v=20260812-method-hints-removed-v24"></script>
 {% endblock %}

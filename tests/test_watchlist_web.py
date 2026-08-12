@@ -402,6 +402,77 @@ def _seed_chart_market(path) -> None:
         )
 
 
+def _seed_chart_method_events(path) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO watchlist_run_receipt (
+                run_id, as_of_date, from_date, origin,
+                minervini_policy_version, weinstein_policy_version,
+                market_database, source_digest, counts_json, status,
+                error_message, started_at, finished_at
+            ) VALUES (
+                'chart-events', '2026-06-30', '2026-06-10', 'RECONSTRUCTED',
+                ?, ?, '/tmp/market.sqlite3', 'chart-events-source', '{}',
+                'SUCCESS', '', '2026-06-30T18:00:00+08:00',
+                '2026-06-30T18:01:00+08:00'
+            )
+            """,
+            (MINERVINI_POLICY_VERSION, WEINSTEIN_POLICY_VERSION),
+        )
+        facts = (
+            (
+                "2026-06-10", "weinstein", "PASS", WEINSTEIN_POLICY_VERSION,
+                '{"profile":{"result":"PASS","stage":"STAGE_2",'
+                '"stage_started_on":"2026-06-05","duration_weeks":1,'
+                '"effective_week_end":"2026-06-05"}}',
+            ),
+            (
+                "2026-06-11", "minervini", "PASS", MINERVINI_POLICY_VERSION,
+                '{"profile":{"result":"PASS","failed_checks":[]}}',
+            ),
+            (
+                "2026-06-15", "minervini", "UNKNOWN", MINERVINI_POLICY_VERSION,
+                '{"profile":{"result":"UNKNOWN","failed_checks":[]}}',
+            ),
+            (
+                "2026-06-18", "minervini", "PASS", MINERVINI_POLICY_VERSION,
+                '{"profile":{"result":"PASS","failed_checks":[]}}',
+            ),
+            (
+                "2026-06-20", "minervini", "FAIL", MINERVINI_POLICY_VERSION,
+                '{"profile":{"result":"FAIL",'
+                '"failed_checks":["close_above_sma50"]}}',
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date, symbol, method, result, policy_version,
+                evidence_json, source_digest, origin
+            ) VALUES (?, '000001.SZ', ?, ?, ?, ?, 'chart-digest', 'RECONSTRUCTED')
+            """,
+            facts,
+        )
+        transitions = (
+            ("2026-06-10", "weinstein", "ENTERED", WEINSTEIN_POLICY_VERSION, "RULES_PASS"),
+            ("2026-06-11", "minervini", "ENTERED", MINERVINI_POLICY_VERSION, "RULES_PASS"),
+            ("2026-06-15", "minervini", "DATA_GAP", MINERVINI_POLICY_VERSION, "REQUIRED_INPUT_MISSING"),
+            ("2026-06-18", "minervini", "REENTERED", MINERVINI_POLICY_VERSION, "RULES_PASS_AGAIN"),
+            ("2026-06-20", "minervini", "EXITED", MINERVINI_POLICY_VERSION, "RULES_NO_LONGER_PASS"),
+        )
+        connection.executemany(
+            """
+            INSERT INTO stock_method_transition (
+                as_of_date, symbol, method, state, policy_version,
+                first_qualified_on, streak_started_on, consecutive_sessions,
+                reason, origin
+            ) VALUES (?, '000001.SZ', ?, ?, ?, '2026-06-10', '', 0, ?, 'RECONSTRUCTED')
+            """,
+            transitions,
+        )
+
+
 def _seed_filter_cases(path) -> None:
     with sqlite3.connect(path) as connection:
         connection.executemany(
@@ -1072,7 +1143,8 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
     assert "平安银行" in page.text
     assert "000001.SZ" in page.text
     assert "计划盈亏比" in page.text
-    assert "1.0倍初始风险" in page.text
+    assert ">1.0</td>" in page.text
+    assert "倍初始风险" not in page.text
     assert ">修改</a>" in page.text
     assert "2026-07-31" in page.text
 
@@ -1264,6 +1336,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     market_path = tmp_path / "market.sqlite3"
     _seed_watchlist(watchlist_path)
     _seed_chart_market(market_path)
+    _seed_chart_method_events(watchlist_path)
     app = create_app(
         market_database=market_path,
         watchlist_database=watchlist_path,
@@ -1295,12 +1368,23 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260810-period-change-v20" in page.text
+    assert "stock-chart.js?v=20260812-method-hints-removed-v24" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert "当日涨跌幅" in page.text
     assert 'data-kc-source' in page.text
     assert 'data-chart-limit="all"' in page.text
+    assert 'data-method-layer="weinstein" checked' not in page.text
+    assert 'data-method-layer="minervini" checked' not in page.text
+    assert 'data-method-layer="weinstein"' in page.text
+    assert 'data-method-layer="minervini"' in page.text
+    assert "状态事件可用区间" not in page.text
+    assert "W/M 标志只表示规则观察状态变化" not in page.text
+    assert "画线仅保存为个人观察标注" not in page.text
+    controller = client.get("/static/stock-chart.js").text
+    assert 'methodLayerStorageKey = "masterstock-chart:method-layers"' in controller
+    assert "restoreMethodLayers();" in controller
+    assert "storeMethodLayers();" in controller
     assert chart.status_code == 200
     payload = chart.json()
     assert payload["status"] == "OK"
@@ -1311,6 +1395,18 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert payload["bars"][-1]["previous_close"] == 13.4
     assert payload["bars"][-1]["change_amount"] == 0.1
     assert payload["bars"][-1]["change_pct"] == 0.75
+    assert [item["label"] for item in payload["method_events"]] == [
+        "W入", "M入", "M?", "M再", "M出",
+    ]
+    assert payload["method_events"][0]["as_of_date"] == "2026-06-10"
+    assert payload["method_events"][0]["effective_date"] == "2026-06-05"
+    assert payload["method_events"][0]["plot_date"] == "2026-06-10"
+    assert payload["method_events"][-1]["failed_checks"] == [
+        "close_above_sma50"
+    ]
+    assert not payload["method_event_coverage"]["weinstein"][
+        "complete_for_chart_range"
+    ]
     all_payload = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30"
     ).json()
@@ -1332,6 +1428,11 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert weekly["interval"] == "week"
     assert len(weekly["bars"]) < len(payload["bars"])
     assert weekly["bars"][-1]["change_pct"] is not None
+    assert weekly["method_events"][0]["as_of_date"] == "2026-06-10"
+    assert weekly["method_events"][0]["plot_date"] in {
+        row["trade_date"] for row in weekly["bars"]
+    }
+    assert weekly["method_events"][0]["plot_date"] != "2026-06-05"
     open_source = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&source=open"
     ).json()

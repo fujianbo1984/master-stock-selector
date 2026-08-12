@@ -12,6 +12,7 @@
   const drawingActions = root.querySelector("[data-drawing-actions]");
   const drawingHint = root.querySelector("[data-drawing-hint]");
   const deleteSelectedButton = root.querySelector("[data-delete-selected]");
+  const methodEventDetail = root.querySelector("[data-method-event-detail]");
   const symbol = root.dataset.symbol;
   const date = root.dataset.date;
   const privateOverlayUrl = root.dataset.privateOverlayUrl || "";
@@ -25,7 +26,26 @@
   let previewAnchor = null;
   let selectedDrawingId = null;
   let recordMode = false;
+  let methodEventsById = new Map();
   const canonicalDrawingAnchors = new Map();
+  const methodLayerStorageKey = "masterstock-chart:method-layers";
+  const restoreMethodLayers = () => {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(methodLayerStorageKey) || "null");
+      if (!saved || typeof saved !== "object") return;
+      root.querySelectorAll("[data-method-layer]").forEach(input => {
+        if (typeof saved[input.dataset.methodLayer] === "boolean") input.checked = saved[input.dataset.methodLayer];
+      });
+    } catch (_) { /* Browser storage can be unavailable or contain stale data. */ }
+  };
+  const storeMethodLayers = () => {
+    try {
+      const saved = {};
+      root.querySelectorAll("[data-method-layer]").forEach(input => { saved[input.dataset.methodLayer] = input.checked; });
+      window.sessionStorage.setItem(methodLayerStorageKey, JSON.stringify(saved));
+    } catch (_) { /* Browser storage can be unavailable. */ }
+  };
+  restoreMethodLayers();
   const chart = LightweightCharts.createChart(chartNode, {
     layout: { background: { color: "#fffdfa" }, textColor: "#142d4c" },
     grid: { vertLines: { color: "#eee8de" }, horzLines: { color: "#eee8de" } },
@@ -47,6 +67,19 @@
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0 } });
   const markersApi = LightweightCharts.createSeriesMarkers(candles, []);
 
+  const minerviniCheckLabels = {
+    close_above_sma50: "收盘价高于50日均线",
+    close_above_sma150: "收盘价高于150日均线",
+    close_above_sma200: "收盘价高于200日均线",
+    sma50_above_sma150: "50日均线高于150日均线",
+    sma50_above_sma200: "50日均线高于200日均线",
+    sma150_above_sma200: "150日均线高于200日均线",
+    sma200_rising_20d: "200日均线近20日上升",
+    close_30pct_above_52w_low: "收盘价高于52周低点至少30%",
+    close_within_25pct_52w_high: "收盘价距52周高点不超过25%",
+    rs_252d_percentile_at_least_70: "252日相对强度百分位至少70",
+  };
+
   const settings = () => ({
     length: root.querySelector("[data-kc-length]").value,
     multiplier: root.querySelector("[data-kc-multiplier]").value,
@@ -62,6 +95,54 @@
     const basis = root.querySelector("[data-kc-ma]").value === "ema" ? "指数移动平均" : "简单移动平均";
     const style = ({ atr: "平均真实波幅", tr: "真实波幅", range: "最高最低价差" })[root.querySelector("[data-kc-style]").value];
     kcSummary.textContent = `肯特纳通道：${root.querySelector("[data-kc-length]").value}日${basis} · ${root.querySelector("[data-kc-atr-length]").value}日${style} · ${root.querySelector("[data-kc-multiplier]").value}倍 · ${source}`;
+  };
+  const methodLayerVisible = (method) => root.querySelector(`[data-method-layer="${method}"]`)?.checked !== false;
+  const renderMethodEventDetail = (event) => {
+    if (!event) { methodEventDetail.hidden = true; methodEventDetail.replaceChildren(); return; }
+    const title = document.createElement("strong");
+    const methodName = event.method === "weinstein" ? "Weinstein" : "Minervini";
+    const stateName = ({ ENTERED: "进入观察状态", REENTERED: "重新进入观察状态", EXITED: "移出观察状态", DATA_GAP: "判定中断" })[event.state] || event.state;
+    title.textContent = `${event.as_of_date} · ${methodName} ${stateName}`;
+    const summary = document.createElement("span");
+    const failed = (event.failed_checks || []).map(key => minerviniCheckLabels[key] || key);
+    summary.textContent = `${event.summary}${failed.length ? `；未满足：${failed.join("、")}` : ""}`;
+    const metadata = document.createElement("small");
+    const effective = event.method === "weinstein" && event.effective_date !== event.as_of_date
+      ? ` · 依据完成周线截至 ${event.effective_date}` : "";
+    metadata.textContent = `规则版本：${event.policy_version}${effective}`;
+    methodEventDetail.replaceChildren(title, summary, metadata);
+    methodEventDetail.hidden = false;
+  };
+  const renderMarkers = () => {
+    if (!payload) return;
+    methodEventsById = new Map((payload.method_events || []).map(item => [item.id, item]));
+    const trades = (payload.trade_overlay?.executions || []).map(item => ({
+      priority: 0,
+      marker: {
+        id: `trade:${item.execution_id}`, time: item.traded_on,
+        position: item.side === "BUY" ? "belowBar" : "aboveBar",
+        shape: item.side === "BUY" ? "arrowUp" : "arrowDown",
+        color: item.side === "BUY" ? "#c94e47" : "#258460",
+        text: `${item.side === "BUY" ? "买" : "卖"} ${item.price} ×${item.quantity}`,
+      },
+    }));
+    const methods = (payload.method_events || [])
+      .filter(item => methodLayerVisible(item.method))
+      .map(item => ({
+        priority: item.method === "weinstein" ? 1 : 2,
+        marker: {
+          id: item.id,
+          time: item.plot_date,
+          position: ["ENTERED", "REENTERED"].includes(item.state) ? "belowBar" : "aboveBar",
+          shape: item.method === "weinstein" ? "circle" : "square",
+          color: item.state === "DATA_GAP" ? "#7a7f86" : (item.method === "weinstein" ? "#315a9a" : "#986719"),
+          text: item.label,
+          size: 0.8,
+        },
+      }));
+    markersApi.setMarkers([...trades, ...methods]
+      .sort((left, right) => left.marker.time.localeCompare(right.marker.time) || left.priority - right.priority || left.marker.id.localeCompare(right.marker.id))
+      .map(item => item.marker));
   };
   const selectedDrawing = () => drawings.find(drawing => drawing.drawing_id === selectedDrawingId) || null;
   const updateDrawingActions = () => {
@@ -206,13 +287,8 @@
     ma50.setData(root.querySelector('[data-ma="50"]').checked ? simpleMa(50) : []);
     volume.setData(payload.bars.map(row => ({ time: row.trade_date, value: row.volume || 0, color: row.close >= row.open ? "rgba(201,78,71,.48)" : "rgba(37,132,96,.48)" })));
     syncVolumePane();
-    markersApi.setMarkers((payload.trade_overlay?.executions || []).map(item => ({
-      id: item.execution_id, time: item.traded_on,
-      position: item.side === "BUY" ? "belowBar" : "aboveBar",
-      shape: item.side === "BUY" ? "arrowUp" : "arrowDown",
-      color: item.side === "BUY" ? "#c94e47" : "#258460",
-      text: `${item.side === "BUY" ? "买" : "卖"} ${item.price} ×${item.quantity}`,
-    })));
+    renderMarkers();
+    renderMethodEventDetail(null);
     drawings = (payload.drawings || []).map(canonicalizeDrawing);
     if (!selectedDrawing()) selectedDrawingId = null;
     updateChangeReadout(payload.bars[payload.bars.length - 1]);
@@ -327,6 +403,11 @@
     drawingHint.textContent = recordMode ? "点击价格图预填成交日与价格；保存前仍可修改" : "拖拽缩放或查看价格";
   });
   root.querySelectorAll("[data-ma]").forEach(input => input.addEventListener("change", () => { if (payload) drawPayload(payload); }));
+  root.querySelectorAll("[data-method-layer]").forEach(input => input.addEventListener("change", () => {
+    storeMethodLayers();
+    renderMarkers();
+    if (!methodLayerVisible("weinstein") && !methodLayerVisible("minervini")) renderMethodEventDetail(null);
+  }));
   volumeInput.addEventListener("change", () => {
     syncVolumePane();
     if (payload) drawPayload(payload);
@@ -334,6 +415,8 @@
   });
   chart.subscribeClick((param) => {
     if (!payload || !param.time) return;
+    const methodEvent = methodEventsById.get(param.hoveredObjectId || "");
+    if (methodEvent) { renderMethodEventDetail(methodEvent); return; }
     const selectedDate = chartDate(param.time);
     const matches = (payload.trade_overlay?.executions || []).filter(item => item.traded_on === selectedDate);
     if (matches.length && !recordMode) { window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?edit_trade=${encodeURIComponent(matches[0].execution_id)}#trade-journal`); return; }

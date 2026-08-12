@@ -1112,6 +1112,13 @@ def build_watchlist_router(
         if len(scale_ids) != 1 or not next(iter(scale_ids)):
             return {"status": "DATA_GAP", "reason": "INCONSISTENT_PRICE_SCALE", "bars": []}
         price_scale_id = next(iter(scale_ids))
+        method_overlay = _chart_method_overlay(
+            repository,
+            symbol=symbol,
+            bars=bars,
+            end_date=date,
+            interval=interval,
+        )
         return {
             "status": "OK",
             "symbol": symbol.upper(),
@@ -1120,6 +1127,8 @@ def build_watchlist_router(
             "interval": interval,
             "price_scale_id": price_scale_id,
             "bars": bars,
+            "method_events": method_overlay["events"],
+            "method_event_coverage": method_overlay["coverage"],
             "keltner": keltner_channels(
                 bars,
                 length=length,
@@ -1623,6 +1632,53 @@ def _weekly_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "amount": sum(float(item.get("amount") or 0) for item in values),
         })
     return weekly
+
+
+def _chart_method_overlay(
+    repository: WatchlistRepository,
+    *,
+    symbol: str,
+    bars: list[dict[str, Any]],
+    end_date: str,
+    interval: str,
+) -> dict[str, Any]:
+    if not bars:
+        return {"events": [], "coverage": {}}
+    first_bar_date = str(bars[0]["trade_date"])
+    last_bar_date = str(bars[-1]["trade_date"])
+    retained = repository.stock_method_chart_events(
+        symbol, first_bar_date, end_date
+    )
+    dates = {str(row["trade_date"]) for row in bars}
+    week_ends = {
+        _week_key(str(row["trade_date"])): str(row["trade_date"])
+        for row in bars
+    }
+    events: list[dict[str, Any]] = []
+    for item in retained["events"]:
+        as_of_date = str(item["as_of_date"])
+        plot_date = (
+            week_ends.get(_week_key(as_of_date), "")
+            if interval == "week"
+            else as_of_date
+        )
+        if plot_date not in dates:
+            continue
+        events.append({**item, "plot_date": plot_date})
+    coverage: dict[str, dict[str, Any]] = {}
+    for method, values in retained["coverage"].items():
+        from_date = str(values.get("from_date") or "")
+        to_date = str(values.get("to_date") or "")
+        coverage[method] = {
+            **values,
+            "complete_for_chart_range": bool(
+                from_date
+                and to_date
+                and from_date <= first_bar_date
+                and to_date >= last_bar_date
+            ),
+        }
+    return {"events": events, "coverage": coverage}
 
 
 def _with_period_changes(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
