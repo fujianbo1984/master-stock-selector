@@ -11,6 +11,61 @@ from master_stock_selector.watchlist.methods import (
 from master_stock_selector.watchlist.repository import MarketDataReader, WatchlistRepository
 
 
+def test_repository_repairs_missing_current_baseline_tables(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    repository.initialize()
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute("DROP TABLE weinstein_stage_baseline")
+        connection.execute("DROP TABLE stock_method_lifecycle_baseline")
+
+    reopened = WatchlistRepository(repository.path)
+    reopened.initialize()
+
+    with sqlite3.connect(repository.path) as connection:
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert "weinstein_stage_baseline" in tables
+    assert "stock_method_lifecycle_baseline" in tables
+
+
+def test_repository_returns_independent_daily_breadth_rates(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    repository.initialize()
+    with sqlite3.connect(repository.path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date,symbol,method,result,policy_version,evidence_json,
+                source_digest,origin
+            ) VALUES (?,?,?,?,?,'{}','breadth-test','RECONSTRUCTED')
+            """,
+            [
+                ("2026-07-01", "000001.SZ", "weinstein", "PASS", WEINSTEIN_POLICY_VERSION),
+                ("2026-07-01", "000002.SZ", "weinstein", "FAIL", WEINSTEIN_POLICY_VERSION),
+                ("2026-07-01", "000003.SZ", "weinstein", "TRANSITION", WEINSTEIN_POLICY_VERSION),
+                ("2026-07-01", "000001.SZ", "minervini", "PASS", MINERVINI_POLICY_VERSION),
+                ("2026-07-01", "000002.SZ", "minervini", "UNKNOWN", MINERVINI_POLICY_VERSION),
+                ("2026-07-02", "000001.SZ", "weinstein", "PASS", WEINSTEIN_POLICY_VERSION),
+                ("2026-07-02", "000002.SZ", "weinstein", "PASS", WEINSTEIN_POLICY_VERSION),
+                ("2026-07-02", "000001.SZ", "minervini", "FAIL", MINERVINI_POLICY_VERSION),
+                ("2026-07-02", "000002.SZ", "minervini", "PASS", MINERVINI_POLICY_VERSION),
+            ],
+        )
+
+    rows = repository.breadth_history("2026-07-02", limit=20)
+
+    assert [row["as_of_date"] for row in rows] == ["2026-07-01", "2026-07-02"]
+    assert rows[0]["weinstein_pass_rate"] == 50.0
+    assert rows[0]["weinstein_evaluable"] == 2
+    assert rows[0]["minervini_pass_rate"] == 100.0
+    assert rows[1]["weinstein_pass_rate"] == 100.0
+    assert rows[1]["minervini_pass_rate"] == 50.0
+
+
 def test_repository_derives_enter_continue_exit_and_reentry(tmp_path):
     path = tmp_path / "watchlist.sqlite3"
     repository = WatchlistRepository(path)
@@ -303,6 +358,7 @@ def test_industry_proxy_calendar_ignores_unrelated_newer_symbols(tmp_path):
         connection.executemany(
             "INSERT INTO daily_bars VALUES ('ashare', ?, ?, ?, ?, ?, ?, 'qfq')",
             (
+                ("000001.SZ", "2026-07-28", 9.5, 10.0, 9.0, 10.0),
                 ("000001.SZ", "2026-07-29", 10.0, 10.0, 10.0, 10.0),
                 ("000001.SZ", "2026-07-30", 10.0, 11.0, 9.0, 10.5),
                 ("000001.SZ", "2026-07-31", 10.5, 12.0, 10.0, 11.0),
@@ -319,3 +375,15 @@ def test_industry_proxy_calendar_ignores_unrelated_newer_symbols(tmp_path):
     )
 
     assert [bar["trade_date"] for bar in bars] == ["2026-07-30", "2026-07-31"]
+
+    all_bars = MarketDataReader(path).industry_proxy_bars(
+        ["000001.SZ"],
+        "2026-08-05",
+        limit=None,
+    )
+
+    assert [bar["trade_date"] for bar in all_bars] == [
+        "2026-07-29",
+        "2026-07-30",
+        "2026-07-31",
+    ]

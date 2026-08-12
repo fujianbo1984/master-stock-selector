@@ -46,6 +46,14 @@ MANUAL_LABELS = {
     "ARCHIVED": "已归档",
 }
 MARKET_CAP_FLOORS = {0, 30, 50, 100}
+BREADTH_BENCHMARKS = {
+    "000985.CSI": "中证全指",
+    "000001.SH": "上证综指",
+    "000300.SH": "沪深300",
+    "000852.SH": "中证1000",
+    "399006.SZ": "创业板指",
+    "000688.SH": "科创50",
+}
 MINERVINI_CHECKS = (
     "close_above_sma50",
     "close_above_sma150",
@@ -581,10 +589,14 @@ def build_watchlist_router(
         analysis_bars = market_reader.safe_industry_proxy_bars(
             [str(row.get("symbol") or "") for row in members],
             query_date,
-            limit=320,
+            limit=None,
         )
-        bars = analysis_bars[-180:]
+        bars = analysis_bars
         observation = _decorate_industry(dict(payload["observation"]))
+        navigation = _industry_navigation(
+            [_decorate_industry(row) for row in repository.industry_observations(query_date)],
+            industry_code=industry_code,
+        )
         confirmation = _decorate_industry_confirmation(
             build_industry_weinstein_confirmation(analysis_bars, observation)
         )
@@ -599,7 +611,8 @@ def build_watchlist_router(
                 "confirmation": confirmation,
                 "members": members,
                 "bars": bars,
-                "chart": _build_candlestick_chart(bars),
+                "chart": _industry_chart_summary(bars),
+                "navigation": navigation,
             },
         )
 
@@ -623,6 +636,53 @@ def build_watchlist_router(
                     if rows
                     else "minervini-index-stage2-price-template-v1"
                 ),
+            },
+        )
+
+    @router.get("/a/breadth", response_class=HTMLResponse)
+    def market_breadth(
+        request: Request,
+        date: str | None = None,
+        benchmark: str = "000985.CSI",
+    ) -> Response:
+        if current_user(request) is None:
+            return RedirectResponse("/login?next=/a/breadth", status_code=303)
+        query_date = _selected_date(repository, date, market_reader)
+        benchmark_symbol = (
+            benchmark.upper() if benchmark.upper() in BREADTH_BENCHMARKS else "000985.CSI"
+        )
+        history = repository.breadth_history(query_date, limit=260)
+        benchmark_series = _normalized_index_series(
+            market_reader.safe_index_bars(benchmark_symbol, query_date)[-260:]
+        )
+        method_summaries = {
+            method: _breadth_method_summary(history, method)
+            for method in ("weinstein", "minervini")
+        }
+        regime = _breadth_regime(method_summaries)
+        benchmark_summary = _proxy_summary(benchmark_series)
+        benchmark_summary.update(
+            {
+                "symbol": benchmark_symbol,
+                "name": BREADTH_BENCHMARKS[benchmark_symbol],
+            }
+        )
+        return render(
+            request,
+            "ashare/market_breadth.html",
+            {
+                "active": "市场广度",
+                "query_date": query_date,
+                "latest_date": repository.latest_fact_date(),
+                "history": history,
+                "proxy": benchmark_series,
+                "method_summaries": method_summaries,
+                "regime": regime,
+                "proxy_summary": benchmark_summary,
+                "benchmarks": BREADTH_BENCHMARKS,
+                "indices": [
+                    _decorate_index(row) for row in repository.index_facts(query_date)
+                ],
             },
         )
 
@@ -1703,94 +1763,53 @@ def _with_period_changes(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return decorated
 
 
-def _build_candlestick_chart(bars: list[dict[str, Any]]) -> dict[str, Any]:
+def _industry_chart_summary(bars: list[dict[str, Any]]) -> dict[str, Any]:
     if not bars:
         return {}
-    width, height = 1120.0, 430.0
-    left, right, top, bottom = 66.0, 24.0, 20.0, 48.0
-    plot_width = width - left - right
-    plot_height = height - top - bottom
-    minimum = min(float(row["low"]) for row in bars)
-    maximum = max(float(row["high"]) for row in bars)
-    span = max(maximum - minimum, maximum * 0.02, 1.0)
-    minimum -= span * 0.05
-    maximum += span * 0.05
-    price_span = maximum - minimum
-
-    def y(value: float) -> float:
-        return round(top + (maximum - value) / price_span * plot_height, 2)
-
-    slot = plot_width / len(bars)
-    body_width = max(1.6, min(7.0, slot * 0.58))
-    candles: list[dict[str, Any]] = []
-    closes: list[float] = []
-    for index, row in enumerate(bars):
-        open_price = float(row["open"])
-        close = float(row["close"])
-        center = left + slot * (index + 0.5)
-        open_y, close_y = y(open_price), y(close)
-        candles.append(
-            {
-                "x": round(center, 2),
-                "body_x": round(center - body_width / 2, 2),
-                "body_y": min(open_y, close_y),
-                "body_width": round(body_width, 2),
-                "body_height": max(1.2, round(abs(close_y - open_y), 2)),
-                "high_y": y(float(row["high"])),
-                "low_y": y(float(row["low"])),
-                "direction": "up" if close >= open_price else "down",
-                "date": str(row["trade_date"]),
-            }
-        )
-        closes.append(close)
-
-    def moving_average_points(window: int) -> str:
-        points = []
-        for index in range(window - 1, len(closes)):
-            average = sum(closes[index - window + 1 : index + 1]) / window
-            center = left + slot * (index + 0.5)
-            points.append(f"{center:.2f},{y(average):.2f}")
-        return " ".join(points)
-
-    tick_indexes = sorted(
-        {
-            0,
-            len(bars) // 4,
-            len(bars) // 2,
-            len(bars) * 3 // 4,
-            len(bars) - 1,
-        }
-    )
-    date_ticks = [
-        {
-            "x": round(left + slot * (index + 0.5), 2),
-            "label": str(bars[index]["trade_date"])[5:],
-        }
-        for index in tick_indexes
-    ]
-    price_ticks = []
-    for index in range(5):
-        value = maximum - price_span * index / 4
-        price_ticks.append({"y": y(value), "label": f"{value:.1f}"})
     latest = dict(bars[-1])
     first_close = float(bars[0]["close"])
     latest_close = float(latest["close"])
     latest["period_return_pct"] = round((latest_close / first_close - 1) * 100, 2)
     return {
-        "width": int(width),
-        "height": int(height),
-        "plot_left": left,
-        "plot_right": width - right,
-        "plot_top": top,
-        "plot_bottom": height - bottom,
-        "candles": candles,
-        "ma20_points": moving_average_points(20),
-        "ma50_points": moving_average_points(50),
-        "date_ticks": date_ticks,
-        "price_ticks": price_ticks,
         "latest": latest,
         "first_date": str(bars[0]["trade_date"]),
         "last_date": str(bars[-1]["trade_date"]),
+    }
+
+
+def _industry_navigation(
+    rows: list[dict[str, Any]], *, industry_code: str
+) -> dict[str, Any]:
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: (
+            -int(row.get("union_pass_count") or 0),
+            -int(row.get("both_pass_count") or 0),
+            -int(row.get("weinstein_pass_count") or 0),
+            -int(row.get("minervini_pass_count") or 0),
+            str(row.get("industry_code") or ""),
+        ),
+    )
+    items = [
+        {
+            "industry_code": str(row.get("industry_code") or ""),
+            "industry_name": str(row.get("industry_name") or row.get("industry_code") or ""),
+        }
+        for row in ordered_rows
+        if row.get("industry_code")
+    ]
+    current = industry_code.upper().strip()
+    position = next(
+        (index for index, item in enumerate(items) if item["industry_code"].upper() == current),
+        -1,
+    )
+    if position < 0:
+        return {"position": 0, "total": len(items), "previous": None, "next": None}
+    return {
+        "position": position + 1,
+        "total": len(items),
+        "previous": items[position - 1] if position > 0 else None,
+        "next": items[position + 1] if position + 1 < len(items) else None,
     }
 
 
@@ -2196,4 +2215,125 @@ def _stock_navigation(
         "total": len(selected),
         "previous": item_at(index - 1),
         "next": item_at(index + 1),
+    }
+
+
+def _breadth_method_summary(
+    history: list[dict[str, Any]],
+    method: str,
+) -> dict[str, Any]:
+    points = [
+        row
+        for row in history
+        if row.get(f"{method}_pass_rate") is not None
+    ]
+    if not points:
+        return {
+            "method": method,
+            "as_of_date": "",
+            "pass_count": 0,
+            "evaluable_count": 0,
+            "pass_rate": None,
+            "delta_20d": None,
+            "direction": "UNKNOWN",
+            "direction_label": "数据不足",
+        }
+    latest = points[-1]
+    baseline = points[-21] if len(points) >= 21 else points[0]
+    latest_rate = float(latest[f"{method}_pass_rate"])
+    baseline_rate = float(baseline[f"{method}_pass_rate"])
+    delta = round(latest_rate - baseline_rate, 2) if len(points) > 1 else None
+    if delta is None:
+        direction = "UNKNOWN"
+        direction_label = "数据不足"
+    elif delta >= 1.0:
+        direction = "EXPANDING"
+        direction_label = "20日扩张"
+    elif delta <= -1.0:
+        direction = "CONTRACTING"
+        direction_label = "20日收缩"
+    else:
+        direction = "FLAT"
+        direction_label = "20日持平"
+    return {
+        "method": method,
+        "as_of_date": str(latest["as_of_date"]),
+        "pass_count": int(latest[f"{method}_pass"] or 0),
+        "evaluable_count": int(latest[f"{method}_evaluable"] or 0),
+        "pass_rate": latest_rate,
+        "delta_20d": delta,
+        "direction": direction,
+        "direction_label": direction_label,
+    }
+
+
+def _breadth_regime(summaries: dict[str, dict[str, Any]]) -> dict[str, str]:
+    weinstein = str(summaries["weinstein"].get("direction") or "UNKNOWN")
+    minervini = str(summaries["minervini"].get("direction") or "UNKNOWN")
+    regimes = {
+        ("EXPANDING", "EXPANDING"): (
+            "同步扩张",
+            "长期上升阶段与强趋势股同时增多，市场参与面正在改善。",
+            "positive",
+        ),
+        ("CONTRACTING", "CONTRACTING"): (
+            "同步收缩",
+            "长期阶段广度与强趋势质量同时回落，宜降低对普涨环境的预期。",
+            "negative",
+        ),
+        ("EXPANDING", "CONTRACTING"): (
+            "广度扩张、强度转弱",
+            "Stage 2 股票增多，但通过严格趋势模板的股票减少，需要留意趋势质量。",
+            "mixed",
+        ),
+        ("CONTRACTING", "EXPANDING"): (
+            "广度收缩、强者集中",
+            "整体上升阶段股票减少，但强趋势核心增多，可能是结构性行情。",
+            "mixed",
+        ),
+    }
+    label, explanation, tone = regimes.get(
+        (weinstein, minervini),
+        (
+            "分化待确认",
+            "至少一种方法的20日变化不足1个百分点，暂不解读为明确市场状态。",
+            "neutral",
+        ),
+    )
+    return {"label": label, "explanation": explanation, "tone": tone}
+
+
+def _normalized_index_series(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    valid = [row for row in bars if float(row.get("close") or 0) > 0]
+    if not valid:
+        return []
+    baseline = float(valid[0]["close"])
+    return [
+        {
+            "trade_date": str(row.get("trade_date") or ""),
+            "close": round(float(row["close"]) / baseline * 1000, 2),
+        }
+        for row in valid
+    ]
+
+
+def _proxy_summary(proxy: list[dict[str, Any]]) -> dict[str, Any]:
+    if not proxy:
+        return {
+            "as_of_date": "",
+            "close": None,
+            "return_20d_pct": None,
+        }
+    latest = proxy[-1]
+    baseline = proxy[-21] if len(proxy) >= 21 else proxy[0]
+    baseline_close = float(baseline.get("close") or 0)
+    latest_close = float(latest.get("close") or 0)
+    return {
+        "as_of_date": str(latest.get("trade_date") or ""),
+        "close": latest_close,
+        "return_20d_pct": (
+            round((latest_close / baseline_close - 1) * 100, 2)
+            if baseline_close > 0 and len(proxy) > 1
+            else None
+        ),
     }

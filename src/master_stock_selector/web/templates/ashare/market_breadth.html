@@ -1,0 +1,105 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block heading %}市场广度实验室{% endblock %}
+{% block subtitle %}宽基指数与两种独立大师方法的趋势广度参考{% endblock %}
+{% block content %}
+<section class="section daily-hero page-ledger-hero breadth-hero">
+  <div>
+    <p class="eyebrow">登录用户·实验性功能</p>
+    <h1>市场广度实验室</h1>
+    <p>把可切换的宽基指数与 Weinstein、Minervini 每日通过率对齐，用于观察趋势是否扩散、收缩或出现背离。</p>
+  </div>
+  <div class="breadth-regime breadth-regime-{{ regime.tone }}">
+    <span>当前参考状态</span>
+    <strong>{{ regime.label }}</strong>
+    <small>{{ regime.explanation }}</small>
+  </div>
+</section>
+
+<section class="section grid kpi-grid breadth-kpis" aria-label="市场广度摘要">
+  <article class="kpi">
+    <span>{{ proxy_summary.name }}·20日</span>
+    <strong>{% if proxy_summary.return_20d_pct is not none %}{{ '%+.2f'|format(proxy_summary.return_20d_pct) }}%{% else %}数据不足{% endif %}</strong>
+    <small>{{ proxy_summary.symbol }}·收盘价归一化路径</small>
+  </article>
+  {% for method, label in [('weinstein', 'Weinstein'), ('minervini', 'Minervini')] %}
+  {% set summary = method_summaries[method] %}
+  <article class="kpi">
+    <span>{{ label }} 通过率</span>
+    <strong>{% if summary.pass_rate is not none %}{{ '%.2f'|format(summary.pass_rate) }}%{% else %}数据不足{% endif %}</strong>
+    <small>{{ summary.pass_count }} / {{ summary.evaluable_count }} 只可判定股票</small>
+  </article>
+  {% endfor %}
+  <article class="kpi kpi-accent">
+    <span>两法20日变化</span>
+    <strong class="breadth-delta-pair">
+      <i>W {% if method_summaries.weinstein.delta_20d is not none %}{{ '%+.2f'|format(method_summaries.weinstein.delta_20d) }}pp{% else %}—{% endif %}</i>
+      <i>M {% if method_summaries.minervini.delta_20d is not none %}{{ '%+.2f'|format(method_summaries.minervini.delta_20d) }}pp{% else %}—{% endif %}</i>
+    </strong>
+    <small>两种方法独立展示，不合成总分</small>
+  </article>
+</section>
+
+<section class="section panel breadth-chart-panel" data-breadth-lab data-benchmark-name="{{ proxy_summary.name }}">
+  <div class="section-heading breadth-chart-heading">
+    <div><h2>价格路径与趋势广度</h2><p>同图叠加：左轴为通过率，右轴为指数归一化路径；用于观察同步与背离，不预测指数点位。</p></div>
+    <div class="breadth-chart-controls">
+      <form class="breadth-benchmark-form" method="get" action="/a/breadth">
+        <input type="hidden" name="date" value="{{ query_date }}">
+        <label for="breadth-benchmark">对照指数</label>
+        <select id="breadth-benchmark" name="benchmark" onchange="this.form.requestSubmit()" aria-label="选择后自动切换对照指数">
+          {% for symbol, name in benchmarks.items() %}<option value="{{ symbol }}" {% if symbol == proxy_summary.symbol %}selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select>
+      </form>
+      <div class="breadth-legend" aria-label="图例">
+        <span><i class="legend-proxy"></i>{{ proxy_summary.name }}</span>
+        <span><i class="legend-weinstein"></i>Weinstein</span>
+        <span><i class="legend-minervini"></i>Minervini</span>
+      </div>
+    </div>
+  </div>
+  {% if history %}
+  <div class="breadth-chart-block">
+    <div class="breadth-chart-label">
+      <strong>通过率 × {{ proxy_summary.name }}归一化路径</strong>
+      <span data-breadth-readout>左轴：通过率 · 右轴：{% if proxy %}窗口起点1000{% else %}指数数据不足{% endif %}</span>
+    </div>
+    <div class="breadth-chart-canvas breadth-overlay-chart" data-overlay-chart aria-label="Weinstein、Minervini通过率与{{ proxy_summary.name }}归一化路径叠加折线图"></div>
+  </div>
+  <script id="breadth-history-data" type="application/json">{{ history|tojson }}</script>
+  <script id="breadth-proxy-data" type="application/json">{{ proxy|tojson }}</script>
+  {% else %}<div class="empty">暂无足够的每日方法事实用于绘图。</div>{% endif %}
+</section>
+
+{% if indices %}
+<section class="section index-stage-grid breadth-index-strip" aria-label="四指数当前参考">
+  {% for row in indices %}
+  <article class="index-stage-card stage-{{ row.stage|lower }}">
+    <span class="index-instrument-links"><b>{{ row.index_name }}</b><small>{{ row.index_symbol }}</small></span>
+    <div class="index-method-result"><span>Weinstein</span><strong>{{ row.stage_label }}</strong></div>
+    <div class="index-method-result index-minervini-result"><span>Minervini</span><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></div>
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="section breadth-reading-grid" aria-label="如何阅读市场广度">
+  <article class="panel"><span class="section-label">同步</span><h3>指数与广度同时上升</h3><p>趋势向更多股票扩散，市场参与面对价格走强形成确认。</p></article>
+  <article class="panel"><span class="section-label">负背离</span><h3>指数上涨、广度回落</h3><p>上涨可能集中在少数权重或领涨股，不等同于全市场趋势改善。</p></article>
+  <article class="panel"><span class="section-label">正背离</span><h3>指数尚弱、广度回升</h3><p>内部结构可能先于指数修复，只能作为后续跟踪线索。</p></article>
+</section>
+
+<details class="section stock-disclosure notes-panel">
+  <summary><span><strong>实验口径与边界</strong><small>代理指数、通过率分母与不可推导的结论</small></span><span class="disclosure-action">展开</span></summary>
+  <div class="stock-disclosure-body">
+    <p>指数仅使用本地已有的官方收盘序列，并将当前窗口起点归一化为1000以便比较路径。中证全指或上证综指若尚未完成本地采集，会明确显示数据不足；本页不使用自建慢速代理冒充正式指数。</p>
+    <p>Weinstein 与 Minervini 通过率分别为当日 PASS 除以 PASS + FAIL；UNKNOWN 和 TRANSITION 不进入可判定分母。两种方法独立呈现，不投票、不加权、不合成市场总分。</p>
+    <p>图中同步或背离只是人工复盘线索，不能单独证明未来收益、底部、顶部或买卖时点。</p>
+  </div>
+</details>
+
+{% if history %}
+<script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
+<script src="/static/breadth-chart.js?v=20260812-breadth-overlay-v4"></script>
+{% endif %}
+{% endblock %}

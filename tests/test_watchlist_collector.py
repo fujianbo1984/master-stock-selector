@@ -220,7 +220,7 @@ def test_collector_atomically_adds_day_and_rescales_only_changed_factor(tmp_path
     assert result["status"] == "SUCCESS"
     assert result["collection_state"] == "COLLECTED"
     assert result["stock_count"] == 2
-    assert result["index_count"] == 4
+    assert result["index_count"] == 6
     assert result["rescaled_symbol_count"] == 1
     with sqlite3.connect(path) as connection:
         old_rows = connection.execute(
@@ -285,7 +285,7 @@ def test_collector_rejects_incomplete_index_batch_without_market_rows(tmp_path) 
     path = tmp_path / "market.sqlite3"
     _seed_market(path)
 
-    with pytest.raises(ValueError, match="四指数日线缺失"):
+    with pytest.raises(ValueError, match="指数日线缺失"):
         collect_market_data(
             CollectionConfig(
                 market_database=path,
@@ -387,12 +387,13 @@ def test_historical_backfill_plans_then_fills_only_missing_market_rows(tmp_path)
     assert dry_run["status"] == "DRY_RUN"
     assert dry_run["plan"]["factor_dates"] == ["2026-08-03"]
     assert dry_run["plan"]["metric_dates"] == ["2026-08-03"]
-    assert dry_run["plan"]["index_dates"] == ["2026-08-03"]
+    assert dry_run["plan"]["index_dates"] == ["2026-07-31", "2026-08-03"]
+    assert dry_run["plan"]["missing_index_rows"] == 8
 
     result = backfill_market_history(config, apply=True, provider=BackfillFakeProvider())
 
     assert result["status"] == "SUCCESS"
-    assert result["inserted"] == {"factors": 2, "metrics": 2, "indices": 4}
+    assert result["inserted"] == {"factors": 2, "metrics": 2, "indices": 8}
     with sqlite3.connect(path) as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM daily_adjustment_factors WHERE trade_date='2026-08-03'"
@@ -402,7 +403,7 @@ def test_historical_backfill_plans_then_fills_only_missing_market_rows(tmp_path)
         ).fetchone()[0] == 2
         assert connection.execute(
             "SELECT COUNT(*) FROM market_index_daily_bars WHERE trade_date='2026-08-03'"
-        ).fetchone()[0] == 4
+        ).fetchone()[0] == 6
         assert connection.execute(
             "SELECT COUNT(*) FROM market_history_backfill_receipt"
         ).fetchone()[0] == 1

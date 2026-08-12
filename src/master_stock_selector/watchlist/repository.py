@@ -492,6 +492,12 @@ class MarketDataReader:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def safe_index_bars(self, index_symbol: str, end_date: str) -> list[dict[str, Any]]:
+        try:
+            return self.index_bars(index_symbol, end_date)
+        except (FileNotFoundError, sqlite3.Error, TypeError, ValueError):
+            return []
+
     def stock_chart_bars(
         self,
         symbol: str,
@@ -839,7 +845,7 @@ class MarketDataReader:
         symbols: Sequence[str],
         end_date: str,
         *,
-        limit: int = 180,
+        limit: int | None = 180,
     ) -> list[dict[str, Any]]:
         """Build an equal-weight OHLC proxy from point-in-time industry members.
 
@@ -849,7 +855,7 @@ class MarketDataReader:
         """
 
         requested = sorted({str(symbol).upper() for symbol in symbols if symbol})
-        if not requested or not end_date or limit < 2:
+        if not requested or not end_date or (limit is not None and limit < 2):
             return []
         with self.connect() as connection:
             columns = {
@@ -866,6 +872,10 @@ class MarketDataReader:
             for start in range(0, len(requested), 700):
                 batch = requested[start : start + 700]
                 symbol_placeholders = ",".join("?" for _ in batch)
+                limit_clause = "" if limit is None else "LIMIT ?"
+                parameters: tuple[Any, ...] = (*batch, end_date)
+                if limit is not None:
+                    parameters = (*parameters, limit + 1)
                 date_rows = connection.execute(
                     f"""
                     SELECT DISTINCT trade_date
@@ -873,12 +883,14 @@ class MarketDataReader:
                     WHERE market = 'ashare' AND adj_type = 'qfq'
                       AND symbol IN ({symbol_placeholders}) AND trade_date <= ?
                     ORDER BY trade_date DESC
-                    LIMIT ?
+                    {limit_clause}
                     """,
-                    (*batch, end_date, limit + 1),
+                    parameters,
                 ).fetchall()
                 recent_dates.update(str(row[0]) for row in date_rows)
-            dates = sorted(recent_dates, reverse=True)[: limit + 1]
+            dates = sorted(recent_dates, reverse=True)
+            if limit is not None:
+                dates = dates[: limit + 1]
             dates.sort()
             if len(dates) < 2:
                 return []
@@ -952,14 +964,14 @@ class MarketDataReader:
                 }
             )
             previous_proxy_close = proxy_close
-        return result[-limit:]
+        return result if limit is None else result[-limit:]
 
     def safe_industry_proxy_bars(
         self,
         symbols: Sequence[str],
         end_date: str,
         *,
-        limit: int = 180,
+        limit: int | None = 180,
     ) -> list[dict[str, Any]]:
         try:
             return self.industry_proxy_bars(symbols, end_date, limit=limit)
@@ -1057,6 +1069,8 @@ class WatchlistRepository:
         return (
             {
                 "stock_method_daily_fact",
+                "stock_method_lifecycle_baseline",
+                "weinstein_stage_baseline",
                 "trade_execution",
                 "security_identity_history",
                 "security_industry_membership_history",
@@ -1815,6 +1829,66 @@ class WatchlistRepository:
                 (limit,),
             ).fetchall()
         return [str(row[0]) for row in reversed(rows)]
+
+    def breadth_history(
+        self,
+        end_date: str,
+        *,
+        limit: int = 260,
+    ) -> list[dict[str, Any]]:
+        """Aggregate independent daily method breadth without combining scores."""
+
+        self.initialize()
+        if not end_date or limit < 2:
+            return []
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT as_of_date, method,
+                       SUM(result='PASS') AS pass_count,
+                       SUM(result IN ('PASS','FAIL')) AS evaluable_count,
+                       COUNT(*) AS method_total
+                FROM stock_method_daily_fact
+                WHERE as_of_date <= ?
+                GROUP BY as_of_date, method
+                ORDER BY as_of_date DESC
+                LIMIT ?
+                """,
+                (end_date, limit * 2),
+            ).fetchall()
+
+        by_date: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            as_of_date = str(row["as_of_date"])
+            item = by_date.setdefault(
+                as_of_date,
+                {
+                    "as_of_date": as_of_date,
+                    "weinstein_pass": 0,
+                    "weinstein_evaluable": 0,
+                    "minervini_pass": 0,
+                    "minervini_evaluable": 0,
+                    "universe_count": 0,
+                },
+            )
+            method = str(row["method"])
+            item[f"{method}_pass"] = int(row["pass_count"] or 0)
+            item[f"{method}_evaluable"] = int(row["evaluable_count"] or 0)
+            item["universe_count"] = max(
+                int(item["universe_count"]), int(row["method_total"] or 0)
+            )
+
+        result: list[dict[str, Any]] = []
+        for as_of_date in sorted(by_date)[-limit:]:
+            item = by_date[as_of_date]
+            for method in ("weinstein", "minervini"):
+                passed = int(item[f"{method}_pass"] or 0)
+                evaluable = int(item[f"{method}_evaluable"] or 0)
+                item[f"{method}_pass_rate"] = (
+                    round(passed * 100 / evaluable, 2) if evaluable else None
+                )
+            result.append(item)
+        return result
 
     def stock_method_chart_events(
         self,

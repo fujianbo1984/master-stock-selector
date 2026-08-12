@@ -9,8 +9,8 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from .collector import (
-    INDEX_SYMBOLS,
     MARKET,
+    MARKET_INDEX_SYMBOLS,
     _assert_required_tables,
     _digest,
     _now,
@@ -105,7 +105,7 @@ def plan_market_history_backfill(config: HistoricalBackfillConfig) -> dict[str, 
         metric_dates, metric_rows = _stock_gap_summary(
             connection, from_date, to_date, "daily_metrics"
         )
-        index_dates = _dates_with_index_gaps(connection, trading_dates)
+        index_dates, missing_index_rows = _index_gap_summary(connection, trading_dates)
     return {
         "from_date": from_date,
         "to_date": to_date,
@@ -115,7 +115,7 @@ def plan_market_history_backfill(config: HistoricalBackfillConfig) -> dict[str, 
         "index_dates": index_dates,
         "missing_factor_rows": factor_rows,
         "missing_metric_rows": metric_rows,
-        "missing_index_rows": len(index_dates) * len(INDEX_SYMBOLS),
+        "missing_index_rows": missing_index_rows,
     }
 
 
@@ -197,15 +197,15 @@ def backfill_market_history(
     )
     for trade_date in plan["index_dates"]:
         rows = index_values.get(trade_date, {})
-        missing = sorted(set(INDEX_SYMBOLS) - set(rows))
+        missing = sorted(set(MARKET_INDEX_SYMBOLS) - set(rows))
         invalid = sorted(
             symbol
             for symbol, row in rows.items()
-            if symbol in INDEX_SYMBOLS and not _valid_daily_row(row, trade_date)
+            if symbol in MARKET_INDEX_SYMBOLS and not _valid_daily_row(row, trade_date)
         )
         if missing or invalid:
             raise ValueError(
-                f"{trade_date} 四指数日线质量门未通过; "
+                f"{trade_date} 指数日线质量门未通过; "
                 f"missing={missing}; invalid={invalid}"
             )
         inserted["indices"] += _persist_missing_indices(
@@ -216,7 +216,7 @@ def backfill_market_history(
             provider=active_provider,
         )
         completed_steps += 1
-        _report(progress, completed_steps, total_steps, "四指数", trade_date)
+        _report(progress, completed_steps, total_steps, "宽基指数", trade_date)
 
     final_plan = plan_market_history_backfill(config)
     if any(final_plan[key] for key in ("factor_dates", "metric_dates", "index_dates")):
@@ -311,24 +311,28 @@ def _stock_gap_summary(
     return [str(row[0]) for row in rows], sum(int(row[1]) for row in rows)
 
 
-def _dates_with_index_gaps(
+def _index_gap_summary(
     connection: sqlite3.Connection, trading_dates: list[str]
-) -> list[str]:
-    return [
-        trade_date
-        for trade_date in trading_dates
-        if int(
+) -> tuple[list[str], int]:
+    placeholders = ",".join("?" for _ in MARKET_INDEX_SYMBOLS)
+    dates: list[str] = []
+    missing_rows = 0
+    for trade_date in trading_dates:
+        stored = int(
             connection.execute(
-                """
+                f"""
                 SELECT COUNT(DISTINCT index_symbol) FROM market_index_daily_bars
                 WHERE market=? AND trade_date=?
-                  AND index_symbol IN ('000300.SH','000852.SH','399006.SZ','000688.SH')
+                  AND index_symbol IN ({placeholders})
                 """,
-                (MARKET, trade_date),
+                (MARKET, trade_date, *MARKET_INDEX_SYMBOLS),
             ).fetchone()[0]
         )
-        < len(INDEX_SYMBOLS)
-    ]
+        missing = len(MARKET_INDEX_SYMBOLS) - stored
+        if missing > 0:
+            dates.append(trade_date)
+            missing_rows += missing
+    return dates, missing_rows
 
 
 def _persist_missing_stock_dataset(
@@ -401,8 +405,10 @@ def _fetch_index_history(
         return {}
     range_method = getattr(provider, "index_daily_bars_range", None)
     if callable(range_method):
-        return dict(range_method(from_date, to_date, INDEX_SYMBOLS))
-    return {date: provider.index_daily_bars(date, INDEX_SYMBOLS) for date in dates}
+        return dict(range_method(from_date, to_date, MARKET_INDEX_SYMBOLS))
+    return {
+        date: provider.index_daily_bars(date, MARKET_INDEX_SYMBOLS) for date in dates
+    }
 
 
 def _persist_missing_indices(
@@ -425,7 +431,7 @@ def _persist_missing_indices(
         }
         missing_values = {
             symbol: values[symbol]
-            for symbol in INDEX_SYMBOLS
+            for symbol in MARKET_INDEX_SYMBOLS
             if symbol not in existing
         }
         if not missing_values:

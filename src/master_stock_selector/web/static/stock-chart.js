@@ -28,7 +28,27 @@
   let recordMode = false;
   let methodEventsById = new Map();
   const canonicalDrawingAnchors = new Map();
+  const chartViewStorageKey = "masterstock-chart:view";
   const methodLayerStorageKey = "masterstock-chart:method-layers";
+  const syncChartViewControls = () => {
+    root.querySelectorAll("[data-chart-interval]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.chartInterval === interval)));
+    root.querySelectorAll("[data-chart-limit]").forEach(button => {
+      const buttonLimit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit);
+      button.setAttribute("aria-pressed", String(buttonLimit === limit));
+    });
+  };
+  const restoreChartView = () => {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(chartViewStorageKey) || "null");
+      if (!saved || typeof saved !== "object") return;
+      if (["day", "week"].includes(saved.interval)) interval = saved.interval;
+      if (saved.limit === null || saved.limit === 260) limit = saved.limit;
+    } catch (_) { /* Browser storage can be unavailable or contain stale data. */ }
+  };
+  const storeChartView = () => {
+    try { window.sessionStorage.setItem(chartViewStorageKey, JSON.stringify({ interval, limit })); }
+    catch (_) { /* Browser storage can be unavailable. */ }
+  };
   const restoreMethodLayers = () => {
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(methodLayerStorageKey) || "null");
@@ -45,6 +65,8 @@
       window.sessionStorage.setItem(methodLayerStorageKey, JSON.stringify(saved));
     } catch (_) { /* Browser storage can be unavailable. */ }
   };
+  restoreChartView();
+  syncChartViewControls();
   restoreMethodLayers();
   const chart = LightweightCharts.createChart(chartNode, {
     layout: { background: { color: "#fffdfa" }, textColor: "#142d4c" },
@@ -441,8 +463,8 @@
     event.preventDefault();
     window.location.assign(target.href);
   });
-  root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); root.querySelectorAll("[data-chart-limit]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); request(); }));
-  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { interval = button.dataset.chartInterval; root.querySelectorAll("[data-chart-interval]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); request(); }));
+  root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); syncChartViewControls(); storeChartView(); request(); }));
+  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { interval = button.dataset.chartInterval; syncChartViewControls(); storeChartView(); request(); }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
   chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); syncVolumePane(); resize(); request();
   if ("requestIdleCallback" in window) window.requestIdleCallback(prefetchAdjacentCharts, { timeout: 1200 });

@@ -100,6 +100,7 @@ def create_app(
             ("行业观察", "/a/industries"),
         ]
         private_items = [
+            ("市场广度", "/a/breadth"),
             ("我的观察", "/a/observations"),
             ("交易复盘", "/a/review"),
         ] if user is not None else []

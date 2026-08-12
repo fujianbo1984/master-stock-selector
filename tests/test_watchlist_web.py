@@ -14,6 +14,7 @@ from master_stock_selector.watchlist.methods import (
 from master_stock_selector.watchlist.repository import WatchlistRepository
 from master_stock_selector.web.app import PROJECT_ROOT, _resolve_database_path
 from master_stock_selector.web.app import create_app as _production_create_app
+from master_stock_selector.web.routers.watchlist import _industry_navigation
 from master_stock_selector.web.users import SESSION_COOKIE, UserRepository
 
 
@@ -813,6 +814,33 @@ def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composit
     assert {row["minervini"]["result_label"] for row in payload["rows"]} == {"是"}
 
 
+def test_logged_in_user_can_open_experimental_market_breadth_page(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.get("/a/breadth?date=2026-07-31")
+
+    assert response.status_code == 200
+    assert "市场广度实验室" in response.text
+    assert "登录用户·实验性功能" in response.text
+    assert "对照指数" in response.text
+    assert "中证全指·20日" in response.text
+    assert "Weinstein 通过率" in response.text
+    assert "Minervini 通过率" in response.text
+    assert "同图叠加" in response.text
+    assert "左轴为通过率，右轴为指数归一化路径" in response.text
+    assert "中证全指" in response.text
+    assert "上证综指" in response.text
+    assert 'data-overlay-chart' in response.text
+    assert 'data-proxy-chart' not in response.text
+    assert 'data-rate-chart' not in response.text
+    assert 'onchange="this.form.requestSubmit()"' in response.text
+    assert '>切换</button>' not in response.text
+    assert "两种方法独立展示，不合成总分" in response.text
+    assert 'id="breadth-history-data"' in response.text
+    assert "breadth-chart.js" in response.text
+    assert 'aria-current="page" href="/a/breadth?date=2026-07-31"' in response.text
+
+
 def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     client = _client(tmp_path)
 
@@ -1045,6 +1073,7 @@ def test_chart_review_keeps_position_when_manual_state_changes_sort_order(tmp_pa
 
 
 def test_industry_observation_page_and_api_are_fact_only(tmp_path):
+    _seed_chart_market(tmp_path / "market.sqlite3")
     client = _client(tmp_path)
 
     page = client.get("/a/industries?date=2026-07-31")
@@ -1060,6 +1089,16 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert "行业确认数据不足，不作趋势判断。" in chart.text
     assert "industry-weinstein-confirmation-v1" in chart.text
     assert 'href="/a/daily?date=2026-07-31&industry=851911.SI"' in chart.text
+    assert "lightweight-charts-5.1.0.js" in chart.text
+    assert "industry-chart.js?v=20260812-industry-tv-v1" in chart.text
+    assert 'id="industry-chart-data"' in chart.text
+    assert "data-industry-chart-canvas" in chart.text
+    assert "方法宽度顺序 <b>1 / 1</b>" in chart.text
+    assert "已是第一个行业" in chart.text
+    assert "已是最后一个行业" in chart.text
+    assert '<svg class="industry-kline"' not in chart.text
+    assert "全部 30 个交易日" in chart.text
+    assert chart.text.index("industry-kline-panel") < chart.text.index("industry-confirmation-panel")
     assert "不计分、不判定“主线”" in page.text
     assert "不构成投资建议或自动买卖指令" in page.text
     assert "industry-observation-table-compact" in page.text
@@ -1071,6 +1110,26 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert payload["policy_version"] == "industry-observation-v2-non-st"
     assert payload["rows"][0]["both_pass_count"] == 1
     assert detail["members"][0]["symbol"] == "000001.SZ"
+
+
+def test_industry_navigation_uses_method_breadth_order():
+    navigation = _industry_navigation(
+        [
+            {"industry_code": "A", "industry_name": "A", "union_pass_count": 1},
+            {"industry_code": "B", "industry_name": "B", "union_pass_count": 3},
+            {
+                "industry_code": "C",
+                "industry_name": "C",
+                "union_pass_count": 3,
+                "both_pass_count": 2,
+            },
+        ],
+        industry_code="B",
+    )
+
+    assert navigation["position"] == 2
+    assert navigation["previous"]["industry_code"] == "C"
+    assert navigation["next"]["industry_code"] == "A"
 
 
 def test_stock_industry_context_is_optional_and_does_not_replace_method_evidence(tmp_path):
@@ -1368,7 +1427,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260812-method-hints-removed-v24" in page.text
+    assert "stock-chart.js?v=20260812-persist-chart-view-v25" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert "当日涨跌幅" in page.text
@@ -1382,6 +1441,9 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "W/M 标志只表示规则观察状态变化" not in page.text
     assert "画线仅保存为个人观察标注" not in page.text
     controller = client.get("/static/stock-chart.js").text
+    assert 'chartViewStorageKey = "masterstock-chart:view"' in controller
+    assert "restoreChartView();" in controller
+    assert "storeChartView();" in controller
     assert 'methodLayerStorageKey = "masterstock-chart:method-layers"' in controller
     assert "restoreMethodLayers();" in controller
     assert "storeMethodLayers();" in controller
@@ -1551,6 +1613,9 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
     )
     assert client.get("/a/review", follow_redirects=False).headers["location"].startswith(
         "/login"
+    )
+    assert client.get("/a/breadth", follow_redirects=False).headers["location"] == (
+        "/login?next=/a/breadth"
     )
     assert client.post(
         "/a/stocks/000001.SZ/review",

@@ -17,6 +17,8 @@ from .service import INDEX_UNIVERSE
 MARKET = "ashare"
 QFQ_DERIVATION_VERSION = "qfq-adj-factor-ratio-v2"
 INDEX_SYMBOLS = tuple(symbol for symbol, _ in INDEX_UNIVERSE)
+BREADTH_BENCHMARK_SYMBOLS = ("000985.CSI", "000001.SH")
+MARKET_INDEX_SYMBOLS = (*INDEX_SYMBOLS, *BREADTH_BENCHMARK_SYMBOLS)
 
 COLLECTION_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS watchlist_market_collection_receipt (
@@ -159,7 +161,7 @@ def collect_market_data(
     daily = active_provider.market_daily_bars(target_date)
     factors = active_provider.market_adjustment_factors(target_date)
     metrics = active_provider.market_daily_metrics(target_date)
-    indices = active_provider.index_daily_bars(target_date, INDEX_SYMBOLS)
+    indices = active_provider.index_daily_bars(target_date, MARKET_INDEX_SYMBOLS)
     prepared = _prepare_batch(
         target_date=target_date,
         members_raw=members_raw,
@@ -245,14 +247,14 @@ def _prepare_batch(
         if str(metrics[symbol].get("trade_date") or "") != target_date:
             errors.append(f"市值数据日期无效: {symbol}")
             break
-    missing_indices = sorted(set(INDEX_SYMBOLS) - set(indices))
+    missing_indices = sorted(set(MARKET_INDEX_SYMBOLS) - set(indices))
     if missing_indices:
-        errors.append("四指数日线缺失: " + ", ".join(missing_indices))
+        errors.append("指数日线缺失: " + ", ".join(missing_indices))
     for symbol in complete_symbols:
         if not _valid_daily_row(daily[symbol], target_date):
             errors.append(f"股票日线字段无效: {symbol}")
             break
-    for symbol in INDEX_SYMBOLS:
+    for symbol in MARKET_INDEX_SYMBOLS:
         row = indices.get(symbol)
         if row is not None and not _valid_daily_row(row, target_date):
             errors.append(f"指数日线字段无效: {symbol}")
@@ -265,7 +267,9 @@ def _prepare_batch(
         symbol: dict(metrics[symbol])
         for symbol in sorted(complete_symbols & metric_symbols)
     }
-    selected_indices = {symbol: dict(indices[symbol]) for symbol in INDEX_SYMBOLS}
+    selected_indices = {
+        symbol: dict(indices[symbol]) for symbol in MARKET_INDEX_SYMBOLS
+    }
     quality = {
         "trade_date": target_date,
         "expected_universe_count": expected_count,
@@ -273,7 +277,7 @@ def _prepare_batch(
         "coverage_ratio": round(coverage, 6),
         "metrics_count": len(selected_metrics),
         "metrics_coverage_ratio": round(metrics_coverage, 6),
-        "index_symbols": list(INDEX_SYMBOLS),
+        "index_symbols": list(MARKET_INDEX_SYMBOLS),
         "daily_without_factor_count": len(daily_symbols - factor_symbols),
         "factor_without_daily_count": len(factor_symbols - daily_symbols),
     }
