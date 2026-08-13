@@ -28,12 +28,17 @@
 先运行 `nginx -t`，再执行 `systemctl daemon-reload` 并重启 Web 与 Nginx。切换后必须确认：
 
 - `ss` 仅显示 FastAPI 监听 `127.0.0.1:8000`，Nginx 监听公网 `8888`；
+- 启用 HTTPS 后，Nginx 额外监听公网 `80` 和 `443`，FastAPI 仍不得监听公网；
 - 公网首页、行情和公开图表正常；公网 `/login`、`/account/`、`/api/me/`、
   `/api/v1/` 均返回 `404`，公网 POST 返回 `403`；
 - SSH `-L 127.0.0.1:8888:127.0.0.1:8000` 后，本机登录和 Agent API 正常；
 - `http://真实域名` 跳转到 HTTPS，`https://真实域名/login` 和 `/api/v1/` 只经 443；
 - `certbot renew --dry-run` 通过，证书续期定时器为 active；
 - `masterstock-daily.timer` 和 `masterstock-backup.timer` 仍为 active。
+
+Certbot 使用 Webroot 续期时，把 `deploy/certbot/reload-nginx` 安装到
+`/etc/letsencrypt/renewal-hooks/deploy/reload-nginx` 并设为 `0755`。这样证书文件更新后
+会先验证 Nginx 配置，再平滑 reload 载入新证书。
 
 首次备份必须手动运行 `masterstock-backup.service`，确认用户数据库备份通过 `quick_check`。
 

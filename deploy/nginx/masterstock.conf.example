@@ -28,6 +28,8 @@ server {
     ssl_session_timeout 1d;
     ssl_session_cache shared:MasterStockTLS:10m;
     ssl_session_tickets off;
+    proxy_headers_hash_max_size 1024;
+    proxy_headers_hash_bucket_size 128;
 
     client_max_body_size 1m;
     add_header X-Content-Type-Options nosniff always;

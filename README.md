@@ -6,9 +6,10 @@
 
 本项目采用 [MIT License](LICENSE)。开源仓库不包含行情数据库、Tushare token、个人观察与成交记录、会话或原始参考资料。
 
-> **在线试用：** [http://47.110.74.48:8888](http://47.110.74.48:8888)
+> **在线试用：** [https://longchangwudao.cn](https://longchangwudao.cn)
 >
-> 该地址当前为 HTTP 直连，仅用于浏览公开行情与方法事实；请勿在不可信网络输入密码或其他敏感信息。
+> HTTPS 入口支持公开页面、登录、个人空间和 Agent API。原公网
+> `http://47.110.74.48:8888` 继续仅提供公开只读页面。
 
 ## 产品边界
 
@@ -103,7 +104,7 @@ scripts/run_master_watchlist.sh
 Agent Token 由用户在“账户设置”中创建，建议一台设备或一个 Agent 一枚。Token 只显示一次，服务端仅保存摘要；`trades:read` 用于查询，`trades:write` 用于预检、批量录入成交和更新既有 BUY 止损。
 
 ```bash
-export MASTERSTOCK_AGENT_URL=http://127.0.0.1:8888
+export MASTERSTOCK_AGENT_URL=https://longchangwudao.cn
 read -s MASTERSTOCK_AGENT_TOKEN
 export MASTERSTOCK_AGENT_TOKEN
 .venv/bin/masterstock agent me
