@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}龙场悟道 · 大师选股{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260813-account-desktop-v33">
+  <link rel="stylesheet" href="/static/app.css?v=20260813-desktop-workbench-v36">
 </head>
 <body class="app-body {% block body_class %}{% endblock %}">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -47,6 +47,32 @@
       form.addEventListener("submit", (event) => {
         if (!window.confirm(form.dataset.confirm)) event.preventDefault();
       });
+    });
+
+    document.querySelectorAll(".trade-form").forEach((form) => {
+      const side = form.querySelector("[data-trade-side]");
+      const setupField = form.querySelector("[data-trade-setup-field]");
+      const setup = form.querySelector("[data-trade-setup]");
+      const exitField = form.querySelector("[data-trade-exit-field]");
+      const exitReason = form.querySelector("[data-exit-reason-select]");
+      const otherField = form.querySelector("[data-exit-reason-other-field]");
+      const other = form.querySelector("[data-exit-reason-other]");
+      if (!side || !setupField || !setup || !exitField || !exitReason || !otherField || !other) return;
+
+      const syncTradeFields = () => {
+        const selling = side.value === "SELL";
+        setupField.hidden = selling;
+        setup.disabled = selling;
+        exitField.hidden = !selling;
+        exitReason.disabled = !selling;
+        const showOther = selling && exitReason.value === "OTHER";
+        otherField.hidden = !showOther;
+        other.disabled = !showOther;
+      };
+
+      side.addEventListener("change", syncTradeFields);
+      exitReason.addEventListener("change", syncTradeFields);
+      syncTradeFields();
     });
 
     document.querySelectorAll("table[data-sortable='true']").forEach((table) => {

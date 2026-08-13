@@ -8,6 +8,12 @@
   <div class="research-context">
     <strong>大师选股 · 两位大师独立方法观察池</strong>
     <span class="research-subtitle">{% block subtitle %}{% endblock %}</span>
+    <div class="research-date">
+      <strong>{{ latest_date or query_date or today }}</strong>
+      {% if not suppress_research_date_note %}
+      <span>数据截至 {{ (v2.market_date if v2 is defined else None) or latest_date or query_date or today }} · 收盘后复盘</span>
+      {% endif %}
+    </div>
   </div>
   <nav class="research-nav" aria-label="龙场悟道导航">
     {% for group in a_nav_groups %}
@@ -35,12 +41,6 @@
     </div>
     {% else %}
     <a class="button button-secondary button-compact" href="/login">登录</a>
-    {% endif %}
-  </div>
-  <div class="research-date">
-    <strong>{{ latest_date or query_date or today }}</strong>
-    {% if not suppress_research_date_note %}
-    <span>数据截至 {{ (v2.market_date if v2 is defined else None) or latest_date or query_date or today }} · 收盘后复盘</span>
     {% endif %}
   </div>
 </header>

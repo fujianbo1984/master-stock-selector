@@ -15,7 +15,7 @@ from master_stock_selector.watchlist.methods import (
 from master_stock_selector.watchlist.repository import WatchlistRepository
 from master_stock_selector.web.app import PROJECT_ROOT, _resolve_database_path
 from master_stock_selector.web.app import create_app as _production_create_app
-from master_stock_selector.web.routers.watchlist import _industry_navigation
+from master_stock_selector.web.routers.watchlist import _industry_navigation, _web_exit_reason
 from master_stock_selector.web.users import SESSION_COOKIE, UserRepository
 
 
@@ -1265,6 +1265,11 @@ def test_stock_industry_context_is_optional_and_does_not_replace_method_evidence
     assert page.status_code == 200
     assert "Weinstein" in page.text
     assert "交易方案" in page.text
+    assert 'data-trade-setup-field' in page.text
+    assert '卖出原因（可选）' in page.text
+    for reason in ("部分止盈", "抵达阻力位", "高潮离场", "形态不符合预期", "其他"):
+        assert f">{reason}</option>" in page.text
+    assert 'name="exit_reason_other"' in page.text
     for label in (
         "失败测试",
         "简单回调",
@@ -1324,7 +1329,7 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
         data={
             "csrf_token": _csrf(client),
             "traded_on": "2026-08-03", "side": "SELL", "quantity": "100",
-                "price": "13.0", "fee": "5", "setup_method": "BREAKOUT", "exit_reason": "计划止盈",
+            "price": "13.0", "fee": "5", "exit_reason_choice": "部分止盈",
         },
         follow_redirects=False,
     )
@@ -1337,11 +1342,21 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
     assert "突破" in page.text
     assert "平安银行" in page.text
     assert "000001.SZ" in page.text
+    assert "部分止盈" in page.text
     assert "计划盈亏比" in page.text
     assert ">1.0</td>" in page.text
     assert "倍初始风险" not in page.text
     assert ">修改</a>" in page.text
     assert "2026-07-31" in page.text
+
+
+def test_web_exit_reason_supports_optional_other_and_legacy_values():
+    assert _web_exit_reason("", "") == ""
+    assert _web_exit_reason("部分止盈", "") == "部分止盈"
+    assert _web_exit_reason("OTHER", "主动降低仓位") == "主动降低仓位"
+    assert _web_exit_reason("", "", legacy="历史自由文本") == "历史自由文本"
+    with pytest.raises(ValueError, match="卖出原因不受支持"):
+        _web_exit_reason("未知选项", "")
 
 
 def test_open_positions_support_previous_and_next_chart_navigation(tmp_path):

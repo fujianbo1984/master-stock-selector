@@ -135,16 +135,21 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>成交日<input name="traded_on" type="date" value="{{ trade.traded_on or query_date }}" required></label>
       <label>成交时间<input name="traded_at" type="time" step="1" value="{{ trade.traded_at or '' }}"></label>
-      <label>方向<select name="side"><option value="BUY" {% if trade.side == 'BUY' %}selected{% endif %}>买入</option><option value="SELL" {% if trade.side == 'SELL' %}selected{% endif %}>卖出</option></select></label>
+      <label>方向<select name="side" data-trade-side><option value="BUY" {% if trade.side != 'SELL' %}selected{% endif %}>买入</option><option value="SELL" {% if trade.side == 'SELL' %}selected{% endif %}>卖出</option></select></label>
       <label>数量（股）<input name="quantity" type="number" min="1" step="1" value="{{ trade.quantity or '' }}" required></label>
       <label>成交价<input name="price" type="number" min="0.001" step="0.001" value="{{ trade.price or '' }}" required></label>
       <label>费用（元）<input name="fee" type="number" min="0" step="0.01" value="{{ trade.fee if editing_trade else 0 }}"></label>
-      <label>交易方案<select name="setup_method">{% for value, label in trade_setup_labels.items() %}<option value="{{ value }}" {% if (trade.setup_method or default_trade_setup) == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label data-trade-setup-field{% if trade.side == 'SELL' %} hidden{% endif %}>交易方案<select name="setup_method" data-trade-setup{% if trade.side == 'SELL' %} disabled{% endif %}>{% for value, label in trade_setup_labels.items() %}<option value="{{ value }}" {% if (trade.setup_method or default_trade_setup) == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label>止损价（仅买入）<input name="stop_price" type="number" min="0.001" step="0.001" value="{{ trade.stop_price or '' }}" placeholder="须低于买入价"></label>
       <label>市场环境<input name="market_context" value="{{ trade.market_context or '' }}" placeholder="如：指数处于上升阶段 / 震荡"></label>
       <label>买入理由<textarea name="rationale" rows="2" placeholder="只写实际执行依据">{{ trade.rationale or '' }}</textarea></label>
       <label>失效条件<textarea name="invalidation" rows="2" placeholder="买入时的止损或失效条件">{{ trade.invalidation or '' }}</textarea></label>
-      <label>卖出原因<textarea name="exit_reason" rows="2" placeholder="卖出时填写">{{ trade.exit_reason or '' }}</textarea></label>
+      {% set selected_exit_reason = trade.exit_reason or '' %}
+      {% set custom_exit_reason = selected_exit_reason if selected_exit_reason and selected_exit_reason not in exit_reason_options else '' %}
+      <div class="trade-exit-field" data-trade-exit-field{% if trade.side != 'SELL' %} hidden{% endif %}>
+        <label>卖出原因（可选）<select name="exit_reason_choice" data-exit-reason-select{% if trade.side != 'SELL' %} disabled{% endif %}><option value="" {% if not selected_exit_reason %}selected{% endif %}>未选择</option>{% for reason in exit_reason_options %}<option value="{{ reason }}" {% if selected_exit_reason == reason %}selected{% endif %}>{{ reason }}</option>{% endfor %}<option value="OTHER" {% if custom_exit_reason %}selected{% endif %}>其他</option></select></label>
+        <label data-exit-reason-other-field{% if not custom_exit_reason %} hidden{% endif %}>其他原因<input name="exit_reason_other" value="{{ custom_exit_reason }}" placeholder="请输入卖出原因" data-exit-reason-other{% if trade.side != 'SELL' or not custom_exit_reason %} disabled{% endif %}></label>
+      </div>
       <div class="trade-form-actions"><button class="button" type="submit">{{ '保存修改' if editing_trade else '保存成交' }}</button>{% if editing_trade %}<a class="button button-secondary" href="/a/stocks/{{ stock.symbol }}#trade-journal">取消修改</a>{% endif %}</div>
     </form>
   </div>

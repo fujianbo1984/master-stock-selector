@@ -50,6 +50,12 @@ MANUAL_LABELS = {
     "FOCUS": "重点",
     "ARCHIVED": "已归档",
 }
+EXIT_REASON_OPTIONS = (
+    "部分止盈",
+    "抵达阻力位",
+    "高潮离场",
+    "形态不符合预期",
+)
 MARKET_CAP_FLOORS = {0, 30, 50, 100}
 BREADTH_BENCHMARKS = {
     "000985.CSI": "中证全指",
@@ -997,6 +1003,7 @@ def build_watchlist_router(
                 "minervini_check_labels": MINERVINI_CHECK_LABELS,
                 "minervini_metric_labels": MINERVINI_METRIC_LABELS,
                 "trade_setup_labels": TRADE_SETUP_LABELS,
+                "exit_reason_options": EXIT_REASON_OPTIONS,
                 "default_trade_setup": DEFAULT_TRADE_SETUP,
                 "editing_trade": editing_trade,
                 "trade_prefill": trade_prefill,
@@ -1242,6 +1249,11 @@ def build_watchlist_router(
         require_csrf(request, user, value("csrf_token"))
 
         try:
+            exit_reason = _web_exit_reason(
+                value("exit_reason_choice"),
+                value("exit_reason_other"),
+                legacy=value("exit_reason"),
+            )
             traded_on = value("traded_on")
             users.record_trade(
                 user.user_id,
@@ -1256,7 +1268,7 @@ def build_watchlist_router(
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"),
                 invalidation=value("invalidation"),
-                exit_reason=value("exit_reason"),
+                exit_reason=exit_reason,
                 market_context=value("market_context"),
                 observation_snapshot=repository.observation_snapshot(symbol, traded_on),
             )
@@ -1279,6 +1291,11 @@ def build_watchlist_router(
         if existing is None:
             raise HTTPException(status_code=404, detail="trade not found")
         try:
+            exit_reason = _web_exit_reason(
+                value("exit_reason_choice"),
+                value("exit_reason_other"),
+                legacy=value("exit_reason"),
+            )
             traded_on = value("traded_on")
             users.update_trade(
                 user.user_id,
@@ -1289,7 +1306,7 @@ def build_watchlist_router(
                 setup_method=value("setup_method", DEFAULT_TRADE_SETUP),
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"), invalidation=value("invalidation"),
-                exit_reason=value("exit_reason"), market_context=value("market_context"),
+                exit_reason=exit_reason, market_context=value("market_context"),
                 observation_snapshot=repository.observation_snapshot(
                     str(existing["symbol"]), traded_on
                 ),
@@ -1510,6 +1527,18 @@ def _selected_date(
     if requested and repository.has_fact_date(requested):
         return requested
     return repository.latest_fact_date() or requested or _safe_market_date(market_reader)
+
+
+def _web_exit_reason(choice: str, other: str, *, legacy: str = "") -> str:
+    """Normalize the optional, controlled exit-reason fields from the web form."""
+    normalized_choice = choice.strip()
+    if not normalized_choice:
+        return legacy.strip()
+    if normalized_choice == "OTHER":
+        return other.strip()
+    if normalized_choice not in EXIT_REASON_OPTIONS:
+        raise ValueError("卖出原因不受支持")
+    return normalized_choice
 
 
 def _normalize_daily_query(
