@@ -1,0 +1,15 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name stocks.example.com www.stocks.example.com;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 404;
+    }
+}

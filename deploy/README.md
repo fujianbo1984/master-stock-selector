@@ -9,6 +9,8 @@
 `masterstock.conf.example` 是可与它同时启用的域名 HTTPS 入口模板。HTTPS 入口在 80
 端口保留 ACME 验证并跳转到 443，443 代理完整应用，供登录、个人空间和 Agent API
 使用。部署时必须把示例域名替换为真实域名，并确认对应证书同时覆盖根域名和 `www`。
+首次签发证书前先临时启用 `masterstock-acme-http.conf.example`，它只公开 ACME 验证
+路径，其他 80 端口请求返回 404；证书签发成功后再用正式 HTTPS 模板替换它。
 基础部署需要创建：
 
 - 系统账号 `masterstock`；
