@@ -129,6 +129,106 @@ def test_explicit_user_schema_migration_backs_up_and_preserves_rows(tmp_path):
     assert tuple(trade) == (None, 1)
 
 
+def test_setup_migration_maps_legacy_breakout_and_pullback_without_losing_rows(tmp_path):
+    path = tmp_path / "users.sqlite3"
+    repository = UserRepository(path)
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    with repository.connect() as connection:
+        connection.executescript(
+            """
+            ALTER TABLE user_trade_execution RENAME TO user_trade_execution_v3;
+            CREATE TABLE user_trade_execution (
+                execution_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                traded_on TEXT NOT NULL,
+                traded_at TEXT NOT NULL DEFAULT '',
+                source_ref TEXT,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
+                quantity INTEGER NOT NULL CHECK (quantity > 0),
+                price REAL NOT NULL CHECK (price > 0),
+                fee REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
+                method TEXT NOT NULL,
+                setup_method TEXT NOT NULL DEFAULT 'PULLBACK'
+                    CHECK (setup_method IN ('BREAKOUT', 'PULLBACK')),
+                stop_price REAL,
+                rationale TEXT NOT NULL DEFAULT '',
+                invalidation TEXT NOT NULL DEFAULT '',
+                exit_reason TEXT NOT NULL DEFAULT '',
+                market_context TEXT NOT NULL DEFAULT '',
+                observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                revision INTEGER NOT NULL DEFAULT 1
+            );
+            DROP TABLE user_trade_execution_v3;
+            PRAGMA user_version=2;
+            """
+        )
+        connection.executemany(
+            """INSERT INTO user_trade_execution(
+                execution_id, user_id, traded_on, symbol, side, quantity,
+                price, method, setup_method
+            ) VALUES (?, ?, '2026-08-01', ?, 'BUY', 100, 10, 'MANUAL', ?)""",
+            [
+                ("legacy-breakout", user_id, "000001.SZ", "BREAKOUT"),
+                ("legacy-pullback", user_id, "000002.SZ", "PULLBACK"),
+            ],
+        )
+
+    status = repository.schema_status()
+    assert status["legacy_trade_setups"] is True
+    backup = tmp_path / "users.before-schema-v3.sqlite3"
+    migrated = migrate_user_schema(repository, apply=True, backup=backup)
+
+    assert migrated["existing_row_counts_preserved"] is True
+    assert repository.schema_status()["compatible"] is True
+    with repository.connect(read_only=True) as connection:
+        setups = dict(
+            connection.execute(
+                "SELECT execution_id, setup_method FROM user_trade_execution"
+            ).fetchall()
+        )
+    assert setups == {
+        "legacy-breakout": "POST_BREAKOUT_FIRST_PULLBACK",
+        "legacy-pullback": "PULLBACK_SUPPORT",
+    }
+
+
+def test_user_trade_journal_accepts_all_eight_setup_options(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    setups = {
+        "FAILED_TEST": "失败测试",
+        "PULLBACK_SUPPORT": "简单回调",
+        "LOWER_TIMEFRAME_BREAKOUT": "低周期突破入场",
+        "COMPLEX_PULLBACK": "复杂回调",
+        "ANTI": "Anti（趋势转换首次回调）",
+        "PRE_BREAKOUT_BASE": "突破前基底入场",
+        "POST_BREAKOUT_FIRST_PULLBACK": "突破后回调",
+        "FAILED_BREAKOUT": "失败突破",
+    }
+    for index, setup in enumerate(setups, start=1):
+        repository.record_trade(
+            user_id,
+            traded_on="2026-08-01",
+            symbol=f"{index:06d}.SZ",
+            side="BUY",
+            quantity=100,
+            price=10,
+            fee=0,
+            method="MANUAL",
+            setup_method=setup,
+        )
+
+    review = repository.trade_review(user_id, {})
+
+    assert {row["setup_method"]: row["setup_label"] for row in review["executions"]} == setups
+    assert list(review["by_setup"]) == list(setups)
+
+
 def test_private_rows_are_scoped_by_user_id(tmp_path):
     repository = UserRepository(tmp_path / "users.sqlite3")
     repository.initialize()

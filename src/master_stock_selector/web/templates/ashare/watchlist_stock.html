@@ -139,7 +139,7 @@
       <label>数量（股）<input name="quantity" type="number" min="1" step="1" value="{{ trade.quantity or '' }}" required></label>
       <label>成交价<input name="price" type="number" min="0.001" step="0.001" value="{{ trade.price or '' }}" required></label>
       <label>费用（元）<input name="fee" type="number" min="0" step="0.01" value="{{ trade.fee if editing_trade else 0 }}"></label>
-      <label>交易方法<select name="setup_method">{% for value, label in trade_setup_labels.items() %}<option value="{{ value }}" {% if (trade.setup_method or 'PULLBACK') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label>交易方案<select name="setup_method">{% for value, label in trade_setup_labels.items() %}<option value="{{ value }}" {% if (trade.setup_method or default_trade_setup) == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label>止损价（仅买入）<input name="stop_price" type="number" min="0.001" step="0.001" value="{{ trade.stop_price or '' }}" placeholder="须低于买入价"></label>
       <label>市场环境<input name="market_context" value="{{ trade.market_context or '' }}" placeholder="如：指数处于上升阶段 / 震荡"></label>
       <label>买入理由<textarea name="rationale" rows="2" placeholder="只写实际执行依据">{{ trade.rationale or '' }}</textarea></label>

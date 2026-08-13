@@ -1264,8 +1264,19 @@ def test_stock_industry_context_is_optional_and_does_not_replace_method_evidence
 
     assert page.status_code == 200
     assert "Weinstein" in page.text
-    assert "交易方法" in page.text
-    assert "回调" in page.text
+    assert "交易方案" in page.text
+    for label in (
+        "失败测试",
+        "简单回调",
+        "低周期突破入场",
+        "复杂回调",
+        "Anti（趋势转换首次回调）",
+        "突破前基底入场",
+        "突破后回调",
+        "失败突破",
+    ):
+        assert label in page.text
+    assert page.text.count('<option value="') >= 10
     assert "行业背景（仅人工参考）" in page.text
     assert "行业代理不参与 000001.SZ 的 Weinstein 或 Minervini 结论。" in page.text
 

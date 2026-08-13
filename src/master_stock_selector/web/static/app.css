@@ -1236,38 +1236,54 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .auth-error { margin: 0 0 16px; padding: .75rem .9rem; border: 1px solid #d6a19b; border-radius: 5px; color: #8f261f; background: #fff2f0; }
 .auth-notice { margin: 0 0 16px; padding: .75rem .9rem; border: 1px solid #9fc9b4; border-radius: 5px; color: #176044; background: #effaf4; }
 .private-login-panel { display: grid; justify-items: start; gap: .5rem; }
-.account-settings-shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 42px; align-items: start; padding-top: 36px; }
+.account-settings-shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); max-width: 1320px; margin-right: auto; margin-left: auto; gap: 34px; align-items: start; padding-top: 30px; }
 .account-settings-sidebar { position: sticky; top: 20px; border: 1px solid var(--line); background: rgba(255, 255, 255, .45); }
-.account-settings-profile { display: grid; grid-template-columns: 42px 1fr; gap: 11px; align-items: center; padding: 20px; border-bottom: 1px solid var(--line); }
-.account-settings-avatar { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: white; background: var(--text); font-family: "Songti SC", "STSong", serif; font-size: 18px; font-weight: 700; }
+.account-settings-profile { display: grid; grid-template-columns: 38px 1fr; gap: 10px; align-items: center; padding: 17px 16px; border-bottom: 1px solid var(--line); }
+.account-settings-avatar { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; color: white; background: var(--text); font-family: "Songti SC", "STSong", serif; font-size: 16px; font-weight: 700; }
 .account-settings-profile div { display: grid; min-width: 0; gap: 1px; }
 .account-settings-profile span, .account-settings-profile small { color: var(--muted); font-size: 9px; }
 .account-settings-profile strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.account-settings-nav { display: grid; padding: 8px; }
+.account-settings-nav { display: grid; gap: 7px; padding: 9px; }
+.account-settings-nav-group { display: grid; gap: 2px; }
+.account-settings-nav-group + .account-settings-nav-group { padding-top: 8px; border-top: 1px solid var(--line); }
+.account-settings-nav-group > p { margin: 0; padding: 3px 10px 5px; color: var(--muted); font-size: 8px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
 .account-settings-nav a { display: grid; gap: 2px; padding: 13px 12px; border-left: 2px solid transparent; color: var(--muted); }
 .account-settings-nav a:hover { color: var(--text); background: var(--panel-soft); }
 .account-settings-nav a.active { border-left-color: var(--accent); color: var(--text); background: var(--accent-soft); }
 .account-settings-nav span { font-size: 12px; font-weight: 700; }
 .account-settings-nav small { font-size: 9px; }
-.account-settings-boundary { margin: 0; padding: 16px 20px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; line-height: 1.7; }
-.account-settings-content { display: grid; min-width: 0; gap: 22px; }
-.account-settings-heading { display: grid; gap: 7px; padding-bottom: 20px; border-bottom: 1px solid var(--line-strong); }
-.account-settings-heading h1 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: clamp(34px, 4vw, 46px); line-height: 1.1; }
-.account-settings-heading p { max-width: 660px; margin: 0; color: var(--muted); line-height: 1.75; }
-.settings-card { padding: 28px; border-top: 3px solid var(--accent); }
+.account-settings-boundary { margin: 0; padding: 14px 16px 17px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; line-height: 1.65; }
+.account-settings-content { display: grid; min-width: 0; gap: 18px; }
+.account-settings-heading { display: flex; justify-content: space-between; gap: 40px; align-items: end; min-height: 88px; padding: 6px 0 17px; border-bottom: 1px solid var(--line-strong); }
+.account-settings-heading > div { display: grid; gap: 6px; }
+.account-settings-heading h1 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: 39px; line-height: 1.05; }
+.account-settings-heading > p { max-width: 470px; margin: 0 0 3px; color: var(--muted); line-height: 1.75; text-align: right; }
+.settings-card { padding: 26px 28px 28px; border-top: 3px solid var(--accent); }
 .settings-card-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 22px; }
-.settings-card-heading h2 { margin: 0 0 6px; font-family: "Songti SC", "STSong", serif; font-size: 24px; }
+.settings-card-heading h2 { margin: 3px 0 5px; font-family: "Songti SC", "STSong", serif; font-size: 24px; }
 .settings-card-heading p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.settings-section-index { color: var(--accent) !important; font-size: 9px !important; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; }
 .settings-status-badge { flex: none; padding: 5px 9px; border: 1px solid #a9c8b8; border-radius: 999px; color: #176044; background: #eff8f3; font-size: 9px; font-weight: 700; }
-.settings-form { max-width: 620px; }
+.settings-form { max-width: none; }
+.settings-security-grid { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start; }
+.settings-password-card { min-height: 420px; }
+.settings-password-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.settings-primary-action { justify-self: start; min-width: 250px; min-height: 44px; margin-top: 5px; }
+.settings-session-card { padding: 27px 25px; border: 1px solid var(--line-strong); border-top: 3px solid var(--text); background: var(--panel); }
+.settings-session-card h2 { margin: 7px 0 20px; font-family: "Songti SC", "STSong", serif; font-size: 23px; line-height: 1.35; }
+.settings-session-card dl { display: grid; gap: 0; margin: 0 0 22px; }
+.settings-session-card dl div { display: grid; gap: 3px; padding: 13px 0; border-top: 1px solid var(--line); }
+.settings-session-card dt { color: var(--muted); font-size: 9px; }
+.settings-session-card dd { margin: 0; color: var(--text); font-size: 11px; font-weight: 700; line-height: 1.55; }
+.settings-session-card .text-link { font-size: 11px; font-weight: 700; }
 .settings-next-card { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding: 20px 22px; border: 1px solid var(--line); background: var(--panel-soft); }
 .settings-next-card p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
-.account-token-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .55fr); gap: 18px; align-items: stretch; }
+.account-token-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(250px, .45fr); gap: 18px; align-items: start; }
 .token-create-card { height: 100%; }
-.token-safety-card { padding: 26px; border: 1px solid var(--line-strong); background: var(--text); color: white; }
+.token-safety-card { padding: 26px; border: 1px solid var(--line-strong); border-top: 3px solid var(--accent); background: var(--text); color: white; }
 .token-safety-card h2 { margin: 8px 0 15px; font-family: "Songti SC", "STSong", serif; font-size: 22px; }
 .token-safety-card > p:last-child { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.2); color: #d5dfeb; font-size: 10px; line-height: 1.7; }
-.token-safety-card .eyebrow { color: #f0a49b; }
+.token-safety-card .eyebrow, .token-safety-card .settings-section-index { color: #f0a49b !important; }
 .settings-checklist { display: grid; gap: 11px; margin: 0; padding: 0; list-style: none; }
 .settings-checklist li { position: relative; padding-left: 18px; color: #eef3f8; font-size: 11px; line-height: 1.55; }
 .settings-checklist li::before { position: absolute; left: 0; color: #f0a49b; content: "—"; }
@@ -1299,7 +1315,8 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .agent-help-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 18px; padding-top: 18px; }
 .agent-help-grid h3 { margin: 0 0 8px; font-size: 12px; }
 .agent-help-grid p { color: var(--muted); font-size: 10px; line-height: 1.7; }
-.token-list-section { padding: 28px; }
+.token-list-section { padding: 26px 28px 28px; }
+.settings-count { min-width: 48px; padding: 5px 9px; border: 1px solid var(--line); color: var(--muted); font-size: 9px; font-weight: 700; text-align: center; }
 .token-list { display: grid; gap: 10px; }
 .token-item { display: grid; grid-template-columns: minmax(150px, .75fr) minmax(0, 2fr) auto; gap: 18px; align-items: center; padding: 16px; border: 1px solid var(--line); background: rgba(255,255,255,.48); }
 .token-item-main { display: grid; min-width: 0; gap: 4px; }
@@ -1330,6 +1347,13 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .reading-prose ul { margin: 1.15em 0; padding-left: 1.25em; }
 .reading-prose li { margin: .45em 0; }
 .reading-prose blockquote { margin: 1.6em 0; padding: 18px 22px; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--text); font-size: 18px; font-weight: 700; line-height: 1.8; }
+.reading-prose table { width: 100%; margin: 1.7em 0; border-collapse: collapse; font-family: inherit; font-size: 14px; line-height: 1.65; }
+.reading-prose th, .reading-prose td { padding: 11px 13px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.reading-prose th { background: var(--accent-soft); color: var(--text); }
+.reading-figure { margin: 2em auto; }
+.reading-figure img { display: block; width: auto; max-width: 100%; height: auto; margin: 0 auto; border: 1px solid var(--line); background: #fff; }
+.reading-figure figcaption { max-width: 680px; margin: 10px auto 0; color: var(--muted); font-size: 12px; line-height: 1.7; text-align: center; }
+.reading-cycle { overflow-x: auto; margin: 1.7em 0; padding: 20px 22px; border: 1px solid var(--line-strong); background: #fffdfa; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; line-height: 1.7; text-align: center; white-space: pre; }
 .reading-framework { display: grid; gap: 8px; margin: 1.7em 0; padding: 24px; border: 1px solid var(--line-strong); background: #fffdfa; }
 .reading-framework p { display: grid; grid-template-columns: 140px 1fr; gap: 16px; align-items: baseline; margin: 0; }
 .reading-framework p strong { color: var(--accent); font-family: Georgia, "Times New Roman", serif; }

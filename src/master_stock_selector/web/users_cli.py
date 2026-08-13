@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from ..watchlist.repository import TRADE_SETUP_ALIASES
 from .users import UserRepository
 
 
@@ -361,7 +362,15 @@ def _copy_legacy_rows(
     target.executemany(
         f"INSERT INTO {target_table}(user_id,{','.join(columns)}) VALUES ({placeholders})",
         [
-            (user_id, *(row[column] for column in columns))
+            (
+                user_id,
+                *(
+                    TRADE_SETUP_ALIASES.get(str(row[column]), str(row[column]))
+                    if target_table == "user_trade_execution" and column == "setup_method"
+                    else row[column]
+                    for column in columns
+                ),
+            )
             for row in source.execute(f"SELECT {','.join(columns)} FROM {source_table}")
         ],
     )

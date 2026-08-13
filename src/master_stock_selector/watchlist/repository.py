@@ -24,7 +24,21 @@ TRADE_METHOD_LABELS = {
     "MINERVINI": "米涅尔维尼",
     "MANUAL": "人工判断",
 }
-TRADE_SETUP_LABELS = {"BREAKOUT": "突破", "PULLBACK": "回调"}
+TRADE_SETUP_LABELS = {
+    "FAILED_TEST": "失败测试",
+    "PULLBACK_SUPPORT": "简单回调",
+    "LOWER_TIMEFRAME_BREAKOUT": "低周期突破入场",
+    "COMPLEX_PULLBACK": "复杂回调",
+    "ANTI": "Anti（趋势转换首次回调）",
+    "PRE_BREAKOUT_BASE": "突破前基底入场",
+    "POST_BREAKOUT_FIRST_PULLBACK": "突破后回调",
+    "FAILED_BREAKOUT": "失败突破",
+}
+TRADE_SETUP_ALIASES = {
+    "BREAKOUT": "POST_BREAKOUT_FIRST_PULLBACK",
+    "PULLBACK": "PULLBACK_SUPPORT",
+}
+DEFAULT_TRADE_SETUP = "PULLBACK_SUPPORT"
 
 WATCHLIST_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS stock_method_daily_fact (
@@ -188,7 +202,11 @@ CREATE TABLE IF NOT EXISTS trade_execution (
     price REAL NOT NULL CHECK (price > 0),
     fee REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
     method TEXT NOT NULL CHECK (method IN ('WEINSTEIN', 'MINERVINI', 'MANUAL')),
-    setup_method TEXT NOT NULL DEFAULT 'PULLBACK' CHECK (setup_method IN ('BREAKOUT', 'PULLBACK')),
+    setup_method TEXT NOT NULL DEFAULT 'PULLBACK_SUPPORT' CHECK (setup_method IN (
+        'FAILED_TEST', 'PULLBACK_SUPPORT', 'LOWER_TIMEFRAME_BREAKOUT',
+        'COMPLEX_PULLBACK', 'ANTI', 'PRE_BREAKOUT_BASE',
+        'POST_BREAKOUT_FIRST_PULLBACK', 'FAILED_BREAKOUT'
+    )),
     stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
     rationale TEXT NOT NULL DEFAULT '',
     invalidation TEXT NOT NULL DEFAULT '',
@@ -1205,7 +1223,8 @@ class WatchlistRepository:
             connection.execute("ALTER TABLE trade_execution ADD COLUMN traded_at TEXT NOT NULL DEFAULT ''")
         if "setup_method" not in columns:
             connection.execute(
-                "ALTER TABLE trade_execution ADD COLUMN setup_method TEXT NOT NULL DEFAULT 'PULLBACK'"
+                "ALTER TABLE trade_execution ADD COLUMN setup_method TEXT NOT NULL "
+                f"DEFAULT '{DEFAULT_TRADE_SETUP}'"
             )
         if "stop_price" not in columns:
             connection.execute("ALTER TABLE trade_execution ADD COLUMN stop_price REAL")
@@ -2673,7 +2692,7 @@ class WatchlistRepository:
         price: float,
         fee: float,
         method: str,
-        setup_method: str = "PULLBACK",
+        setup_method: str = DEFAULT_TRADE_SETUP,
         stop_price: float | None = None,
         rationale: str = "",
         invalidation: str = "",
@@ -2701,10 +2720,11 @@ class WatchlistRepository:
             raise ValueError("方向必须为买入或卖出")
         normalized_method = method.upper().strip()
         normalized_setup = setup_method.upper().strip()
+        normalized_setup = TRADE_SETUP_ALIASES.get(normalized_setup, normalized_setup)
         if normalized_method not in {"WEINSTEIN", "MINERVINI", "MANUAL"}:
             raise ValueError("关联方法不正确")
         if normalized_setup not in TRADE_SETUP_LABELS:
-            raise ValueError("交易方法必须为突破或回调")
+            raise ValueError("交易方案不受支持")
         if quantity <= 0 or price <= 0 or fee < 0:
             raise ValueError("数量、价格和费用必须有效")
         normalized_stop = float(stop_price) if stop_price is not None else None
@@ -2786,8 +2806,10 @@ class WatchlistRepository:
             for item in collection:
                 symbol = str(item["symbol"])
                 item["stock_name"] = names.get(symbol, "名称待补")
-                setup_method = str(item.get("setup_method") or "PULLBACK")
-                item["setup_label"] = TRADE_SETUP_LABELS.get(setup_method, "回调")
+                setup_method = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
+                setup_method = TRADE_SETUP_ALIASES.get(setup_method, setup_method)
+                item["setup_method"] = setup_method
+                item["setup_label"] = TRADE_SETUP_LABELS.get(setup_method, setup_method)
         return {
             "executions": list(reversed(rows)),
             "closed": list(reversed(closed)),
@@ -2796,7 +2818,7 @@ class WatchlistRepository:
             "summary": _trade_statistics(closed),
             "by_setup": {
                 setup: _trade_statistics([item for item in closed if item["setup_method"] == setup])
-                for setup in ("BREAKOUT", "PULLBACK")
+                for setup in TRADE_SETUP_LABELS
             },
             "sample_state": (
                 "样本不足：少于 20 笔已完成交易，仅展示描述统计。"
@@ -2815,7 +2837,10 @@ class WatchlistRepository:
             return None
         item = dict(row)
         item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
-        item["setup_label"] = TRADE_SETUP_LABELS.get(str(item.get("setup_method") or "PULLBACK"), "回调")
+        setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
+        setup = TRADE_SETUP_ALIASES.get(setup, setup)
+        item["setup_method"] = setup
+        item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
         return item
 
     def update_trade(
@@ -2829,7 +2854,7 @@ class WatchlistRepository:
         price: float,
         fee: float,
         method: str,
-        setup_method: str = "PULLBACK",
+        setup_method: str = DEFAULT_TRADE_SETUP,
         stop_price: float | None = None,
         rationale: str = "",
         invalidation: str = "",
@@ -2846,10 +2871,11 @@ class WatchlistRepository:
         normalized_side = side.upper().strip()
         normalized_method = method.upper().strip()
         normalized_setup = setup_method.upper().strip()
+        normalized_setup = TRADE_SETUP_ALIASES.get(normalized_setup, normalized_setup)
         if normalized_side not in {"BUY", "SELL"} or normalized_method not in TRADE_METHOD_LABELS:
             raise ValueError("方向或关联方法不正确")
         if normalized_setup not in TRADE_SETUP_LABELS:
-            raise ValueError("交易方法必须为突破或回调")
+            raise ValueError("交易方案不受支持")
         if quantity <= 0 or price <= 0 or fee < 0:
             raise ValueError("数量、价格和费用必须有效")
         normalized_stop = float(stop_price) if stop_price is not None else None
@@ -3117,7 +3143,10 @@ def _match_trade_executions(
             lots.append({
                 "symbol": str(row["symbol"]), "buy_execution_id": str(row["execution_id"]),
                 "buy_date": str(row["traded_on"]), "method": str(row["method"]),
-                "setup_method": str(row.get("setup_method") or "PULLBACK"),
+                "setup_method": TRADE_SETUP_ALIASES.get(
+                    str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
+                    str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
+                ),
                 "entry_price": float(row["price"]), "stop_price": row.get("stop_price"),
                 "remaining_quantity": quantity,
                 "unit_cost": (float(row["price"]) * quantity + float(row["fee"])) / quantity,
@@ -3171,7 +3200,7 @@ def _match_trade_executions(
 def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for lot in lots:
-        key = (str(lot["symbol"]), str(lot.get("setup_method") or "PULLBACK"))
+        key = (str(lot["symbol"]), str(lot.get("setup_method") or DEFAULT_TRADE_SETUP))
         item = grouped.setdefault(key, {"symbol": key[0], "setup_method": key[1], "quantity": 0, "cost": 0.0})
         quantity = int(lot["remaining_quantity"])
         item["quantity"] += quantity

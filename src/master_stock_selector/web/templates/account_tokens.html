@@ -8,9 +8,8 @@
   {% include "_account_settings_nav.html" %}
   <div class="account-settings-content">
     <header class="account-settings-heading">
-      <p class="eyebrow">Agent 接入</p>
-      <h1>Agent Token</h1>
-      <p>为 CLI 或 Agent 创建可撤销的独立凭据，不需要共享网站密码。</p>
+      <div><p class="eyebrow">账户 · Agent 接入</p><h1>Agent Token</h1></div>
+      <p>为每个 CLI 或 Agent 创建独立凭据，按用途授权、按设备撤销。</p>
     </header>
 
     {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
@@ -28,7 +27,7 @@
 
     <div class="account-token-grid">
       <div class="panel settings-card token-create-card">
-        <div class="settings-card-heading"><div><h2>创建新 Token</h2><p>建议为每个 Agent 分别创建，停用时只需撤销对应凭据。</p></div></div>
+        <div class="settings-card-heading"><div><p class="settings-section-index">01 · 新凭据</p><h2>创建 Token</h2><p>一台设备或一个 Agent 使用一枚，便于单独撤销。</p></div></div>
         <form method="post" action="/account/tokens" class="auth-form settings-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label>用途名称<input name="name" maxlength="80" placeholder="例如：MacBook 上的 Codex" required></label>
@@ -47,7 +46,7 @@
         </form>
       </div>
       <aside class="token-safety-card" aria-labelledby="token-safety-title">
-        <p class="eyebrow">使用边界</p>
+        <p class="settings-section-index">安全边界</p>
         <h2 id="token-safety-title">Token 不是网站密码</h2>
         <ul class="settings-checklist">
           <li>服务端只保存 Token 摘要</li>
@@ -60,10 +59,9 @@
     </div>
 
     <section class="panel agent-quickstart" aria-labelledby="agent-quickstart-title">
-      <div class="settings-card-heading"><div><p class="eyebrow">CLI 使用说明</p><h2 id="agent-quickstart-title">三步连接 Agent</h2><p>先验证身份，再预检交易；只有显式添加 <code>--commit</code> 才会写入。</p></div><span class="settings-status-badge">默认不写入</span></div>
+      <div class="settings-card-heading"><div><p class="settings-section-index">02 · CLI 接入</p><h2 id="agent-quickstart-title">三步连接 Agent</h2><p>先验证身份，再预检交易；只有显式添加 <code>--commit</code> 才会写入。</p></div><span class="settings-status-badge">默认不写入</span></div>
       <ol class="agent-steps">
-        <li><div><span>01</span><strong>安全加载凭据</strong></div><p>将地址和 Token 注入当前终端会话，不把 Token 写入命令历史。</p><pre><code>export MASTERSTOCK_AGENT_URL="https://your-masterstock.example.com"
-read -s MASTERSTOCK_AGENT_TOKEN
+        <li><div><span>01</span><strong>安全加载凭据</strong></div><p>CLI 默认连接 longchangwudao.cn；只需把 Token 注入当前终端会话，不写入命令历史。</p><pre><code>read -s MASTERSTOCK_AGENT_TOKEN
 export MASTERSTOCK_AGENT_TOKEN
 .venv/bin/masterstock agent me</code></pre></li>
         <li><div><span>02</span><strong>预检交易文件</strong></div><p>检查字段、重复记录和可卖数量，不写入系统。</p><pre><code>.venv/bin/masterstock agent trades validate trades.json</code></pre></li>
@@ -90,7 +88,7 @@ export MASTERSTOCK_AGENT_TOKEN
     </section>
 
     <section class="panel token-list-section" aria-labelledby="token-list-title">
-      <div class="settings-card-heading"><div><p class="eyebrow">凭据管理</p><h2 id="token-list-title">已有 Token</h2><p>只显示安全元数据，不会再次展示完整 Token。</p></div><span class="muted">{{ tokens|length }} 个</span></div>
+      <div class="settings-card-heading"><div><p class="settings-section-index">03 · 凭据管理</p><h2 id="token-list-title">已有 Token</h2><p>只显示安全元数据，不会再次展示完整 Token。</p></div><span class="settings-count">{{ tokens|length }} 个</span></div>
       {% if tokens %}
       <div class="token-list">
         {% for token in tokens %}

@@ -18,7 +18,9 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from ..watchlist.repository import (
+    DEFAULT_TRADE_SETUP,
     TRADE_METHOD_LABELS,
+    TRADE_SETUP_ALIASES,
     TRADE_SETUP_LABELS,
     _match_trade_executions,
     _open_quantity,
@@ -30,7 +32,7 @@ SESSION_COOKIE = "masterstock_session"
 SESSION_IDLE_SECONDS = 7 * 24 * 60 * 60
 API_TOKEN_PREFIX = "mst_"
 API_TOKEN_SCOPES = frozenset({"trades:read", "trades:write"})
-USER_SCHEMA_VERSION = 2
+USER_SCHEMA_VERSION = 3
 USER_REQUIRED_TABLES = frozenset(
     {
         "user_account",
@@ -129,8 +131,12 @@ CREATE TABLE IF NOT EXISTS user_trade_execution (
     price REAL NOT NULL CHECK (price > 0),
     fee REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
     method TEXT NOT NULL CHECK (method IN ('WEINSTEIN', 'MINERVINI', 'MANUAL')),
-    setup_method TEXT NOT NULL DEFAULT 'PULLBACK'
-        CHECK (setup_method IN ('BREAKOUT', 'PULLBACK')),
+    setup_method TEXT NOT NULL DEFAULT 'PULLBACK_SUPPORT'
+        CHECK (setup_method IN (
+            'FAILED_TEST', 'PULLBACK_SUPPORT', 'LOWER_TIMEFRAME_BREAKOUT',
+            'COMPLEX_PULLBACK', 'ANTI', 'PRE_BREAKOUT_BASE',
+            'POST_BREAKOUT_FIRST_PULLBACK', 'FAILED_BREAKOUT'
+        )),
     stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
     rationale TEXT NOT NULL DEFAULT '',
     invalidation TEXT NOT NULL DEFAULT '',
@@ -253,6 +259,11 @@ class UserRepository:
                     "WHERE type='table' AND name='user_stock_review'"
                 ).fetchone()
                 review_table_sql = str(review_row[0] if review_row is not None else "")
+                trade_row = connection.execute(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name='user_trade_execution'"
+                ).fetchone()
+                trade_table_sql = str(trade_row[0] if trade_row is not None else "")
                 schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         except sqlite3.Error as exc:
             return {
@@ -271,12 +282,14 @@ class UserRepository:
         legacy_observation_states = (
             "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql
         )
+        legacy_trade_setups = bool(trade_table_sql) and "'FAILED_TEST'" not in trade_table_sql
         compatible = (
             quick_check == "ok"
             and not missing_tables
             and not missing_columns
             and not missing_indexes
             and not legacy_observation_states
+            and not legacy_trade_setups
             and schema_version == USER_SCHEMA_VERSION
         )
         return {
@@ -289,6 +302,7 @@ class UserRepository:
             "missing_columns": missing_columns,
             "missing_indexes": missing_indexes,
             "legacy_observation_states": legacy_observation_states,
+            "legacy_trade_setups": legacy_trade_setups,
         }
 
     def require_schema(self) -> None:
@@ -314,6 +328,11 @@ class UserRepository:
                 str(row[1])
                 for row in connection.execute("PRAGMA table_info(user_trade_execution)")
             }
+            trade_row = connection.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type='table' AND name='user_trade_execution'"
+            ).fetchone()
+            trade_table_sql = str(trade_row[0] if trade_row is not None else "")
             review_row = connection.execute(
                 "SELECT sql FROM sqlite_master "
                 "WHERE type='table' AND name='user_stock_review'"
@@ -360,11 +379,71 @@ class UserRepository:
                         "DROP TABLE user_stock_review_legacy;",
                     ]
                 )
+            if trade_table_exists and "'FAILED_TEST'" not in trade_table_sql:
+                migration_statements.extend(
+                    [
+                        "ALTER TABLE user_trade_execution "
+                        "RENAME TO user_trade_execution_legacy;",
+                        """CREATE TABLE user_trade_execution (
+                            execution_id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            traded_on TEXT NOT NULL,
+                            traded_at TEXT NOT NULL DEFAULT '',
+                            source_ref TEXT,
+                            symbol TEXT NOT NULL,
+                            side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
+                            quantity INTEGER NOT NULL CHECK (quantity > 0),
+                            price REAL NOT NULL CHECK (price > 0),
+                            fee REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
+                            method TEXT NOT NULL CHECK (
+                                method IN ('WEINSTEIN', 'MINERVINI', 'MANUAL')
+                            ),
+                            setup_method TEXT NOT NULL DEFAULT 'PULLBACK_SUPPORT'
+                                CHECK (setup_method IN (
+                                    'FAILED_TEST', 'PULLBACK_SUPPORT',
+                                    'LOWER_TIMEFRAME_BREAKOUT', 'COMPLEX_PULLBACK',
+                                    'ANTI', 'PRE_BREAKOUT_BASE',
+                                    'POST_BREAKOUT_FIRST_PULLBACK', 'FAILED_BREAKOUT'
+                                )),
+                            stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
+                            rationale TEXT NOT NULL DEFAULT '',
+                            invalidation TEXT NOT NULL DEFAULT '',
+                            exit_reason TEXT NOT NULL DEFAULT '',
+                            market_context TEXT NOT NULL DEFAULT '',
+                            observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
+                            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+                            FOREIGN KEY (user_id) REFERENCES user_account(user_id)
+                                ON DELETE CASCADE
+                        );""",
+                        """INSERT INTO user_trade_execution(
+                            execution_id, user_id, traded_on, traded_at, source_ref,
+                            symbol, side, quantity, price, fee, method, setup_method,
+                            stop_price, rationale, invalidation, exit_reason,
+                            market_context, observation_snapshot_json, created_at,
+                            updated_at, revision
+                        )
+                        SELECT execution_id, user_id, traded_on, traded_at, source_ref,
+                               symbol, side, quantity, price, fee, method,
+                               CASE setup_method
+                                   WHEN 'BREAKOUT' THEN 'POST_BREAKOUT_FIRST_PULLBACK'
+                                   WHEN 'PULLBACK' THEN 'PULLBACK_SUPPORT'
+                                   ELSE setup_method
+                               END,
+                               stop_price, rationale, invalidation, exit_reason,
+                               market_context, observation_snapshot_json, created_at,
+                               updated_at, revision
+                        FROM user_trade_execution_legacy;""",
+                        "DROP TABLE user_trade_execution_legacy;",
+                    ]
+                )
             migration_sql = "\n".join(
                 [
                     "BEGIN IMMEDIATE;",
                     USER_SCHEMA_SQL,
                     *migration_statements,
+                    USER_SCHEMA_SQL,
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_trade_source_ref "
                     "ON user_trade_execution(user_id, source_ref) "
                     "WHERE source_ref IS NOT NULL AND source_ref <> '';",
@@ -926,7 +1005,7 @@ class UserRepository:
         price: float,
         fee: float,
         method: str,
-        setup_method: str = "PULLBACK",
+        setup_method: str = DEFAULT_TRADE_SETUP,
         stop_price: float | None = None,
         rationale: str = "",
         invalidation: str = "",
@@ -1018,9 +1097,9 @@ class UserRepository:
             for item in collection:
                 symbol = str(item["symbol"])
                 item["stock_name"] = names.get(symbol, "名称待补")
-                item["setup_label"] = TRADE_SETUP_LABELS.get(
-                    str(item.get("setup_method") or "PULLBACK"), "回调"
-                )
+                setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
+                item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
+        setups = list(TRADE_SETUP_LABELS)
         return {
             "executions": list(reversed(rows)),
             "closed": list(reversed(closed)),
@@ -1031,7 +1110,7 @@ class UserRepository:
                 setup: _trade_statistics(
                     [item for item in closed if item["setup_method"] == setup]
                 )
-                for setup in ("BREAKOUT", "PULLBACK")
+                for setup in setups
             },
             "sample_state": (
                 "样本不足：少于 20 笔已完成交易，仅展示描述统计。"
@@ -1061,9 +1140,8 @@ class UserRepository:
             return None
         item = dict(row)
         item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
-        item["setup_label"] = TRADE_SETUP_LABELS.get(
-            str(item.get("setup_method") or "PULLBACK"), "回调"
-        )
+        setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
+        item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
         return item
 
     def update_trade(
@@ -1078,7 +1156,7 @@ class UserRepository:
         price: float,
         fee: float,
         method: str,
-        setup_method: str = "PULLBACK",
+        setup_method: str = DEFAULT_TRADE_SETUP,
         stop_price: float | None = None,
         rationale: str = "",
         invalidation: str = "",
@@ -1671,7 +1749,7 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         price=price,
         fee=fee,
         method="MANUAL",
-        setup_method=str(payload.get("setup_method") or "PULLBACK"),
+        setup_method=str(payload.get("setup_method") or DEFAULT_TRADE_SETUP),
         stop_price=stop_price,
     )
     client_id = str(payload.get("client_id") or "").strip()
@@ -1793,10 +1871,11 @@ def _validated_trade_values(
     normalized_side = side.upper().strip()
     normalized_method = method.upper().strip()
     normalized_setup = setup_method.upper().strip()
+    normalized_setup = TRADE_SETUP_ALIASES.get(normalized_setup, normalized_setup)
     if normalized_side not in {"BUY", "SELL"} or normalized_method not in TRADE_METHOD_LABELS:
         raise ValueError("方向或关联方法不正确")
     if normalized_setup not in TRADE_SETUP_LABELS:
-        raise ValueError("交易方法必须为突破或回调")
+        raise ValueError("交易方案不受支持")
     if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
         raise ValueError("数量必须为正整数")
     if not math.isfinite(price) or not math.isfinite(fee):

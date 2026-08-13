@@ -9,8 +9,11 @@ def register_agent(subparsers: SubparserRegistry) -> None:
     parser = subparsers.add_parser("agent", help="通过 API Token 调用个人交易 Agent 接口")
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("MASTERSTOCK_AGENT_URL", "http://127.0.0.1:8888"),
-        help="大师选股网站地址；也可使用 MASTERSTOCK_AGENT_URL",
+        default=os.environ.get("MASTERSTOCK_AGENT_URL", "https://longchangwudao.cn"),
+        help=(
+            "大师选股网站地址（默认：https://longchangwudao.cn）；"
+            "也可使用 MASTERSTOCK_AGENT_URL"
+        ),
     )
     parser.add_argument(
         "--token-stdin",

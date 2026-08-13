@@ -13,7 +13,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from ...watchlist.charting import keltner_channels
 from ...watchlist.industry import INDUSTRY_POLICY_VERSION
 from ...watchlist.industry_confirmation import build_industry_weinstein_confirmation
-from ...watchlist.repository import TRADE_SETUP_LABELS, MarketDataReader, WatchlistRepository
+from ...watchlist.repository import (
+    DEFAULT_TRADE_SETUP,
+    TRADE_SETUP_LABELS,
+    MarketDataReader,
+    WatchlistRepository,
+)
 from ..users import AuthenticatedUser, UserRepository
 from .auth import current_user, require_user
 
@@ -852,6 +857,7 @@ def build_watchlist_router(
                 "query_date": repository.latest_fact_date(),
                 "latest_date": repository.latest_fact_date(),
                 "review": review,
+                "trade_setup_labels": TRADE_SETUP_LABELS,
             },
         )
 
@@ -991,6 +997,7 @@ def build_watchlist_router(
                 "minervini_check_labels": MINERVINI_CHECK_LABELS,
                 "minervini_metric_labels": MINERVINI_METRIC_LABELS,
                 "trade_setup_labels": TRADE_SETUP_LABELS,
+                "default_trade_setup": DEFAULT_TRADE_SETUP,
                 "editing_trade": editing_trade,
                 "trade_prefill": trade_prefill,
                 "navigation": navigation,
@@ -1245,7 +1252,7 @@ def build_watchlist_router(
                 quantity=int(value("quantity")),
                 price=float(value("price")),
                 fee=float(value("fee", "0") or "0"),
-                method="MANUAL", setup_method=value("setup_method", "PULLBACK"),
+                method="MANUAL", setup_method=value("setup_method", DEFAULT_TRADE_SETUP),
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"),
                 invalidation=value("invalidation"),
@@ -1279,7 +1286,7 @@ def build_watchlist_router(
                 traded_on=traded_on, traded_at=value("traded_at"), side=value("side"),
                 quantity=int(value("quantity")), price=float(value("price")),
                 fee=float(value("fee", "0") or "0"), method="MANUAL",
-                setup_method=value("setup_method", "PULLBACK"),
+                setup_method=value("setup_method", DEFAULT_TRADE_SETUP),
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"), invalidation=value("invalidation"),
                 exit_reason=value("exit_reason"), market_context=value("market_context"),

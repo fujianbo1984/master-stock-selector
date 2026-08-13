@@ -60,7 +60,7 @@ def test_agent_cli_reads_token_from_environment_and_defaults_import_to_validate(
     assert main(["agent", "trades", "import", str(payload)]) == 0
     assert calls == [
         (
-            "http://127.0.0.1:8888",
+            "https://longchangwudao.cn",
             "mst_test-token",
             "POST",
             "/api/v1/trades/validate",
@@ -72,6 +72,14 @@ def test_agent_cli_reads_token_from_environment_and_defaults_import_to_validate(
         )
     ]
     assert '"status": "VALID"' in capsys.readouterr().out
+
+
+def test_agent_cli_help_discloses_the_production_domain(capsys) -> None:
+    assert main(["agent", "--help"]) == 0
+
+    output = capsys.readouterr().out
+    assert "https://longchangwudao.cn" in output
+    assert "MASTERSTOCK_AGENT_URL" in output
 
 
 def test_agent_cli_requires_explicit_commit_for_stop(monkeypatch) -> None:

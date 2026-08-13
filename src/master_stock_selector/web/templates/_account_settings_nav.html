@@ -8,18 +8,28 @@
     </div>
   </div>
   <nav class="account-settings-nav" aria-label="设置项目">
-    <a href="/account/password" {% if request.url.path == '/account/password' %}class="active" aria-current="page"{% endif %}>
-      <span>登录与安全</span>
-      <small>修改密码与会话保护</small>
-    </a>
-    <a href="/account/tokens" {% if request.url.path == '/account/tokens' %}class="active" aria-current="page"{% endif %}>
-      <span>Agent Token</span>
-      <small>授权 CLI 访问个人交易</small>
-    </a>
-    <a href="/a/reading/trading-system-boundaries" {% if request.url.path == '/a/reading/trading-system-boundaries' %}class="active" aria-current="page"{% endif %}>
-      <span>研读随笔</span>
-      <small>交易体系与研究边界</small>
-    </a>
+    <div class="account-settings-nav-group">
+      <p>账户</p>
+      <a href="/account/password" {% if request.url.path == '/account/password' %}class="active" aria-current="page"{% endif %}>
+        <span>登录与安全</span>
+        <small>修改密码与会话保护</small>
+      </a>
+      <a href="/account/tokens" {% if request.url.path == '/account/tokens' %}class="active" aria-current="page"{% endif %}>
+        <span>Agent Token</span>
+        <small>授权 CLI 访问个人交易</small>
+      </a>
+    </div>
+    <div class="account-settings-nav-group">
+      <p>研读</p>
+      <a href="/a/reading/trading-system-boundaries" {% if request.url.path == '/a/reading/trading-system-boundaries' %}class="active" aria-current="page"{% endif %}>
+        <span>交易体系随笔</span>
+        <small>方法选择与研究边界</small>
+      </a>
+      <a href="/a/reading/adam-grimes-trading-templates" {% if request.url.path == '/a/reading/adam-grimes-trading-templates' %}class="active" aria-current="page"{% endif %}>
+        <span>交易模板图解</span>
+        <small>Adam Grimes 八种结构</small>
+      </a>
+    </div>
   </nav>
   <p class="account-settings-boundary">账户凭据只保护个人工作区，不会改变公开方法事实。</p>
 </aside>

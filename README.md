@@ -6,10 +6,9 @@
 
 本项目采用 [MIT License](LICENSE)。开源仓库不包含行情数据库、Tushare token、个人观察与成交记录、会话或原始参考资料。
 
-> **在线试用：** [https://longchangwudao.cn](https://longchangwudao.cn)
+> **正式网站：** [https://longchangwudao.cn](https://longchangwudao.cn)
 >
-> HTTPS 入口支持公开页面、登录、个人空间和 Agent API。原公网
-> `http://47.110.74.48:8888` 继续仅提供公开只读页面。
+> 该 HTTPS 域名是公开页面、登录、个人空间和 Agent API 的统一正式入口。
 
 ## 产品边界
 
@@ -104,7 +103,6 @@ scripts/run_master_watchlist.sh
 Agent Token 由用户在“账户设置”中创建，建议一台设备或一个 Agent 一枚。Token 只显示一次，服务端仅保存摘要；`trades:read` 用于查询，`trades:write` 用于预检、批量录入成交和更新既有 BUY 止损。
 
 ```bash
-export MASTERSTOCK_AGENT_URL=https://longchangwudao.cn
 read -s MASTERSTOCK_AGENT_TOKEN
 export MASTERSTOCK_AGENT_TOKEN
 .venv/bin/masterstock agent me
@@ -112,7 +110,16 @@ export MASTERSTOCK_AGENT_TOKEN
 .venv/bin/masterstock agent trades import trades.json --commit
 ```
 
-Agent CLI 拒绝普通公网 HTTP 地址；需要远程使用时，应通过受控的回环 SSH 隧道或 HTTPS 部署访问。Token 不支持作为命令行参数传入。
+Agent CLI 默认连接 `https://longchangwudao.cn`。如需连接其他实例，可设置
+`MASTERSTOCK_AGENT_URL`，或在 `agent` 后使用 `--base-url`：
+
+```bash
+export MASTERSTOCK_AGENT_URL=http://127.0.0.1:8000  # 仅限本地开发
+.venv/bin/masterstock agent --base-url https://example.com me
+```
+
+CLI 拒绝普通公网 HTTP 地址；HTTP 只允许 `localhost`、`127.0.0.1` 或 `::1`。
+Token 不支持作为命令行参数传入。
 
 ## 数据、部署与 GitHub 边界
 

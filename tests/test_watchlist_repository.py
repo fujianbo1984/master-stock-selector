@@ -302,7 +302,7 @@ def test_trade_review_matches_fifo_costs_and_rejects_oversell(tmp_path):
     assert review["open_positions"][0]["symbol"] == "000001.SZ"
     assert review["open_positions"][0]["quantity"] == 60
     assert review["open_positions"][0]["cost"] == 603.0
-    assert review["open_positions"][0]["setup_label"] == "回调"
+    assert review["open_positions"][0]["setup_label"] == "简单回调"
     assert review["closed"][0]["stop_price"] == 8.0
     assert review["closed"][0]["entry_price"] == 10.0
     assert review["closed"][0]["exit_price"] == 12.0
@@ -333,7 +333,7 @@ def test_trade_review_retains_authorized_unmatched_historical_sell(tmp_path):
     assert len(unmatched) == 1
     assert unmatched[0]["symbol"] == "603259.SH"
     assert unmatched[0]["quantity"] == 100
-    assert unmatched[0]["setup_label"] == "回调"
+    assert unmatched[0]["setup_label"] == "简单回调"
 
 
 def test_trade_update_preserves_fifo_validation_and_refreshes_fields(tmp_path):
