@@ -8,13 +8,13 @@
 <section class="section daily-hero watchlist-hero page-ledger-hero">
   <div>
     <p class="eyebrow">大师观察池</p>
-    <h1>{{ '今日观察池' if filters.view == 'current' else '方法状态变化' }}</h1>
-    <p class="muted watchlist-hero-summary">当前符合与状态变化分开查看；每个进入、持续和退出状态只属于对应方法，不合成总分。</p>
+    <h1>{{ '今日观察池' if filters.view == 'current' else '每日进入 / 退出' if filters.view == 'projection' else '正式状态变化' }}</h1>
+    <p class="muted watchlist-hero-summary">{% if filters.view == 'projection' %}回答“今天谁进入、谁退出”；每日收盘后用本周临时周K线更新，周五收盘后才成为 Weinstein 正式事实。{% elif filters.view == 'changes' %}查看单一方法已经确认的进入、持续与退出；Weinstein 按完整周确认，Minervini 按日确认。{% else %}查看当前符合 Weinstein 或 Minervini 独立方法的股票，不合成跨方法总分。{% endif %}</p>
   </div>
   <form class="form-row daily-filter daily-filter-compact" method="get" action="/a/daily">
     <input type="hidden" name="view" value="{{ filters.view }}">
     <input type="hidden" name="method" value="{{ filters.method }}">
-    {% if filters.view == 'changes' and filters.state %}<input type="hidden" name="state" value="{{ filters.state }}">{% endif %}
+    {% if filters.view in ['changes', 'projection'] and filters.state %}<input type="hidden" name="state" value="{{ filters.state }}">{% endif %}
     {% if filters.industry %}<input type="hidden" name="industry" value="{{ filters.industry }}">{% endif %}
     <label class="filter-date">日期 <input name="date" value="{{ query_date }}" type="date"></label>
     <label>总市值
@@ -39,7 +39,8 @@
   <span>查看模式</span>
   <div class="daily-tablist">
     <a class="query-choice{% if filters.view == 'current' %} active{% endif %}" {% if filters.view == 'current' %}aria-current="page"{% endif %} href="{{ urls.current_view }}">当前观察池</a>
-    <a class="query-choice{% if filters.view == 'changes' %} active{% endif %}" {% if filters.view == 'changes' %}aria-current="page"{% endif %} href="{{ urls.changes_view }}">方法状态变化</a>
+    <a class="query-choice{% if filters.view == 'projection' %} active{% endif %}" {% if filters.view == 'projection' %}aria-current="page"{% endif %} href="{{ urls.projection_view }}">每日变化</a>
+    <a class="query-choice{% if filters.view == 'changes' %} active{% endif %}" {% if filters.view == 'changes' %}aria-current="page"{% endif %} href="{{ urls.changes_view }}">正式状态变化</a>
   </div>
   <a class="text-link query-industry-link" href="/a/industries?date={{ query_date }}">查看行业观察 →</a>
 </nav>
@@ -47,6 +48,7 @@
 {% if date_fallback %}
 <div class="notice" role="status">请求日期 {{ date_fallback }} 没有观察事实，当前显示最新事实日期 {{ query_date }}。</div>
 {% endif %}
+{% if filters.view == 'projection' %}<div class="notice projection-asof-note" role="note"><strong>截至 {{ query_date }} 收盘：</strong>“预进入/预退出”是今日相对上一交易日的临时周线投影；{% if rows and rows[0].is_final_session %}本交易日已收周，结果已进入正式确认流程。{% else %}周五收盘前均未确认。{% endif %}它不会改写完整周 Weinstein 事实，也不是买卖指令。</div>{% endif %}
 {% if filters.industry %}
 <div class="section active-filter-summary" role="status"><span>当前行业：<strong>{{ industry_name or filters.industry }}</strong> <small>{{ filters.industry }}</small></span><a class="text-link" href="{{ urls.clear_industry }}">清除行业条件</a></div>
 {% endif %}
@@ -69,14 +71,15 @@
   </div>
 </details>
 
-{% if filters.view != 'current' %}
+{% if filters.view == 'changes' %}
 <nav class="section daily-jumpbar method-choice-bar" aria-label="状态变化方法">
-  <span>先选方法</span>
+  <span>确认方法</span>
   <div class="daily-tablist">
     {% for value, label in [('weinstein','Weinstein'),('minervini','Minervini')] %}<a class="query-choice{% if filters.method == value %} active{% endif %}" {% if filters.method == value %}aria-current="page"{% endif %} href="{{ urls.change_methods[value] }}">{{ label }}</a>{% endfor %}
   </div>
 </nav>
 {% if method_ready %}
+{% if filters.method == 'weinstein' and summary.result_count == 0 %}<div class="notice formal-change-empty" role="status">本周尚无新的 Weinstein 正式变化；完整周事实只在收周后更新。<a class="text-link" href="{{ urls.projection_view }}">查看今天的预进入 / 预退出 →</a></div>{% endif %}
 <section class="section grid kpi-grid watchlist-summary query-summary change-summary" aria-label="{{ filters.method }} 状态">
   {% for value, label in [('NEW','新进 / 重进'),('ENTERED','仅新进入'),('REENTERED','仅重新进入'),('CONTINUING','持续符合'),('EXIT','退出 / 中断'),('EXITED','仅退出'),('DATA_GAP','仅数据中断')] %}
   <a class="kpi kpi-link{% if filters.state == value %} kpi-accent{% endif %}" {% if filters.state == value %}aria-current="page"{% endif %} href="{{ urls.change_states[value] }}"><span>{{ label }}</span><strong>{{ summary.changes[value] }}</strong></a>
@@ -87,7 +90,25 @@
 {% endif %}
 {% endif %}
 
-{% if filters.view == 'current' or method_ready %}
+{% if filters.view == 'projection' %}
+<section class="section grid kpi-grid watchlist-summary projection-primary-summary" aria-label="今日 Weinstein 投影摘要">
+  {% for value, label in [('ENTER','今日预进入'),('PRE_EXITED','今日预退出'),('PASSING','当前投影池')] %}
+  <a class="kpi kpi-link{% if filters.state == value %} kpi-accent{% endif %}" {% if filters.state == value %}aria-current="page"{% endif %} href="{{ urls.projection_states[value] }}"><span>{{ label }}</span><strong>{{ summary.projection[value] }}</strong></a>
+  {% endfor %}
+</section>
+<details class="section projection-breakdown">
+  <summary><span><strong>查看构成明细</strong><small>首次预进入 {{ summary.projection.PRE_ENTERED }} · 再次预进入 {{ summary.projection.PRE_REENTERED }} · 持续符合 {{ summary.projection.PRE_CONTINUING }} · 数据中断 {{ summary.projection.DATA_GAP }}</small></span><span class="disclosure-action">展开</span></summary>
+  <nav aria-label="每日变化构成">
+    {% for value, label in [('CHANGE','全部变化'),('PRE_ENTERED','首次预进入'),('PRE_REENTERED','再次预进入'),('PRE_CONTINUING','持续符合'),('DATA_GAP','数据中断')] %}<a class="query-choice{% if filters.state == value %} active{% endif %}" {% if filters.state == value %}aria-current="page"{% endif %} href="{{ urls.projection_states[value] }}">{{ label }} <strong>{{ summary.projection[value] }}</strong></a>{% endfor %}
+  </nav>
+</details>
+<section class="section panel watchlist-section" id="daily-results">
+  <div class="section-heading"><div><p class="eyebrow">昨日投影 → 今日投影</p><h2>{{ {'CHANGE':'今日全部变化','ENTER':'今日预进入','PRE_ENTERED':'今日首次预进入','PRE_REENTERED':'今日再次预进入','PRE_EXITED':'今日预退出','PASSING':'当前投影池','PRE_CONTINUING':'持续预符合','DATA_GAP':'数据中断'}[filters.state] }} <small class="result-count">{{ summary.result_count }} 只</small></h2></div><div class="section-actions"><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="daily-results">下载代码（{{ summary.result_count }}）</button><button class="text-button" type="button" data-copy-tradingview-list="daily-results">复制代码</button></div></div>
+  {% include "ashare/_weinstein_projection_table.html" %}
+</section>
+{% endif %}
+
+{% if filters.view in ['current', 'changes'] and (filters.view == 'current' or method_ready) %}
 <section class="section panel watchlist-section" id="daily-results">
   <div class="section-heading">
     <div><p class="eyebrow">{{ '当前观察池' if filters.view == 'current' else '单方法状态' }}</p><h2>{% if filters.view == 'current' %}{{ {'all':'全部当前符合','weinstein':'Weinstein 当前符合','minervini':'Minervini 当前符合','both':'两法同时符合'}[filters.method] }}{% else %}{{ {'NEW':'新进入与重新进入','ENTERED':'仅新进入','REENTERED':'仅重新进入','CONTINUING':'持续符合','EXIT':'退出与数据中断','EXITED':'仅退出','DATA_GAP':'仅数据中断'}[filters.state] }}{% endif %}</h2></div>

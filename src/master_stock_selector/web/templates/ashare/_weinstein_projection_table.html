@@ -1,0 +1,26 @@
+{% if rows %}
+<div class="table-wrap">
+  <table class="watchlist-table projection-table" data-sortable="true">
+    <thead><tr><th>股票</th><th>今日事件</th><th>昨日投影 → 今日投影</th><th>触发原因</th><th>周内成熟度</th><th>行情</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td data-sort="{{ row.symbol }}">
+          <div class="stock-primary-link">{% if row.tradingview_url %}<a class="instrument-name-link" data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}<span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a><a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?{{ filters.query }}&amp;section=daily-results">详情</a></span></div>
+          {% if row.industry_code %}<a class="table-subline text-link" href="/a/industries/{{ row.industry_code }}/chart?date={{ query_date }}">{{ row.industry }}</a>{% else %}<small class="table-subline">行业待补</small>{% endif %}
+          {% if row.is_suspended %}<span class="tag tag-muted">停牌</span>{% endif %}
+        </td>
+        <td><span class="status-marker status-{{ 'pass' if row.state in ['PRE_ENTERED','PRE_REENTERED','PRE_CONTINUING'] else 'unknown' if row.state == 'DATA_GAP' else 'fail' }}">{{ row.state_label }}</span><small class="table-subline">Minervini：{{ row.minervini_result_label }}</small></td>
+        <td><div><span>{{ row.previous_projection_label }}</span> → <strong>{{ row.current_projection_label }}</strong></div><small class="table-subline">{{ row.previous_projection_source }}</small><small class="table-subline">正式周 {{ row.formal_stage_label }} · 今日投影 {{ row.projected_stage_label }}</small></td>
+        <td>
+          {% if row.state == 'DATA_GAP' %}<strong>今日数据不足</strong>{% elif row.failed_check_labels %}<strong>未满足：{{ row.failed_check_labels|join('、') }}</strong>{% elif row.check_count %}<strong>Stage 2 条件 {{ row.passed_check_count }}/{{ row.check_count }}</strong>{% else %}<strong>周线历史不足</strong>{% endif %}
+          {% if row.check_rows %}<details class="projection-checks"><summary>查看条件与数值</summary><div>{% for check in row.check_rows %}<span class="condition-chip status-{{ 'pass' if check.passed else 'fail' }}">{{ '满足' if check.passed else '未满足' }} · {{ check.label }}</span>{% endfor %}</div><small class="table-subline">距30周线 {{ row.metric_display.distance_from_ma30_pct }}% · 4周斜率 {{ row.metric_display.ma30_slope_4w_pct }}% · 13周收益 {{ row.metric_display.return_13w_pct }}%</small></details>{% endif %}
+        </td>
+        <td data-sort="{{ row.sessions_elapsed }}"><strong>{{ row.maturity_label }}</strong><small class="table-subline">{% if row.is_final_session %}本周已收盘确认{% else %}尚未确认 · 预计 {{ row.expected_week_end }} 收周{% endif %}</small></td>
+        <td data-sort="{{ row.change_pct if row.change_pct is not none else '' }}">{% if row.close is not none %}<strong>收 {{ row.close }}</strong>{% if row.change_pct is not none %}<span class="quote-change {{ 'quote-up' if row.change_pct > 0 else 'quote-down' if row.change_pct < 0 else 'quote-flat' }}">{{ '%+.2f%%'|format(row.change_pct) }}</span>{% endif %}{% else %}<span class="muted">暂无行情</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}<div class="empty">当前分组没有股票。若该日没有周内投影事实，请先运行新版大师观察池计算。</div>{% endif %}

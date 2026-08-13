@@ -15,6 +15,7 @@ from .methods import (
     RESULT_TRANSITION,
     RESULT_UNKNOWN,
     WEINSTEIN_POLICY_VERSION,
+    WEINSTEIN_PROVISIONAL_POLICY_VERSION,
     aggregate_completed_weeks,
     completed_week_end_map,
     finish_minervini_profile,
@@ -22,6 +23,7 @@ from .methods import (
     normalized_daily_bars,
     percentile_ranks,
     weinstein_profiles_for_dates,
+    weinstein_provisional_profiles,
     weinstein_stage_series,
 )
 from .repository import MarketDataReader, WatchlistRepository
@@ -86,7 +88,17 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
     source_summary = reader.source_summary(as_of_date)
     source_digest = _digest(source_summary)
     members = _eligible_members(reader.security_members(as_of_date))
-    week_ends = completed_week_end_map(trading_dates)
+    week_schedule = reader.week_schedule(as_of_date)
+    schedule_key = date.fromisoformat(as_of_date).isocalendar()
+    week_schedules = (
+        {(schedule_key.year, schedule_key.week): week_schedule}
+        if week_schedule
+        else {}
+    )
+    week_ends = completed_week_end_map(
+        trading_dates,
+        authoritative_week_ends=week_schedule[-1:] if week_schedule else (),
+    )
 
     trading_position = {value: index for index, value in enumerate(trading_dates)}
     minervini_dates = [
@@ -114,12 +126,15 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
         "stock_facts": 0,
         "minervini_pass": 0,
         "weinstein_pass": 0,
+        "weinstein_provisional_facts": 0,
+        "weinstein_provisional_pass": 0,
         "unknown": 0,
         "transition": 0,
         "index_facts": 0,
         "index_minervini_facts": 0,
         "index_minervini_stage2": 0,
     }
+    provisional_facts: list[dict[str, Any]] = []
     stock_facts = _stock_fact_stream(
         reader=reader,
         members=members,
@@ -129,6 +144,9 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
         rs_percentiles=rs_percentiles,
         as_of_date=as_of_date,
         stage_baselines=stock_stage_baselines,
+        trading_dates=trading_dates,
+        week_schedules=week_schedules,
+        provisional_sink=provisional_facts,
         origin=origin,
         counts=counts,
     )
@@ -168,6 +186,7 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
     }
     repository.persist_run(
         stock_facts=stock_facts,
+        provisional_facts=provisional_facts,
         index_facts=index_facts,
         index_minervini_facts=index_minervini_facts,
         receipt=receipt,
@@ -193,6 +212,9 @@ def _stock_fact_stream(
     rs_percentiles: dict[str, dict[str, float]],
     as_of_date: str,
     stage_baselines: Mapping[str, Mapping[str, Any]],
+    trading_dates: list[str],
+    week_schedules: Mapping[tuple[int, int], list[str]],
+    provisional_sink: list[dict[str, Any]],
     origin: str,
     counts: dict[str, Any],
 ) -> Iterator[dict[str, Any]]:
@@ -207,9 +229,41 @@ def _stock_fact_stream(
         weekly = aggregate_completed_weeks(bars, week_ends)
         stage_series = weinstein_stage_series(weekly, stage_baselines.get(symbol))
         weinstein = weinstein_profiles_for_dates(stage_series, evaluation_dates)
+        provisional = weinstein_provisional_profiles(
+            bars,
+            evaluation_dates,
+            trading_dates,
+            stage_baselines.get(symbol),
+            week_schedules,
+        )
         digest = _bars_digest(symbol, raw_rows)
         eligibility = _eligibility_evidence(member)
         for evaluation_date in evaluation_dates:
+            provisional_profile = provisional.get(evaluation_date) or {
+                "result": RESULT_UNKNOWN,
+                "projected_stage": "UNKNOWN",
+                "formal_stage": "UNKNOWN",
+                "prior_formal_stage": "UNKNOWN",
+                "formal_effective_week_end": "",
+                "reason": "NO_WEINSTEIN_PROVISIONAL_PROFILE",
+                "week_start": evaluation_date,
+                "expected_week_end": evaluation_date,
+                "sessions_elapsed": 0,
+                "sessions_total": 0,
+                "is_final_session": False,
+                "evidence": {},
+            }
+            provisional_sink.append(
+                _provisional_fact(
+                    evaluation_date,
+                    symbol,
+                    provisional_profile,
+                    eligibility,
+                    digest,
+                    origin,
+                    counts,
+                )
+            )
             if evaluation_date in minervini_set:
                 minervini_profile = finish_minervini_profile(
                     minervini.get(evaluation_date),
@@ -232,6 +286,16 @@ def _stock_fact_stream(
                 "reason": "NO_WEINSTEIN_PROFILE",
                 "evidence": {},
             }
+            if (
+                provisional_profile.get("is_final_session")
+                and provisional_profile.get("result") != RESULT_UNKNOWN
+                and str(provisional_profile.get("projected_stage") or "")
+                != str(weinstein_profile.get("stage") or "")
+            ):
+                raise ValueError(
+                    "final-session Weinstein projection disagrees with formal stage: "
+                    f"{symbol} {evaluation_date}"
+                )
             yield _stock_fact(
                 evaluation_date,
                 symbol,
@@ -249,6 +313,30 @@ def _stock_fact_stream(
     for symbol in sorted(set(members) - seen):
         eligibility = _eligibility_evidence(members[symbol])
         for evaluation_date in evaluation_dates:
+            provisional_sink.append(
+                _provisional_fact(
+                    evaluation_date,
+                    symbol,
+                    {
+                        "result": RESULT_UNKNOWN,
+                        "projected_stage": "UNKNOWN",
+                        "formal_stage": "UNKNOWN",
+                        "prior_formal_stage": "UNKNOWN",
+                        "formal_effective_week_end": "",
+                        "reason": "NO_LOCAL_QFQ_BARS",
+                        "week_start": evaluation_date,
+                        "expected_week_end": evaluation_date,
+                        "sessions_elapsed": 0,
+                        "sessions_total": 0,
+                        "is_final_session": False,
+                        "evidence": {},
+                    },
+                    eligibility,
+                    "missing",
+                    origin,
+                    counts,
+                )
+            )
             method_versions = [("weinstein", WEINSTEIN_POLICY_VERSION)]
             if evaluation_date in minervini_set:
                 method_versions.insert(0, ("minervini", MINERVINI_POLICY_VERSION))
@@ -269,6 +357,49 @@ def _stock_fact_stream(
                     origin,
                     counts,
                 )
+
+
+def _provisional_fact(
+    as_of_date: str,
+    symbol: str,
+    profile: Mapping[str, Any],
+    eligibility: Mapping[str, Any],
+    source_digest: str,
+    origin: str,
+    counts: dict[str, Any],
+) -> dict[str, Any]:
+    result = str(profile.get("result") or RESULT_UNKNOWN)
+    counts["weinstein_provisional_facts"] += 1
+    if result == RESULT_PASS:
+        counts["weinstein_provisional_pass"] += 1
+    return {
+        "as_of_date": as_of_date,
+        "symbol": symbol,
+        "projected_stage": str(profile.get("projected_stage") or "UNKNOWN"),
+        "projected_result": result,
+        "formal_stage": str(profile.get("formal_stage") or "UNKNOWN"),
+        "prior_formal_stage": str(
+            profile.get("prior_formal_stage") or profile.get("formal_stage") or "UNKNOWN"
+        ),
+        "formal_effective_week_end": str(
+            profile.get("formal_effective_week_end") or ""
+        ),
+        "week_start": str(profile.get("week_start") or as_of_date),
+        "expected_week_end": str(profile.get("expected_week_end") or as_of_date),
+        "sessions_elapsed": int(profile.get("sessions_elapsed") or 0),
+        "sessions_total": int(profile.get("sessions_total") or 0),
+        "is_final_session": bool(profile.get("is_final_session")),
+        "policy_version": WEINSTEIN_PROVISIONAL_POLICY_VERSION,
+        "evidence": {
+            "eligibility": dict(eligibility),
+            "profile": {
+                "reason": str(profile.get("reason") or ""),
+                "metrics": dict(profile.get("evidence") or {}),
+            },
+        },
+        "source_digest": source_digest,
+        "origin": origin,
+    }
 
 
 def _stock_fact(

@@ -13,6 +13,7 @@ from master_stock_selector.watchlist.methods import (
     finish_minervini_profile,
     minervini_base_profiles,
     percentile_ranks,
+    weinstein_provisional_profiles,
     weinstein_stage_series,
 )
 
@@ -103,6 +104,90 @@ def test_latest_incomplete_week_is_not_treated_as_completed():
 
     assert completed_week_end_map(dates) == {}
     assert completed_week_end_map(dates + ["2026-07-31"])
+
+
+def test_authoritative_calendar_completes_a_holiday_shortened_week():
+    dates = ["2026-09-28", "2026-09-29", "2026-09-30"]
+
+    assert completed_week_end_map(dates) == {}
+    assert completed_week_end_map(
+        dates, authoritative_week_ends=["2026-09-30"]
+    ) == {(2026, 40): "2026-09-30"}
+
+
+def test_weinstein_intraweek_projection_uses_only_prices_available_each_day():
+    start = date(2025, 1, 3)
+    completed = [
+        DailyBar(
+            (start + timedelta(days=index * 7)).isoformat(),
+            100 + index * 3,
+            100 + index * 3,
+            100 + index * 3,
+            100 + index * 3,
+            1000,
+        )
+        for index in range(34)
+    ]
+    monday = date.fromisoformat(completed[-1].trade_date) + timedelta(days=3)
+    tuesday = monday + timedelta(days=1)
+    bars = [
+        *completed,
+        DailyBar(monday.isoformat(), 203, 203, 203, 203, 1000),
+        DailyBar(tuesday.isoformat(), 20, 20, 20, 20, 1000),
+    ]
+    trading_dates = [bar.trade_date for bar in bars]
+
+    profiles = weinstein_provisional_profiles(
+        bars,
+        [monday.isoformat(), tuesday.isoformat()],
+        trading_dates,
+    )
+
+    assert profiles[monday.isoformat()]["result"] == RESULT_PASS
+    assert profiles[monday.isoformat()]["evidence"]["close"] == 203.0
+    assert profiles[tuesday.isoformat()]["result"] != RESULT_PASS
+    assert profiles[tuesday.isoformat()]["evidence"]["close"] == 20.0
+    assert profiles[monday.isoformat()]["sessions_elapsed"] == 1
+    assert profiles[monday.isoformat()]["is_final_session"] is False
+
+
+def test_final_session_projection_equals_the_formal_completed_week_stage():
+    start = date(2025, 1, 3)
+    bars = [
+        DailyBar(
+            (start + timedelta(days=index * 7)).isoformat(),
+            100 + index * 3,
+            100 + index * 3,
+            100 + index * 3,
+            100 + index * 3,
+            1000,
+        )
+        for index in range(40)
+    ]
+    trading_dates = [bar.trade_date for bar in bars]
+    final_date = trading_dates[-1]
+    formal = weinstein_stage_series(
+        [
+            WeeklyBar(
+                effective_date=bar.trade_date,
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                volume=bar.volume,
+            )
+            for bar in bars
+        ]
+    )[-1]
+
+    projection = weinstein_provisional_profiles(
+        bars, [final_date], trading_dates
+    )[final_date]
+
+    assert projection["is_final_session"] is True
+    assert projection["projected_stage"] == formal.stage
+    assert projection["formal_stage"] == formal.stage
+    assert projection["formal_effective_week_end"] == final_date
 
 
 def test_percentile_ranks_are_cross_sectional_and_ties_are_equal():

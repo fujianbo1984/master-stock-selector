@@ -1,6 +1,6 @@
 {% if section_rows %}
 <div class="table-wrap">
-  <table class="watchlist-table" data-sortable="true">
+  <table class="watchlist-table" data-sortable="true"{% if filters.view == 'current' and section_rows|length > 40 %} data-page-size="40"{% endif %}>
     <thead>
       <tr><th>股票</th><th>行业</th><th>行情</th><th>方法与状态</th><th>本轮开始</th><th>连续交易日</th>{% if current_user %}<th>我的观察</th>{% endif %}</tr>
     </thead>

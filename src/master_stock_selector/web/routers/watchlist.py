@@ -88,6 +88,25 @@ MINERVINI_METRIC_LABELS = {
     "low_52w": "52周低点",
     "rs_252d_percentile": "252日相对强度百分位",
 }
+PROVISIONAL_STATE_LABELS = {
+    "PRE_ENTERED": "今日首次预进入",
+    "PRE_REENTERED": "今日再次预进入",
+    "PRE_CONTINUING": "继续预符合",
+    "PRE_EXITED": "今日预退出",
+    "PRE_OUT": "仍未进入",
+    "DATA_GAP": "数据中断",
+}
+PROJECTION_RESULT_LABELS = {
+    "PASS": "符合 Stage 2",
+    "FAIL": "未符合 Stage 2",
+    "TRANSITION": "转换期",
+    "UNKNOWN": "数据不足",
+}
+WEINSTEIN_CHECK_LABELS = {
+    "close_above_ma30": "收盘高于30周线",
+    "ma30_slope_above_1pct": "30周线4周斜率高于1%",
+    "return_13w_positive": "13周收益为正",
+}
 
 Render = Callable[[Request, str, dict[str, Any]], HTMLResponse]
 
@@ -102,6 +121,7 @@ def build_watchlist_router(
     router = APIRouter()
     row_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
     navigation_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
+    projection_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
     daily_aux_cache: dict[
         str, tuple[tuple[int, int], tuple[list[dict[str, Any]], list[dict[str, Any]]]]
     ] = {}
@@ -167,10 +187,33 @@ def build_watchlist_router(
         daily_aux_cache[query_date] = (fingerprint, value)
         return value
 
+    def cached_projection_rows(query_date: str) -> list[dict[str, Any]]:
+        fingerprint = database_fingerprint()
+        cached = projection_cache.get(query_date)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        rows = [
+            _decorate_provisional_row(row)
+            for row in repository.provisional_rows(query_date)
+        ]
+        for row in rows:
+            row["manual"] = {
+                "manual_state": "UNREVIEWED",
+                "note": "",
+                "reviewed_at": "",
+            }
+        _attach_market_metrics(rows, market_reader, query_date, include_liquidity=False)
+        _attach_quote_changes(rows, market_reader, query_date)
+        if len(projection_cache) >= 4:
+            projection_cache.pop(next(iter(projection_cache)))
+        projection_cache[query_date] = (fingerprint, rows)
+        return rows
+
     def clear_row_caches() -> None:
         row_cache.clear()
         navigation_cache.clear()
         daily_aux_cache.clear()
+        projection_cache.clear()
 
     def rows_for_user(
         request: Request, query_date: str, *, include_liquidity: bool
@@ -200,6 +243,46 @@ def build_watchlist_router(
                 }
             )
         return result
+
+    def projection_rows_for_user(
+        request: Request, query_date: str
+    ) -> list[dict[str, Any]]:
+        rows = cached_projection_rows(query_date)
+        user = current_user(request)
+        reviews = (
+            users.reviews_for_symbols(
+                user.user_id, [str(row.get("symbol") or "") for row in rows]
+            )
+            if user is not None
+            else {}
+        )
+        return [
+            {
+                **row,
+                "manual": reviews.get(
+                    str(row.get("symbol") or ""),
+                    {"manual_state": "UNREVIEWED", "note": "", "reviewed_at": ""},
+                ),
+            }
+            for row in rows
+        ]
+
+    def stock_navigation_rows_for_user(
+        request: Request,
+        query_date: str,
+        *,
+        view: str | None,
+        method: str,
+        state: str,
+    ) -> list[dict[str, Any]]:
+        view_mode, _, _ = _normalize_daily_query(
+            view=view,
+            method=method,
+            state=state,
+        )
+        if view_mode == "projection":
+            return projection_rows_for_user(request, query_date)
+        return rows_for_user(request, query_date, include_liquidity=False)
 
     def personal_navigation_rows(request: Request) -> list[dict[str, Any]]:
         """Mirror the complete personal workspace, including stocks absent today."""
@@ -358,23 +441,39 @@ def build_watchlist_router(
         query_date = _selected_date(repository, date, market_reader)
         # 首页仍取总市值以执行默认的小市值过滤，但不加载流通市值和
         # 20 日成交额中位数，减少首次打开观察池的数据库工作量。
-        rows = rows_for_user(request, query_date, include_liquidity=False)
-        base_rows = _base_filter_rows(
-            rows,
+        formal_rows = rows_for_user(request, query_date, include_liquidity=False)
+        formal_base_rows = _base_filter_rows(
+            formal_rows,
             manual="all",
             min_cap=market_cap_floor,
             industry=industry,
             q=q,
         )
+        projection_rows = (
+            projection_rows_for_user(request, query_date)
+            if view_mode == "projection"
+            else []
+        )
+        projection_base_rows = _base_filter_rows(
+            projection_rows,
+            manual="all",
+            min_cap=market_cap_floor,
+            industry=industry,
+            q=q,
+        )
+        rows = projection_rows if view_mode == "projection" else formal_rows
+        base_rows = (
+            projection_base_rows if view_mode == "projection" else formal_base_rows
+        )
         current_counts = {
-            "all": len(_current_rows(base_rows, "all")),
-            "weinstein": len(_current_rows(base_rows, "weinstein")),
-            "minervini": len(_current_rows(base_rows, "minervini")),
-            "both": len(_current_rows(base_rows, "both")),
+            "all": len(_current_rows(formal_base_rows, "all")),
+            "weinstein": len(_current_rows(formal_base_rows, "weinstein")),
+            "minervini": len(_current_rows(formal_base_rows, "minervini")),
+            "both": len(_current_rows(formal_base_rows, "both")),
         }
         method_ready = method_mode in METHOD_LABELS
         change_counts = {
-            value: len(_change_rows(base_rows, method_mode, value))
+            value: len(_change_rows(formal_base_rows, method_mode, value))
             if method_ready
             else 0
             for value in (
@@ -387,17 +486,27 @@ def build_watchlist_router(
                 "DATA_GAP",
             )
         }
+        projection_counts = {
+            value: len(_projection_rows(projection_base_rows, value))
+            for value in (
+                "CHANGE", "ENTER", "PRE_ENTERED", "PRE_REENTERED",
+                "PRE_EXITED", "PASSING", "PRE_CONTINUING", "DATA_GAP",
+            )
+        }
         filtered = (
-            _current_rows(base_rows, method_mode)
+            _projection_rows(projection_base_rows, state_mode)
+            if view_mode == "projection"
+            else _current_rows(formal_base_rows, method_mode)
             if view_mode == "current"
-            else _change_rows(base_rows, method_mode, state_mode)
+            else _change_rows(formal_base_rows, method_mode, state_mode)
             if method_ready
             else []
         )
-        filtered = _prepare_daily_rows(
-            _sort_daily_rows(filtered, view=view_mode, method=method_mode),
-            method=method_mode,
-        )
+        if view_mode != "projection":
+            filtered = _prepare_daily_rows(
+                _sort_daily_rows(filtered, view=view_mode, method=method_mode),
+                method=method_mode,
+            )
         index_rows, _ = cached_daily_auxiliary(query_date)
         date_fallback = date if date and date != query_date else ""
         industry_name = next(
@@ -461,23 +570,24 @@ def build_watchlist_router(
                 "summary": {
                     "current": current_counts,
                     "changes": change_counts,
+                    "projection": projection_counts,
                     "result_count": len(filtered),
                     "reconstructed": sum(
                         1 for row in base_rows if row.get("origin") == "RECONSTRUCTED"
                     ),
                     "excluded_st": sum(
-                        1 for row in rows if row["has_pass"] and row.get("is_st")
+                        1 for row in formal_rows if row["has_pass"] and row.get("is_st")
                     ),
                     "small_cap": sum(
                         1
-                        for row in rows
+                        for row in formal_rows
                         if row["has_pass"]
                         and not row.get("is_st")
                         and row.get("small_cap")
                     ),
                     "missing_market_cap": sum(
                         1
-                        for row in rows
+                        for row in formal_rows
                         if row["has_pass"]
                         and not row.get("is_st")
                         and row.get("total_market_cap_yi") is None
@@ -492,8 +602,20 @@ def build_watchlist_router(
                     ),
                     "changes_view": daily_url(
                         target_view="changes",
-                        target_method=method_mode if method_ready else "all",
-                        target_state=state_mode or "NEW",
+                        target_method=method_mode if method_ready else "weinstein",
+                        target_state=(
+                            state_mode
+                            if state_mode in {
+                                "NEW", "ENTERED", "REENTERED", "CONTINUING",
+                                "EXIT", "EXITED", "DATA_GAP",
+                            }
+                            else "NEW"
+                        ),
+                    ),
+                    "projection_view": daily_url(
+                        target_view="projection",
+                        target_method="weinstein",
+                        target_state="CHANGE",
                     ),
                     "current_methods": {
                         value: daily_url(target_view="current", target_method=value)
@@ -517,6 +639,14 @@ def build_watchlist_router(
                     }
                     if method_ready
                     else {},
+                    "projection_states": {
+                        value: daily_url(
+                            target_view="projection",
+                            target_method="weinstein",
+                            target_state=value,
+                        )
+                        for value in projection_counts
+                    },
                     "clear_industry": daily_url(
                         target_view=view_mode,
                         target_method=method_mode,
@@ -826,8 +956,12 @@ def build_watchlist_router(
             industry=industry,
             q=q,
             section=section,
-            rows_for_date=lambda value: rows_for_user(
-                request, value, include_liquidity=False
+            rows_for_date=lambda value: stock_navigation_rows_for_user(
+                request,
+                value,
+                view=view,
+                method=method,
+                state=state,
             ),
             personal_rows=(
                 personal_navigation_rows(request)
@@ -916,8 +1050,12 @@ def build_watchlist_router(
             industry=industry,
             q=q,
             section=section,
-            rows_for_date=lambda value: rows_for_user(
-                request, value, include_liquidity=False
+            rows_for_date=lambda value: stock_navigation_rows_for_user(
+                request,
+                value,
+                view=view,
+                method=method,
+                state=state,
             ),
             personal_rows=(
                 personal_navigation_rows(request)
@@ -1008,8 +1146,12 @@ def build_watchlist_router(
             industry=industry,
             q=q,
             section=section,
-            rows_for_date=lambda value: rows_for_user(
-                request, value, include_liquidity=False
+            rows_for_date=lambda value: stock_navigation_rows_for_user(
+                request,
+                value,
+                view=view,
+                method=method,
+                state=state,
             ),
             personal_rows=(
                 personal_navigation_rows(request)
@@ -1372,24 +1514,37 @@ def _normalize_daily_query(
 
     state_mode = state.upper().strip()
     requested_view = str(view or "").lower().strip()
-    if requested_view not in {"current", "changes"}:
-        requested_view = (
-            "changes"
-            if state_mode
-            in {
-                "NEW",
-                "ENTERED",
-                "REENTERED",
-                "STABLE",
-                "CONTINUING",
-                "EXIT",
-                "EXITED",
-                "DATA_GAP",
-            }
-            else "current"
-        )
+    if requested_view not in {"current", "changes", "projection"}:
+        if state_mode.startswith("PRE_"):
+            requested_view = "projection"
+        else:
+            requested_view = (
+                "changes"
+                if state_mode
+                in {
+                    "NEW",
+                    "ENTERED",
+                    "REENTERED",
+                    "STABLE",
+                    "CONTINUING",
+                    "EXIT",
+                    "EXITED",
+                    "DATA_GAP",
+                }
+                else "current"
+            )
+    if requested_view == "projection":
+        if state_mode not in {
+            "CHANGE", "ENTER", "PRE_ENTERED", "PRE_REENTERED",
+            "PRE_EXITED", "PASSING", "PRE_CONTINUING", "DATA_GAP",
+        }:
+            state_mode = "CHANGE"
+        return "projection", "weinstein", state_mode
     if requested_view == "current":
         return "current", method_mode, ""
+
+    if method_mode not in METHOD_LABELS:
+        method_mode = "weinstein"
 
     if state_mode == "STABLE":
         state_mode = "CONTINUING"
@@ -1422,7 +1577,7 @@ def _daily_query_string(
         "method": method,
         "min_cap": min_cap,
     }
-    if view == "changes" and state:
+    if view in {"changes", "projection"} and state:
         query["state"] = state
     if industry:
         query["industry"] = industry
@@ -1465,6 +1620,79 @@ def _decorate_watchlist_row(row: dict[str, Any]) -> dict[str, Any]:
     item["manual_label"] = MANUAL_LABELS.get(
         str(item.get("manual", {}).get("manual_state") or "UNREVIEWED"), "未加入"
     )
+    item.update(_stock_external_urls(str(item.get("symbol") or "")))
+    return item
+
+
+def _format_optional_decimal(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _decorate_provisional_row(row: dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    metrics = dict(item.get("metrics") or {})
+    checks = dict(metrics.get("checks") or {})
+    failed = [str(value) for value in metrics.get("failed_checks") or []]
+    item["state_label"] = PROVISIONAL_STATE_LABELS.get(
+        str(item.get("state") or ""), "周内状态未知"
+    )
+    item["projected_stage_label"] = STAGE_LABELS.get(
+        str(item.get("projected_stage") or "UNKNOWN"), "数据不足"
+    )
+    item["formal_stage_label"] = STAGE_LABELS.get(
+        str(item.get("formal_stage") or "UNKNOWN"), "数据不足"
+    )
+    item["prior_formal_stage_label"] = STAGE_LABELS.get(
+        str(item.get("prior_formal_stage") or "UNKNOWN"), "数据不足"
+    )
+    item["minervini_result_label"] = RESULT_LABELS.get(
+        str(item.get("minervini_result") or "UNKNOWN"), "未知"
+    )
+    item["check_rows"] = [
+        {
+            "key": key,
+            "label": WEINSTEIN_CHECK_LABELS.get(key, key),
+            "passed": bool(value),
+        }
+        for key, value in checks.items()
+    ]
+    item["metric_display"] = {
+        key: _format_optional_decimal(metrics.get(key))
+        for key in (
+            "distance_from_ma30_pct",
+            "ma30_slope_4w_pct",
+            "return_13w_pct",
+        )
+    }
+    item["failed_check_labels"] = [
+        WEINSTEIN_CHECK_LABELS.get(key, key) for key in failed
+    ]
+    item["passed_check_count"] = sum(bool(value) for value in checks.values())
+    item["check_count"] = len(checks)
+    previous_result = str(item.get("previous_result") or "UNKNOWN")
+    projected_result = str(item.get("projected_result") or "UNKNOWN")
+    item["previous_projection_label"] = PROJECTION_RESULT_LABELS.get(
+        previous_result, "状态未知"
+    )
+    item["current_projection_label"] = PROJECTION_RESULT_LABELS.get(
+        projected_result, "状态未知"
+    )
+    item["previous_projection_source"] = (
+        f"{item.get('previous_as_of_date')} 投影"
+        if item.get("previous_as_of_date")
+        else "上周正式状态"
+    )
+    elapsed = int(item.get("sessions_elapsed") or 0)
+    total = int(item.get("sessions_total") or 0)
+    item["maturity_label"] = (
+        f"本周第 {elapsed}/{total} 个交易日" if total else "交易日历不足"
+    )
+    item["is_change"] = str(item.get("state") or "") in {
+        "PRE_ENTERED", "PRE_REENTERED", "PRE_EXITED", "DATA_GAP"
+    }
     item.update(_stock_external_urls(str(item.get("symbol") or "")))
     return item
 
@@ -1887,6 +2115,42 @@ def _change_rows(
     return [row for row in rows if matches(row)]
 
 
+def _projection_rows(
+    rows: list[dict[str, Any]], state: str
+) -> list[dict[str, Any]]:
+    if state == "CHANGE":
+        states = {"PRE_ENTERED", "PRE_REENTERED", "PRE_EXITED", "DATA_GAP"}
+        selected = [row for row in rows if str(row.get("state") or "") in states]
+    elif state == "ENTER":
+        selected = [
+            row for row in rows
+            if str(row.get("state") or "") in {"PRE_ENTERED", "PRE_REENTERED"}
+        ]
+    elif state == "PASSING":
+        selected = [
+            row for row in rows if str(row.get("projected_result") or "") == "PASS"
+        ]
+    else:
+        selected = [
+            row for row in rows if str(row.get("state") or "") == state
+        ]
+    rank = {
+        "PRE_ENTERED": 0,
+        "PRE_REENTERED": 1,
+        "PRE_EXITED": 2,
+        "DATA_GAP": 3,
+        "PRE_CONTINUING": 4,
+    }
+    return sorted(
+        selected,
+        key=lambda row: (
+            rank.get(str(row.get("state") or ""), 9),
+            -int(row.get("sessions_elapsed") or 0),
+            str(row.get("symbol") or ""),
+        ),
+    )
+
+
 def _sort_daily_rows(
     rows: list[dict[str, Any]], *, view: str, method: str
 ) -> list[dict[str, Any]]:
@@ -2066,7 +2330,13 @@ def _stock_navigation(
         "new-candidates": "新进 / 重进",
         "continuing-candidates": "持续符合",
         "exit-candidates": "退出 / 中断",
-        "daily-results": "当前观察池" if view_mode == "current" else "方法状态变化",
+        "daily-results": (
+            "当前观察池"
+            if view_mode == "current"
+            else "每日变化"
+            if view_mode == "projection"
+            else "正式状态变化"
+        ),
         "focus-candidates": "我的重点观察",
         "personal-observations": "我的观察",
         "open-positions": "当前持仓",
@@ -2155,12 +2425,15 @@ def _stock_navigation(
         q=q,
     )
     if section == "daily-results":
-        selected = (
-            _current_rows(base_rows, method_mode)
-            if view_mode == "current"
-            else _change_rows(base_rows, method_mode, state_mode)
-        )
-        selected = _sort_daily_rows(selected, view=view_mode, method=method_mode)
+        if view_mode == "projection":
+            selected = _projection_rows(base_rows, state_mode)
+        else:
+            selected = (
+                _current_rows(base_rows, method_mode)
+                if view_mode == "current"
+                else _change_rows(base_rows, method_mode, state_mode)
+            )
+            selected = _sort_daily_rows(selected, view=view_mode, method=method_mode)
     else:
         filtered = _filter_rows(
             base_rows,

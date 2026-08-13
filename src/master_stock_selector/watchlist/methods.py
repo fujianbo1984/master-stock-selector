@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections import OrderedDict, deque
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Iterable, Mapping
 
 MINERVINI_POLICY_VERSION = "minervini-trend-template-v1"
 MINERVINI_INDEX_STAGE2_POLICY_VERSION = "minervini-index-stage2-price-template-v1"
 WEINSTEIN_POLICY_VERSION = "weinstein-stage-30w-v1"
+WEINSTEIN_PROVISIONAL_POLICY_VERSION = (
+    "weinstein-stage-30w-intraweek-projection-v1"
+)
 
 RESULT_PASS = "PASS"
 RESULT_FAIL = "FAIL"
@@ -333,7 +336,162 @@ def weinstein_profiles_for_dates(
     return result
 
 
-def completed_week_end_map(trading_dates: list[str]) -> dict[tuple[int, int], str]:
+def weinstein_provisional_profiles(
+    bars: list[DailyBar],
+    evaluation_dates: list[str],
+    trading_dates: list[str],
+    baseline: Mapping[str, Any] | None = None,
+    week_schedules: Mapping[tuple[int, int], list[str]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Project Weinstein stages with the current, incomplete week appended.
+
+    Price inputs are strictly limited to each evaluation date.  A supplied
+    schedule may contain future sessions because the exchange calendar is
+    known in advance; it is used only for maturity and final-session metadata,
+    never for prices.
+    """
+
+    if not evaluation_dates:
+        return {}
+    schedules = {
+        key: sorted(set(values))
+        for key, values in (week_schedules or {}).items()
+        if values
+    }
+    known_week_ends = [values[-1] for values in schedules.values()]
+    completed_ends = completed_week_end_map(
+        trading_dates,
+        authoritative_week_ends=known_week_ends,
+    )
+    observed_by_week: OrderedDict[tuple[int, int], list[str]] = OrderedDict()
+    for value in sorted(set(trading_dates)):
+        parsed = date.fromisoformat(value)
+        iso = parsed.isocalendar()
+        observed_by_week.setdefault((iso.year, iso.week), []).append(value)
+
+    result: dict[str, dict[str, Any]] = {}
+    for evaluation_date in sorted(set(evaluation_dates)):
+        parsed = date.fromisoformat(evaluation_date)
+        iso = parsed.isocalendar()
+        week_key = (iso.year, iso.week)
+        eligible_bars = [bar for bar in bars if bar.trade_date <= evaluation_date]
+        current_items = [
+            bar
+            for bar in eligible_bars
+            if _iso_week_key(bar.trade_date) == week_key
+        ]
+        schedule = schedules.get(week_key, [])
+        observed_sessions = [
+            value
+            for value in observed_by_week.get(week_key, [])
+            if value <= evaluation_date
+        ]
+        completed_week_end = completed_ends.get(week_key, "")
+        inferred_complete = bool(
+            completed_week_end and completed_week_end == evaluation_date
+        )
+        is_final_session = bool(
+            schedule and evaluation_date == schedule[-1]
+        ) or (not schedule and inferred_complete)
+        sessions_elapsed = (
+            sum(value <= evaluation_date for value in schedule)
+            if schedule
+            else len(observed_sessions)
+        )
+        sessions_total = (
+            len(schedule)
+            if schedule
+            else len(observed_by_week.get(week_key, []))
+            if completed_week_end
+            else max(5, len(observed_sessions))
+        )
+        expected_week_end = (
+            schedule[-1]
+            if schedule
+            else completed_week_end
+            or (parsed + timedelta(days=4 - parsed.weekday())).isoformat()
+        )
+
+        prior_week_ends = {
+            key: value for key, value in completed_ends.items() if key != week_key
+        }
+        completed_weeks = aggregate_completed_weeks(eligible_bars, prior_week_ends)
+        formal_series = weinstein_stage_series(completed_weeks, baseline)
+        formal_fact = formal_series[-1] if formal_series else None
+        formal_stage = formal_fact.stage if formal_fact else STAGE_UNKNOWN
+        formal_effective_week_end = (
+            formal_fact.effective_date if formal_fact else ""
+        )
+
+        if not current_items or current_items[-1].trade_date != evaluation_date:
+            result[evaluation_date] = {
+                "result": RESULT_UNKNOWN,
+                "projected_stage": STAGE_UNKNOWN,
+                "formal_stage": formal_stage,
+                "prior_formal_stage": formal_stage,
+                "formal_effective_week_end": formal_effective_week_end,
+                "reason": "MISSING_BAR_FOR_AS_OF_DATE",
+                "week_start": (parsed - timedelta(days=parsed.weekday())).isoformat(),
+                "expected_week_end": expected_week_end,
+                "sessions_elapsed": sessions_elapsed,
+                "sessions_total": sessions_total,
+                "is_final_session": is_final_session,
+                "evidence": {},
+            }
+            continue
+
+        volume_values = [item.volume for item in current_items if item.volume is not None]
+        provisional_week = WeeklyBar(
+            effective_date=evaluation_date,
+            open=current_items[0].open,
+            high=max(item.high for item in current_items),
+            low=min(item.low for item in current_items),
+            close=current_items[-1].close,
+            volume=sum(volume_values) if volume_values else None,
+        )
+        projected_series = weinstein_stage_series(
+            [*completed_weeks, provisional_week], baseline
+        )
+        projected_fact = projected_series[-1]
+        projected_stage = projected_fact.stage
+        projected_result = _weinstein_result(projected_stage)
+        evidence = dict(projected_fact.evidence)
+        checks: OrderedDict[str, bool] = OrderedDict()
+        if evidence.get("ma30") is not None:
+            checks["close_above_ma30"] = bool(evidence.get("close_above_ma30"))
+            checks["ma30_slope_above_1pct"] = (
+                float(evidence.get("ma30_slope_4w_pct") or 0) > 1.0
+            )
+            checks["return_13w_positive"] = (
+                float(evidence.get("return_13w_pct") or 0) > 0
+            )
+        evidence["checks"] = checks
+        evidence["failed_checks"] = [
+            key for key, passed in checks.items() if not passed
+        ]
+        result[evaluation_date] = {
+            "result": projected_result,
+            "projected_stage": projected_stage,
+            "formal_stage": projected_stage if is_final_session else formal_stage,
+            "prior_formal_stage": formal_stage,
+            "formal_effective_week_end": (
+                evaluation_date if is_final_session else formal_effective_week_end
+            ),
+            "reason": str(projected_fact.evidence.get("reason") or ""),
+            "week_start": (parsed - timedelta(days=parsed.weekday())).isoformat(),
+            "expected_week_end": expected_week_end,
+            "sessions_elapsed": sessions_elapsed,
+            "sessions_total": sessions_total,
+            "is_final_session": is_final_session,
+            "evidence": evidence,
+        }
+    return result
+
+
+def completed_week_end_map(
+    trading_dates: list[str],
+    authoritative_week_ends: Iterable[str] = (),
+) -> dict[tuple[int, int], str]:
     """A week is complete only when a later known trading date is in another week.
 
     The latest observed week is accepted only when its final date is Friday. A
@@ -341,6 +499,7 @@ def completed_week_end_map(trading_dates: list[str]) -> dict[tuple[int, int], st
     calendar check by the caller rather than guessed here.
     """
 
+    authoritative = set(authoritative_week_ends)
     by_week: OrderedDict[tuple[int, int], list[str]] = OrderedDict()
     for value in sorted(set(trading_dates)):
         parsed = date.fromisoformat(value)
@@ -350,9 +509,26 @@ def completed_week_end_map(trading_dates: list[str]) -> dict[tuple[int, int], st
     result: dict[tuple[int, int], str] = {}
     for index, key in enumerate(keys):
         end_date = by_week[key][-1]
-        if index < len(keys) - 1 or date.fromisoformat(end_date).weekday() == 4:
+        if (
+            index < len(keys) - 1
+            or date.fromisoformat(end_date).weekday() == 4
+            or end_date in authoritative
+        ):
             result[key] = end_date
     return result
+
+
+def _iso_week_key(value: str) -> tuple[int, int]:
+    iso = date.fromisoformat(value).isocalendar()
+    return iso.year, iso.week
+
+
+def _weinstein_result(stage: str) -> str:
+    return {
+        STAGE_2: RESULT_PASS,
+        STAGE_TRANSITION: RESULT_TRANSITION,
+        STAGE_UNKNOWN: RESULT_UNKNOWN,
+    }.get(stage, RESULT_FAIL)
 
 
 def percentile_ranks(values: list[tuple[str, float]]) -> dict[str, float]:

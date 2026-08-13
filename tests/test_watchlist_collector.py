@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 
 import pytest
 
@@ -71,7 +72,16 @@ class FakeProvider:
 
     def trade_calendar(self, start_date: str, end_date: str) -> list[str]:
         self.request_count += 1
-        return [end_date] if self.open_day else []
+        if not self.open_day:
+            return []
+        current = date.fromisoformat(start_date)
+        last = date.fromisoformat(end_date)
+        values: list[str] = []
+        while current <= last:
+            if current.weekday() < 5:
+                values.append(current.isoformat())
+            current += timedelta(days=1)
+        return values
 
     def stock_basic(self) -> list[dict[str, object]]:
         self.request_count += 1

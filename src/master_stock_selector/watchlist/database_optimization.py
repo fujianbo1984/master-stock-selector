@@ -101,6 +101,8 @@ def validate_database_equivalence(
     core_tables = (
         "stock_method_daily_fact",
         "stock_method_transition",
+        "stock_weinstein_provisional_daily_fact",
+        "stock_weinstein_provisional_transition",
         "index_weinstein_weekly_fact",
         "index_minervini_stage2_daily_fact",
         "industry_observation_daily_fact",
@@ -185,6 +187,8 @@ def _validate_retained_candidate(
     core_tables = {
         "stock_method_daily_fact": "as_of_date",
         "stock_method_transition": "as_of_date",
+        "stock_weinstein_provisional_daily_fact": "as_of_date",
+        "stock_weinstein_provisional_transition": "as_of_date",
         "industry_observation_daily_fact": "as_of_date",
         "index_weinstein_weekly_fact": "effective_date",
         "index_minervini_stage2_daily_fact": "as_of_date",

@@ -142,10 +142,17 @@ def test_service_builds_two_independent_stock_methods_and_four_index_stages(tmp_
     )
     repository = WatchlistRepository(runtime_path)
     rows = repository.watchlist_rows(dates[-1])
+    provisional = repository.provisional_rows(dates[-1])
     indices = repository.index_facts(dates[-1])
 
     assert payload["status"] == "SUCCESS"
     assert payload["counts"]["stock_facts"] == 8
+    assert payload["counts"]["weinstein_provisional_facts"] == 4
+    assert len(provisional) == 2
+    assert {row["projected_stage"] for row in provisional} == {
+        "STAGE_2", "STAGE_4"
+    }
+    assert all(row["sessions_elapsed"] >= 1 for row in provisional)
     assert {row["index_symbol"] for row in indices} == {
         "000300.SH", "000852.SH", "399006.SZ", "000688.SH"
     }

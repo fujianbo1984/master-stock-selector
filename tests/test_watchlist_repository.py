@@ -7,6 +7,7 @@ import pytest
 from master_stock_selector.watchlist.methods import (
     MINERVINI_POLICY_VERSION,
     WEINSTEIN_POLICY_VERSION,
+    WEINSTEIN_PROVISIONAL_POLICY_VERSION,
 )
 from master_stock_selector.watchlist.repository import MarketDataReader, WatchlistRepository
 
@@ -116,6 +117,68 @@ def test_repository_derives_enter_continue_exit_and_reentry(tmp_path):
         ("2026-07-03", "CONTINUING", "2026-07-02", "2026-07-02", 2),
         ("2026-07-04", "EXITED", "2026-07-02", None, 0),
         ("2026-07-05", "REENTERED", "2026-07-02", "2026-07-05", 1),
+    ]
+
+
+def test_repository_derives_daily_weinstein_projection_entry_and_exit(tmp_path):
+    path = tmp_path / "watchlist.sqlite3"
+    repository = WatchlistRepository(path)
+    results = ["FAIL", "PASS", "PASS", "FAIL", "PASS"]
+    provisional_facts = [
+        {
+            "as_of_date": f"2026-07-{day:02d}",
+            "symbol": "000001.SZ",
+            "projected_stage": "STAGE_2" if result == "PASS" else "STAGE_3",
+            "projected_result": result,
+            "formal_stage": "STAGE_3",
+            "prior_formal_stage": "STAGE_3",
+            "formal_effective_week_end": "2026-06-26",
+            "week_start": "2026-06-29",
+            "expected_week_end": "2026-07-03",
+            "sessions_elapsed": min(day, 5),
+            "sessions_total": 5,
+            "is_final_session": day == 3,
+            "policy_version": WEINSTEIN_PROVISIONAL_POLICY_VERSION,
+            "evidence": {},
+            "source_digest": "digest",
+            "origin": "RECONSTRUCTED",
+        }
+        for day, result in zip(range(1, 6), results)
+    ]
+    repository.persist_run(
+        stock_facts=[],
+        provisional_facts=provisional_facts,
+        index_facts=[],
+        receipt={
+            "run_id": "projection-run",
+            "as_of_date": "2026-07-05",
+            "from_date": "2026-07-01",
+            "origin": "RECONSTRUCTED",
+            "minervini_policy_version": MINERVINI_POLICY_VERSION,
+            "weinstein_policy_version": WEINSTEIN_POLICY_VERSION,
+            "market_database": "/tmp/market.sqlite3",
+            "source_digest": "source",
+            "counts": {},
+            "status": "SUCCESS",
+            "started_at": "2026-07-05T10:00:00+08:00",
+            "finished_at": "",
+        },
+    )
+
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            """
+            SELECT as_of_date, state, previous_result, current_result
+            FROM stock_weinstein_provisional_transition ORDER BY as_of_date
+            """
+        ).fetchall()
+
+    assert rows == [
+        ("2026-07-01", "PRE_OUT", "FAIL", "FAIL"),
+        ("2026-07-02", "PRE_ENTERED", "FAIL", "PASS"),
+        ("2026-07-03", "PRE_CONTINUING", "PASS", "PASS"),
+        ("2026-07-04", "PRE_EXITED", "PASS", "FAIL"),
+        ("2026-07-05", "PRE_REENTERED", "FAIL", "PASS"),
     ]
 
 

@@ -6,7 +6,7 @@ import os
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -146,7 +146,12 @@ def collect_market_data(
     active_provider = provider or TushareMarketProvider()
     active_provider.assert_ready()
     started_at = _now()
-    open_dates = active_provider.trade_calendar(target_date, target_date)
+    target = date.fromisoformat(target_date)
+    week_start = target - timedelta(days=target.weekday())
+    week_end = week_start + timedelta(days=6)
+    open_dates = active_provider.trade_calendar(
+        week_start.isoformat(), week_end.isoformat()
+    )
     if target_date not in open_dates:
         return {
             "trade_date": target_date,
@@ -172,6 +177,8 @@ def collect_market_data(
         minimum_stock_count=config.minimum_stock_count,
         minimum_coverage_ratio=config.minimum_coverage_ratio,
     )
+    prepared["quality"]["week_open_dates"] = sorted(set(open_dates))
+    prepared["quality"]["week_calendar_source"] = active_provider.source_name
 
     run_id = f"collect-{target_date}-{uuid4().hex[:12]}"
     fetched_at = _now()

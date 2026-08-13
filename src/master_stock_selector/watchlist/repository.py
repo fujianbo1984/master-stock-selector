@@ -69,6 +69,62 @@ CREATE TABLE IF NOT EXISTS stock_method_lifecycle_baseline (
     consecutive_sessions INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (symbol, method, policy_version)
 );
+CREATE TABLE IF NOT EXISTS stock_weinstein_provisional_daily_fact (
+    as_of_date TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    projected_stage TEXT NOT NULL CHECK (
+        projected_stage IN (
+            'STAGE_1', 'STAGE_2', 'STAGE_3', 'STAGE_4', 'TRANSITION', 'UNKNOWN'
+        )
+    ),
+    projected_result TEXT NOT NULL CHECK (
+        projected_result IN ('PASS', 'FAIL', 'UNKNOWN', 'TRANSITION')
+    ),
+    formal_stage TEXT NOT NULL CHECK (
+        formal_stage IN (
+            'STAGE_1', 'STAGE_2', 'STAGE_3', 'STAGE_4', 'TRANSITION', 'UNKNOWN'
+        )
+    ),
+    prior_formal_stage TEXT NOT NULL CHECK (
+        prior_formal_stage IN (
+            'STAGE_1', 'STAGE_2', 'STAGE_3', 'STAGE_4', 'TRANSITION', 'UNKNOWN'
+        )
+    ),
+    formal_effective_week_end TEXT NOT NULL DEFAULT '',
+    week_start TEXT NOT NULL,
+    expected_week_end TEXT NOT NULL,
+    sessions_elapsed INTEGER NOT NULL CHECK (sessions_elapsed >= 0),
+    sessions_total INTEGER NOT NULL CHECK (sessions_total >= sessions_elapsed),
+    is_final_session INTEGER NOT NULL DEFAULT 0 CHECK (is_final_session IN (0, 1)),
+    policy_version TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    source_digest TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (as_of_date, symbol, policy_version)
+);
+CREATE TABLE IF NOT EXISTS stock_weinstein_provisional_transition (
+    as_of_date TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+        state IN (
+            'PRE_ENTERED', 'PRE_REENTERED', 'PRE_CONTINUING',
+            'PRE_EXITED', 'PRE_OUT', 'DATA_GAP'
+        )
+    ),
+    previous_as_of_date TEXT NOT NULL DEFAULT '',
+    previous_result TEXT NOT NULL CHECK (
+        previous_result IN ('PASS', 'FAIL', 'UNKNOWN', 'TRANSITION')
+    ),
+    current_result TEXT NOT NULL CHECK (
+        current_result IN ('PASS', 'FAIL', 'UNKNOWN', 'TRANSITION')
+    ),
+    policy_version TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (as_of_date, symbol, policy_version)
+);
 CREATE TABLE IF NOT EXISTS weinstein_stage_baseline (
     instrument_type TEXT NOT NULL CHECK (instrument_type IN ('stock', 'index')),
     symbol TEXT NOT NULL,
@@ -262,6 +318,12 @@ CREATE INDEX IF NOT EXISTS idx_stock_method_transition_date_state
 ON stock_method_transition(as_of_date, method, state);
 CREATE INDEX IF NOT EXISTS idx_stock_method_transition_symbol_date
 ON stock_method_transition(symbol, as_of_date);
+CREATE INDEX IF NOT EXISTS idx_weinstein_provisional_date_result
+ON stock_weinstein_provisional_daily_fact(as_of_date, projected_result);
+CREATE INDEX IF NOT EXISTS idx_weinstein_provisional_symbol_date
+ON stock_weinstein_provisional_daily_fact(symbol, as_of_date);
+CREATE INDEX IF NOT EXISTS idx_weinstein_provisional_transition_date_state
+ON stock_weinstein_provisional_transition(as_of_date, state);
 CREATE INDEX IF NOT EXISTS idx_index_weinstein_symbol_date
 ON index_weinstein_weekly_fact(index_symbol, effective_date);
 CREATE INDEX IF NOT EXISTS idx_index_minervini_symbol_date
@@ -298,6 +360,22 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_stock_method_lifecycle_baseline_no_delete
 BEFORE DELETE ON stock_method_lifecycle_baseline BEGIN
     SELECT RAISE(ABORT, 'stock_method_lifecycle_baseline is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_weinstein_provisional_daily_fact_no_update
+BEFORE UPDATE ON stock_weinstein_provisional_daily_fact BEGIN
+    SELECT RAISE(ABORT, 'stock_weinstein_provisional_daily_fact is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_weinstein_provisional_daily_fact_no_delete
+BEFORE DELETE ON stock_weinstein_provisional_daily_fact BEGIN
+    SELECT RAISE(ABORT, 'stock_weinstein_provisional_daily_fact is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_weinstein_provisional_transition_no_update
+BEFORE UPDATE ON stock_weinstein_provisional_transition BEGIN
+    SELECT RAISE(ABORT, 'stock_weinstein_provisional_transition is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_weinstein_provisional_transition_no_delete
+BEFORE DELETE ON stock_weinstein_provisional_transition BEGIN
+    SELECT RAISE(ABORT, 'stock_weinstein_provisional_transition is immutable');
 END;
 CREATE TRIGGER IF NOT EXISTS trg_weinstein_stage_baseline_no_update
 BEFORE UPDATE ON weinstein_stage_baseline BEGIN
@@ -448,6 +526,46 @@ class MarketDataReader:
                 (end_date,),
             ).fetchall()
         return [str(row[0]) for row in rows]
+
+    def week_schedule(self, as_of_date: str) -> list[str]:
+        """Return the authoritative open-session schedule captured that day."""
+
+        with self.connect() as connection:
+            table = connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='watchlist_market_collection_receipt'
+                """
+            ).fetchone()
+            if not table:
+                return []
+            row = connection.execute(
+                """
+                SELECT quality_json FROM watchlist_market_collection_receipt
+                WHERE trade_date = ? AND status = 'SUCCESS'
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (as_of_date,),
+            ).fetchone()
+        if not row:
+            return []
+        try:
+            quality = json.loads(str(row[0]) or "{}")
+            values = sorted(
+                {
+                    str(value)
+                    for value in quality.get("week_open_dates", [])
+                    if value
+                }
+            )
+            target = date.fromisoformat(as_of_date).isocalendar()
+            return [
+                value
+                for value in values
+                if date.fromisoformat(value).isocalendar()[:2] == target[:2]
+            ]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
 
     def iter_stock_bars(self, end_date: str) -> Iterator[tuple[str, list[dict[str, Any]]]]:
         connection = self.connect()
@@ -1070,6 +1188,8 @@ class WatchlistRepository:
             {
                 "stock_method_daily_fact",
                 "stock_method_lifecycle_baseline",
+                "stock_weinstein_provisional_daily_fact",
+                "stock_weinstein_provisional_transition",
                 "weinstein_stage_baseline",
                 "trade_execution",
                 "security_identity_history",
@@ -1183,6 +1303,7 @@ class WatchlistRepository:
         stock_facts: Iterable[Mapping[str, Any]],
         index_facts: Sequence[Mapping[str, Any]],
         receipt: dict[str, Any],
+        provisional_facts: Sequence[Mapping[str, Any]] = (),
         identities: Sequence[Mapping[str, Any]] = (),
         index_minervini_facts: Sequence[Mapping[str, Any]] = (),
     ) -> None:
@@ -1207,6 +1328,32 @@ class WatchlistRepository:
                 ),
             )
             self._derive_transitions(connection)
+            self._insert_immutable_rows(
+                connection,
+                "stock_weinstein_provisional_daily_fact",
+                (
+                    "as_of_date", "symbol", "projected_stage", "projected_result",
+                    "formal_stage", "prior_formal_stage",
+                    "formal_effective_week_end", "week_start",
+                    "expected_week_end", "sessions_elapsed", "sessions_total",
+                    "is_final_session", "policy_version", "evidence_json",
+                    "source_digest", "origin",
+                ),
+                [
+                    (
+                        row["as_of_date"], row["symbol"], row["projected_stage"],
+                        row["projected_result"], row["formal_stage"],
+                        row["prior_formal_stage"], row["formal_effective_week_end"],
+                        row["week_start"],
+                        row["expected_week_end"], int(row["sessions_elapsed"]),
+                        int(row["sessions_total"]), int(bool(row["is_final_session"])),
+                        row["policy_version"], _json(row.get("evidence") or {}),
+                        row["source_digest"], row["origin"],
+                    )
+                    for row in provisional_facts
+                ],
+            )
+            self._derive_provisional_transitions(connection)
             self._insert_immutable_rows(
                 connection,
                 "index_weinstein_weekly_fact",
@@ -1748,6 +1895,76 @@ class WatchlistRepository:
         )
 
     @staticmethod
+    def _derive_provisional_transitions(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO stock_weinstein_provisional_transition (
+                as_of_date, symbol, state, previous_as_of_date, previous_result,
+                current_result, policy_version, reason, origin
+            )
+            WITH ordered AS (
+                SELECT f.*,
+                       LAG(f.as_of_date) OVER (
+                           PARTITION BY f.symbol, f.policy_version
+                           ORDER BY f.as_of_date
+                       ) AS previous_as_of_date,
+                       LAG(f.projected_result) OVER (
+                           PARTITION BY f.symbol, f.policy_version
+                           ORDER BY f.as_of_date
+                       ) AS stored_previous_result,
+                       SUM(CASE WHEN f.projected_result = 'PASS' THEN 1 ELSE 0 END)
+                           OVER (
+                               PARTITION BY f.symbol, f.policy_version
+                               ORDER BY f.as_of_date
+                               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                           ) AS earlier_passes
+                FROM stock_weinstein_provisional_daily_fact AS f
+            ), contextual AS (
+                SELECT ordered.*,
+                       COALESCE(
+                           stored_previous_result,
+                           CASE prior_formal_stage
+                               WHEN 'STAGE_2' THEN 'PASS'
+                               WHEN 'UNKNOWN' THEN 'UNKNOWN'
+                               WHEN 'TRANSITION' THEN 'TRANSITION'
+                               ELSE 'FAIL'
+                           END
+                       ) AS previous_result
+                FROM ordered
+            )
+            SELECT as_of_date, symbol,
+                   CASE
+                       WHEN projected_result = 'PASS' AND previous_result = 'PASS'
+                           THEN 'PRE_CONTINUING'
+                       WHEN projected_result = 'PASS' AND COALESCE(earlier_passes, 0) > 0
+                           THEN 'PRE_REENTERED'
+                       WHEN projected_result = 'PASS' THEN 'PRE_ENTERED'
+                       WHEN projected_result = 'UNKNOWN' AND previous_result = 'PASS'
+                           THEN 'DATA_GAP'
+                       WHEN projected_result <> 'PASS' AND previous_result = 'PASS'
+                           THEN 'PRE_EXITED'
+                       ELSE 'PRE_OUT'
+                   END,
+                   COALESCE(previous_as_of_date, ''), previous_result,
+                   projected_result, policy_version,
+                   CASE
+                       WHEN projected_result = 'PASS' AND previous_result = 'PASS'
+                           THEN 'PROJECTION_STILL_PASSES'
+                       WHEN projected_result = 'PASS' AND COALESCE(earlier_passes, 0) > 0
+                           THEN 'PROJECTION_PASSES_AGAIN'
+                       WHEN projected_result = 'PASS' THEN 'PROJECTION_NOW_PASSES'
+                       WHEN projected_result = 'UNKNOWN' AND previous_result = 'PASS'
+                           THEN 'REQUIRED_INPUT_MISSING'
+                       WHEN projected_result <> 'PASS' AND previous_result = 'PASS'
+                           THEN 'PROJECTION_NO_LONGER_PASSES'
+                       ELSE 'PROJECTION_REMAINS_OUT'
+                   END,
+                   origin
+            FROM contextual
+            """
+        )
+
+    @staticmethod
     def _insert_index_minervini_facts(
         connection: sqlite3.Connection,
         facts: Sequence[Mapping[str, Any]],
@@ -2106,6 +2323,81 @@ class WatchlistRepository:
                 "evidence": evidence,
             }
         return list(grouped.values())
+
+    def provisional_rows(self, as_of_date: str) -> list[dict[str, Any]]:
+        """Return every Weinstein intraweek projection for one trading day."""
+
+        self.initialize()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT f.*, t.state, t.previous_as_of_date, t.previous_result,
+                       t.reason AS transition_reason,
+                       m.result AS minervini_result
+                FROM stock_weinstein_provisional_daily_fact AS f
+                JOIN stock_weinstein_provisional_transition AS t
+                  ON t.as_of_date=f.as_of_date AND t.symbol=f.symbol
+                 AND t.policy_version=f.policy_version
+                LEFT JOIN stock_method_daily_fact AS m
+                  ON m.as_of_date=f.as_of_date AND m.symbol=f.symbol
+                 AND m.method='minervini'
+                 AND m.policy_version=(
+                     SELECT MAX(latest.policy_version)
+                     FROM stock_method_daily_fact AS latest
+                     WHERE latest.as_of_date=f.as_of_date
+                       AND latest.symbol=f.symbol AND latest.method='minervini'
+                 )
+                WHERE f.as_of_date = ?
+                ORDER BY f.symbol
+                """,
+                (as_of_date,),
+            ).fetchall()
+            identity_rows = self._identity_rows_as_of(connection, as_of_date)
+            industry_rows = [
+                row for row in self._membership_rows_as_of(connection, as_of_date)
+                if str(row.get("assignment_state") or "") == "VERIFIED"
+            ]
+        identities = {str(row["symbol"]): dict(row) for row in identity_rows}
+        industries = {str(row["symbol"]): dict(row) for row in industry_rows}
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            symbol = str(row["symbol"])
+            evidence = json.loads(str(row["evidence_json"] or "{}"))
+            identity = identities.get(symbol) or dict(evidence.get("eligibility") or {})
+            industry = industries.get(symbol) or {}
+            profile = dict(evidence.get("profile") or {})
+            metrics = dict(profile.get("metrics") or {})
+            result.append(
+                {
+                    "as_of_date": str(row["as_of_date"]),
+                    "symbol": symbol,
+                    "name": str(identity.get("name") or ""),
+                    "industry": str(industry.get("industry_name") or ""),
+                    "industry_code": str(industry.get("industry_code") or ""),
+                    "is_st": bool(identity.get("is_st")),
+                    "is_suspended": bool(identity.get("is_suspended")),
+                    "projected_stage": str(row["projected_stage"]),
+                    "projected_result": str(row["projected_result"]),
+                    "formal_stage": str(row["formal_stage"]),
+                    "prior_formal_stage": str(row["prior_formal_stage"]),
+                    "formal_effective_week_end": str(
+                        row["formal_effective_week_end"] or ""
+                    ),
+                    "week_start": str(row["week_start"]),
+                    "expected_week_end": str(row["expected_week_end"]),
+                    "sessions_elapsed": int(row["sessions_elapsed"]),
+                    "sessions_total": int(row["sessions_total"]),
+                    "is_final_session": bool(row["is_final_session"]),
+                    "state": str(row["state"]),
+                    "previous_as_of_date": str(row["previous_as_of_date"] or ""),
+                    "previous_result": str(row["previous_result"]),
+                    "reason": str(row["transition_reason"] or profile.get("reason") or ""),
+                    "metrics": metrics,
+                    "minervini_result": str(row["minervini_result"] or "UNKNOWN"),
+                    "origin": str(row["origin"]),
+                }
+            )
+        return result
 
     def industry_observations(self, as_of_date: str) -> list[dict[str, Any]]:
         self.initialize()

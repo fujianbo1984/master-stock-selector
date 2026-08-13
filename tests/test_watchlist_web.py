@@ -10,6 +10,7 @@ from master_stock_selector.watchlist.methods import (
     MINERVINI_INDEX_STAGE2_POLICY_VERSION,
     MINERVINI_POLICY_VERSION,
     WEINSTEIN_POLICY_VERSION,
+    WEINSTEIN_PROVISIONAL_POLICY_VERSION,
 )
 from master_stock_selector.watchlist.repository import WatchlistRepository
 from master_stock_selector.web.app import PROJECT_ROOT, _resolve_database_path
@@ -75,6 +76,41 @@ def _seed_watchlist(path):
                     },
                 },
             },
+        ],
+        provisional_facts=[
+            {
+                **common,
+                "projected_stage": "STAGE_2",
+                "projected_result": "PASS",
+                "formal_stage": "STAGE_2",
+                "prior_formal_stage": "STAGE_3",
+                "formal_effective_week_end": "2026-07-31",
+                "week_start": "2026-07-27",
+                "expected_week_end": "2026-07-31",
+                "sessions_elapsed": 5,
+                "sessions_total": 5,
+                "is_final_session": True,
+                "policy_version": WEINSTEIN_PROVISIONAL_POLICY_VERSION,
+                "evidence": {
+                    "eligibility": eligibility,
+                    "profile": {
+                        "reason": "STAGE_RULES_APPLIED",
+                        "metrics": {
+                            "close": 12.5,
+                            "ma30": 10.1,
+                            "ma30_slope_4w_pct": 2.4,
+                            "distance_from_ma30_pct": 23.76,
+                            "return_13w_pct": 18.0,
+                            "checks": {
+                                "close_above_ma30": True,
+                                "ma30_slope_above_1pct": True,
+                                "return_13w_positive": True,
+                            },
+                            "failed_checks": [],
+                        },
+                    },
+                },
+            }
         ],
         index_facts=[
             {
@@ -709,12 +745,12 @@ def test_daily_query_preserves_filters_and_discloses_fallbacks(tmp_path):
     legacy = client.get(
         "/a/daily?date=2026-07-31&method=weinstein&state=STABLE&min_cap=0"
     )
-    assert "方法状态变化" in legacy.text
+    assert "正式状态变化" in legacy.text
     assert "持续符合" in legacy.text
     assert "state=CONTINUING" in legacy.text
 
 
-def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
+def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     client = _client(tmp_path)
 
     response = client.get("/a/daily?min_cap=0")
@@ -732,7 +768,8 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     assert "两法同时符合" in response.text
     assert "行业观察" in response.text
     assert "当前观察池" in response.text
-    assert "方法状态变化" in response.text
+    assert "每日变化" in response.text
+    assert "正式状态变化" in response.text
     assert 'id="daily-results"' in response.text
     assert 'id="continuing-candidates"' not in response.text
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in response.text
@@ -744,6 +781,7 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     assert response.text.count("kpi-link") == 4
     assert "view=current" in response.text
     assert "view=changes" in response.text
+    assert "view=projection" in response.text
     assert '<select name="state">' not in response.text
     assert "manual=FOCUS" not in response.text
     assert "人工状态" not in response.text
@@ -777,8 +815,95 @@ def test_new_site_only_exposes_two_master_watchlist_surfaces(tmp_path):
     for state in ("NEW", "STABLE", "EXIT"):
         filtered = client.get(f"/a/daily?date=2026-07-31&state={state}&min_cap=0")
         assert filtered.status_code == 200
-        assert "请选择 Weinstein 或 Minervini" in filtered.text
-        assert "方法状态变化" in filtered.text
+        assert "请选择 Weinstein 或 Minervini" not in filtered.text
+        assert "正式状态变化" in filtered.text
+        assert 'aria-current="page" href="/a/daily?date=2026-07-31&amp;view=changes&amp;method=weinstein' in filtered.text
+
+
+def test_weinstein_projection_page_shows_daily_entry_evidence_and_confirmation(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.get(
+        "/a/daily?date=2026-07-31&view=projection&state=CHANGE&min_cap=0"
+    )
+
+    assert response.status_code == 200
+    assert "每日进入 / 退出" in response.text
+    assert "昨日投影 → 今日投影" in response.text
+    assert "今日预进入" in response.text
+    assert "未符合 Stage 2" in response.text
+    assert "符合 Stage 2" in response.text
+    assert "上周正式状态" in response.text
+    assert "第二阶段 · 上升" in response.text
+    assert "收盘高于30周线" in response.text
+    assert "30周线4周斜率高于1%" in response.text
+    assert "13周收益为正" in response.text
+    assert "本周第 5/5 个交易日" in response.text
+    assert "本周已收盘确认" in response.text
+    assert "本交易日已收周" in response.text
+    assert "不会改写完整周 Weinstein 事实" in response.text
+
+
+def test_projection_detail_and_charts_keep_previous_next_navigation(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    _seed_filter_cases(watchlist_path)
+    with sqlite3.connect(watchlist_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO stock_weinstein_provisional_daily_fact (
+                as_of_date, symbol, projected_stage, projected_result,
+                formal_stage, prior_formal_stage, formal_effective_week_end,
+                week_start, expected_week_end, sessions_elapsed, sessions_total,
+                is_final_session, policy_version, evidence_json, source_digest, origin
+            )
+            SELECT as_of_date, '000003.SZ', projected_stage, projected_result,
+                   formal_stage, prior_formal_stage, formal_effective_week_end,
+                   week_start, expected_week_end, sessions_elapsed, sessions_total,
+                   is_final_session, policy_version, evidence_json, source_digest, origin
+            FROM stock_weinstein_provisional_daily_fact
+            WHERE symbol='000001.SZ'
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO stock_weinstein_provisional_transition (
+                as_of_date, symbol, state, previous_as_of_date, previous_result,
+                current_result, policy_version, reason, origin
+            ) VALUES (
+                '2026-07-31', '000003.SZ', 'PRE_REENTERED', '', 'FAIL',
+                'PASS', ?, 'PROJECTION_PASSES_AGAIN', 'RECONSTRUCTED'
+            )
+            """,
+            (WEINSTEIN_PROVISIONAL_POLICY_VERSION,),
+        )
+    client = _authenticated_client(
+        create_app(
+            market_database=tmp_path / "market.sqlite3",
+            watchlist_database=watchlist_path,
+            secure_cookies=False,
+        )
+    )
+    query = (
+        "date=2026-07-31&view=projection&method=weinstein"
+        "&state=CHANGE&min_cap=0&section=daily-results"
+    )
+
+    detail = client.get(f"/a/stocks/000001.SZ?{query}")
+    chart = client.get(f"/a/stocks/000001.SZ/chart?{query}")
+    realtime = client.get(f"/a/stocks/000001.SZ/realtime?{query}")
+
+    assert detail.status_code == 200
+    assert "每日变化 · 1 / 2" in detail.text
+    assert "/a/stocks/000003.SZ?date=2026-07-31" in detail.text
+    assert chart.status_code == 200
+    assert "每日变化 <b>1 / 2</b>" in chart.text
+    assert 'aria-label="下一只：小盘示例"' in chart.text
+    assert "/a/stocks/000003.SZ/chart?date=2026-07-31" in chart.text
+    assert realtime.status_code == 200
+    assert "1 / 2" in realtime.text
+    assert 'aria-label="下一只：小盘示例"' in realtime.text
+    assert "/a/stocks/000003.SZ/realtime?date=2026-07-31" in realtime.text
 
 
 def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composite(

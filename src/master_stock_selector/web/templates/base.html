@@ -51,6 +51,42 @@
 
     document.querySelectorAll("table[data-sortable='true']").forEach((table) => {
       const headers = Array.from(table.querySelectorAll("thead th"));
+      const pageSize = Number(table.dataset.pageSize || 0);
+      let currentPage = 0;
+      let refreshPagination = () => {};
+
+      if (pageSize > 0) {
+        const controls = document.createElement("nav");
+        controls.className = "table-pagination";
+        controls.setAttribute("aria-label", "观察池分页");
+        const previous = document.createElement("button");
+        previous.type = "button";
+        previous.className = "button button-secondary button-compact";
+        previous.textContent = "上一页";
+        const status = document.createElement("span");
+        status.setAttribute("aria-live", "polite");
+        const next = document.createElement("button");
+        next.type = "button";
+        next.className = "button button-secondary button-compact";
+        next.textContent = "下一页";
+        controls.append(previous, status, next);
+        table.closest(".table-wrap")?.insertAdjacentElement("afterend", controls);
+
+        refreshPagination = () => {
+          const rows = Array.from(table.querySelectorAll("tbody tr"));
+          const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+          currentPage = Math.min(currentPage, pageCount - 1);
+          rows.forEach((row, index) => {
+            row.hidden = index < currentPage * pageSize || index >= (currentPage + 1) * pageSize;
+          });
+          status.textContent = `第 ${currentPage + 1} / ${pageCount} 页 · 共 ${rows.length} 只`;
+          previous.disabled = currentPage === 0;
+          next.disabled = currentPage >= pageCount - 1;
+        };
+        previous.addEventListener("click", () => { currentPage -= 1; refreshPagination(); table.scrollIntoView({ block: "start" }); });
+        next.addEventListener("click", () => { currentPage += 1; refreshPagination(); table.scrollIntoView({ block: "start" }); });
+      }
+
       const sortRows = (th, index, direction) => {
         const tbody = table.querySelector("tbody");
         if (!tbody) return;
@@ -69,6 +105,8 @@
           return direction === "asc" ? result : -result;
         });
         rows.forEach(row => tbody.appendChild(row));
+        currentPage = 0;
+        refreshPagination();
       };
 
       headers.forEach((th, index) => {
@@ -91,6 +129,7 @@
         const defaultDirection = table.dataset.defaultDirection === "asc" ? "asc" : "desc";
         sortRows(headers[defaultIndex], defaultIndex, defaultDirection);
       }
+      refreshPagination();
     });
 
     document.querySelectorAll("[data-daily-tabs]").forEach((tabs) => {
