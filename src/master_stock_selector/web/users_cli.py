@@ -204,6 +204,7 @@ def _backup_database(source: Path, backup: Path) -> dict[str, Any]:
     if backup.exists():
         raise ValueError(f"备份目标已存在，拒绝覆盖：{backup}")
     backup.parent.mkdir(parents=True, exist_ok=True)
+    backup.touch(mode=0o600, exist_ok=False)
     source_connection = sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True)
     target_connection = sqlite3.connect(backup)
     try:

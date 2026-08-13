@@ -119,6 +119,7 @@ def test_explicit_user_schema_migration_backs_up_and_preserves_rows(tmp_path):
 
     assert migrated["status"] == "migrated"
     assert migrated["backup"] == {"path": str(backup.resolve()), "quick_check": "ok"}
+    assert backup.stat().st_mode & 0o777 == 0o600
     assert migrated["existing_row_counts_preserved"] is True
     assert repository.schema_status()["compatible"] is True
     with repository.connect(read_only=True) as connection:
