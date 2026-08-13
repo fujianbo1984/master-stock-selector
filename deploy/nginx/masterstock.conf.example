@@ -1,4 +1,6 @@
 limit_req_zone $binary_remote_addr zone=masterstock_login:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=masterstock_https_dynamic:10m rate=1r/s;
+limit_conn_zone $binary_remote_addr zone=masterstock_https_conn:10m;
 
 server {
     listen 80;
@@ -36,6 +38,27 @@ server {
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy same-origin always;
     add_header Strict-Transport-Security "max-age=31536000" always;
+    limit_req_status 429;
+    limit_conn_status 429;
+    limit_conn masterstock_https_conn 4;
+
+    location = /robots.txt {
+        default_type text/plain;
+        return 200 "User-agent: *\nDisallow: /\n";
+    }
+
+    location = /healthz {
+        proxy_pass http://127.0.0.1:8000;
+        include proxy_params;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location ^~ /static/ {
+        proxy_pass http://127.0.0.1:8000;
+        include proxy_params;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+    }
 
     location = /login {
         limit_req zone=masterstock_login burst=5 nodelay;
@@ -45,6 +68,7 @@ server {
     }
 
     location / {
+        limit_req zone=masterstock_https_dynamic burst=8 nodelay;
         proxy_pass http://127.0.0.1:8000;
         include proxy_params;
         proxy_set_header X-Forwarded-Proto https;

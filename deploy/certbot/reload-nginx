@@ -1,5 +1,8 @@
 #!/bin/sh
 set -eu
 
-/usr/sbin/nginx -t
+if ! nginx_output=$(/usr/sbin/nginx -t 2>&1); then
+    printf '%s\n' "$nginx_output" >&2
+    exit 1
+fi
 /usr/bin/systemctl reload nginx.service
