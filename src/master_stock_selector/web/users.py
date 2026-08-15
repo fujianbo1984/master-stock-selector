@@ -32,7 +32,7 @@ SESSION_COOKIE = "masterstock_session"
 SESSION_IDLE_SECONDS = 7 * 24 * 60 * 60
 API_TOKEN_PREFIX = "mst_"
 API_TOKEN_SCOPES = frozenset({"trades:read", "trades:write"})
-USER_SCHEMA_VERSION = 3
+USER_SCHEMA_VERSION = 4
 USER_REQUIRED_TABLES = frozenset(
     {
         "user_account",
@@ -43,6 +43,15 @@ USER_REQUIRED_TABLES = frozenset(
         "user_stock_review",
         "user_trade_execution",
         "user_chart_drawing",
+        "user_access_log",
+    }
+)
+USER_REQUIRED_INDEXES = frozenset(
+    {
+        "idx_user_trade_source_ref",
+        "idx_user_access_occurred",
+        "idx_user_access_user_occurred",
+        "idx_user_access_path_occurred",
     }
 )
 
@@ -165,6 +174,27 @@ CREATE TABLE IF NOT EXISTS user_chart_drawing (
 );
 CREATE INDEX IF NOT EXISTS idx_user_chart_symbol
 ON user_chart_drawing(user_id, symbol, price_scale_id, created_at);
+CREATE TABLE IF NOT EXISTS user_access_log (
+    access_id TEXT PRIMARY KEY,
+    occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    user_id TEXT,
+    client_ip TEXT NOT NULL,
+    country_code TEXT NOT NULL DEFAULT '',
+    country_name TEXT NOT NULL DEFAULT '',
+    region_name TEXT NOT NULL DEFAULT '',
+    city_name TEXT NOT NULL DEFAULT '',
+    location_source TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_access_occurred
+ON user_access_log(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_access_user_occurred
+ON user_access_log(user_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_access_path_occurred
+ON user_access_log(path, occurred_at DESC);
 """
 
 
@@ -233,7 +263,7 @@ class UserRepository:
                     "user_trade_execution.source_ref",
                     "user_trade_execution.revision",
                 ],
-                "missing_indexes": ["idx_user_trade_source_ref"],
+                "missing_indexes": sorted(USER_REQUIRED_INDEXES),
             }
         try:
             with self.connect(read_only=True) as connection:
@@ -278,7 +308,7 @@ class UserRepository:
             f"user_trade_execution.{column}"
             for column in {"source_ref", "revision"} - trade_columns
         )
-        missing_indexes = sorted({"idx_user_trade_source_ref"} - indexes)
+        missing_indexes = sorted(USER_REQUIRED_INDEXES - indexes)
         legacy_observation_states = (
             "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql
         )
@@ -523,6 +553,19 @@ class UserRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def active_user_by_username(self, username: str) -> dict[str, Any] | None:
+        """Resolve one active account without exposing password or session data."""
+        with self.connect(read_only=True) as connection:
+            row = connection.execute(
+                """
+                SELECT user_id, username, display_name
+                FROM user_account
+                WHERE username=? COLLATE NOCASE AND status='ACTIVE'
+                """,
+                (_normalize_username(username),),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def readiness(self) -> dict[str, Any]:
         try:
             with self.connect(read_only=True) as connection:
@@ -533,6 +576,46 @@ class UserRepository:
             }
         except sqlite3.Error as exc:
             return {"connected": False, "quick_check": "error", "error": type(exc).__name__}
+
+    def record_access(
+        self,
+        *,
+        user_id: str | None,
+        client_ip: str,
+        country_code: str,
+        country_name: str,
+        region_name: str,
+        city_name: str,
+        location_source: str,
+        method: str,
+        path: str,
+        status_code: int,
+    ) -> str:
+        """Append a minimal page/API access event without query or browser metadata."""
+        access_id = uuid4().hex
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO user_access_log(
+                    access_id, user_id, client_ip, country_code, country_name,
+                    region_name, city_name, location_source, method, path, status_code
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    access_id,
+                    user_id,
+                    client_ip[:45],
+                    country_code[:8],
+                    country_name[:80],
+                    region_name[:80],
+                    city_name[:80],
+                    location_source[:32],
+                    method[:12].upper(),
+                    path[:500],
+                    int(status_code),
+                ),
+            )
+        return access_id
 
     def set_user_status(self, username: str, status: str) -> None:
         normalized_status = status.upper()

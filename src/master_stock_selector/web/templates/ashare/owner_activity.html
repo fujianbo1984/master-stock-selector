@@ -1,0 +1,140 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block title %}站长动态 · 龙场悟道{% endblock %}
+{% block heading %}站长动态{% endblock %}
+{% block subtitle %}重点观察、持仓变化、买卖记录与阅读心得{% endblock %}
+{% block content %}
+<section class="section owner-hero">
+  <div>
+    <p class="eyebrow">站内共享 · 仅注册用户可见</p>
+    <h1>站长动态</h1>
+    <p>重点观察、持仓状态、实际买卖记录与阅读心得。仓位已标准化，不公布真实数量和资金规模。</p>
+  </div>
+  <div class="owner-hero-meta">
+    {% if owner_available %}
+    <strong>{{ owner.display_name or owner.username }}</strong>
+    <span>@{{ owner.username }}</span>
+    <small>最后更新 {{ latest_updated_at or '尚无动态' }}</small>
+    {% else %}
+    <strong>站长账号暂不可用</strong>
+    <small>请联系网站管理员检查站长配置。</small>
+    {% endif %}
+  </div>
+</section>
+
+<aside class="section owner-boundary" role="note">
+  <strong>研究记录，不是跟单信号</strong>
+  <span>站长动态仅用于展示研究过程和实际记录，不构成买入、卖出或收益承诺。</span>
+</aside>
+
+{% if owner_available %}
+<section class="section owner-summary" aria-label="站长动态概览">
+  <article><span>当前持仓</span><strong>{{ positions|length }}</strong><small>按股票计算</small></article>
+  <article><span>重点观察</span><strong>{{ focus_items|length }}</strong><small>自动同步站长重点</small></article>
+  <article><span>买卖记录</span><strong>{{ executions|length }}</strong><small>仓位以比例展示</small></article>
+  <article><span>阅读心得</span><strong>{{ reading_notes|length }}</strong><small>站长原创文章</small></article>
+</section>
+
+<section class="section panel owner-panel" id="positions">
+  <div class="section-heading">
+    <div><p class="eyebrow">实际成交推导</p><h2>当前持仓</h2></div>
+    <span class="muted">不公布真实数量</span>
+  </div>
+  {% if positions %}
+  <div class="owner-position-grid">
+    {% for item in positions %}
+    <article class="owner-position-card">
+      <div class="owner-position-head">
+        <a href="/a/stocks/{{ item.symbol }}"><strong>{{ item.stock_name }}</strong><small>{{ item.symbol }}</small></a>
+        {% if item.is_focus %}<span class="manual-state manual-focus">重点</span>{% endif %}
+      </div>
+      <div class="owner-position-facts">
+        <span><small>交易方案</small><strong>{{ item.setup_label }}</strong></span>
+        <span><small>首次建仓</small><strong>{{ item.first_buy_on }}</strong></span>
+        <span><small>持仓均价</small><strong>{{ item.average_price if item.average_price is not none else '—' }}</strong></span>
+        <span><small>最近操作</small><strong>{{ item.latest_trade_on }} {{ item.latest_action }}</strong></span>
+      </div>
+      <div class="owner-position-track" aria-label="{{ item.remaining_label }}">
+        <span style="width: {{ item.bar_percent }}%"></span>
+      </div>
+      <div class="owner-position-state"><strong>{{ item.remaining_label }}</strong><small>相对本轮基准仓位</small></div>
+      {% if item.rationale %}<p>{{ item.rationale }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">站长当前没有可复盘持仓。</div>{% endif %}
+</section>
+
+<section class="section panel owner-panel" id="focus">
+  <div class="section-heading">
+    <div><p class="eyebrow">站长手动收敛</p><h2>重点观察</h2></div>
+    <span class="muted">重点不等于建议买入</span>
+  </div>
+  {% if focus_items %}
+  <div class="owner-focus-list">
+    {% for item in focus_items %}
+    <article>
+      <div class="owner-focus-stock">
+        <a href="/a/stocks/{{ item.symbol }}"><strong>{{ item.name }}</strong><small>{{ item.symbol }}</small></a>
+        <span class="tag {{ 'tag-positive' if item.is_held else '' }}">{{ '已持仓' if item.is_held else '未持仓' }}</span>
+      </div>
+      <div class="owner-focus-methods">
+        {% if item.public %}
+          {% for method in item.public.methods.values() %}<span><b>{{ method.method_label }}</b> {{ method.result_label }}{% if method.state_label %}<small>{{ method.state_label }}</small>{% endif %}</span>{% endfor %}
+        {% else %}<span class="muted">当前不在最新公开观察池</span>{% endif %}
+      </div>
+      <p>{{ item.note or '站长尚未填写观察备注。' }}</p>
+      <small class="owner-focus-updated">更新于 {{ item.reviewed_at }}</small>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">站长当前没有重点观察。</div>{% endif %}
+</section>
+
+<section class="section panel owner-panel" id="trades">
+  <div class="section-heading">
+    <div><p class="eyebrow">真实买卖记录</p><h2>仓位变化</h2></div>
+    <span class="muted">本轮首次减仓前的持仓 = 100%</span>
+  </div>
+  {% if executions %}
+  <div class="table-wrap owner-trade-table">
+    <table>
+      <thead><tr><th>日期</th><th>股票</th><th>操作</th><th>成交价</th><th>方案</th><th>仓位变化</th><th>操作后</th><th>记录</th></tr></thead>
+      <tbody>
+      {% for item in executions %}
+      <tr>
+        <td>{{ item.traded_on }}{% if item.traded_at %}<small>{{ item.traded_at }}</small>{% endif %}</td>
+        <td><a class="stock-link" href="/a/stocks/{{ item.symbol }}">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td>
+        <td><span class="owner-trade-side owner-trade-{{ item.side|lower }}">{{ item.side_label }}</span>{% if item.revised %}<small class="owner-revised">已修订</small>{% endif %}</td>
+        <td>{{ item.price }}</td>
+        <td>{{ item.setup_label if item.side == 'BUY' else '—' }}</td>
+        <td class="owner-change">{{ item.change_label }}</td>
+        <td>{{ item.remaining_label }}</td>
+        <td class="owner-trade-reason">{{ item.reason or '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<div class="empty">站长尚未录入买卖记录。</div>{% endif %}
+</section>
+{% endif %}
+
+<section class="section panel owner-panel" id="reading">
+  <div class="section-heading">
+    <div><p class="eyebrow">原创研读随笔</p><h2>阅读心得</h2></div>
+    <span class="muted">方法、结构与风险边界</span>
+  </div>
+  <div class="owner-reading-grid">
+    {% for article in reading_notes %}
+    <article>
+      <div class="owner-reading-meta"><span>站长原创</span><time datetime="{{ article.updated_on }}">{{ article.updated_on }}</time></div>
+      <h3><a href="{{ article.href }}">{{ article.title }}</a></h3>
+      <p>{{ article.summary }}</p>
+      <ul>{% for tag in article.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
+      <a class="text-link" href="{{ article.href }}">阅读全文 →</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

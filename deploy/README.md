@@ -23,6 +23,15 @@ HTTPS 模板对动态请求设置了按来源 IP 的限速和并发上限，静�
   HTTPS 登录后改为 `1`。Agent CLI 使用 Bearer Token，通过 SSH 隧道访问回环 HTTP
   不依赖会话 Cookie，仍可继续使用。
 
+访问日志使用用户库 schema v4。上线前先停止 Web，用
+`scripts/manage_users.sh schema-migrate --apply --backup <未存在的备份路径>` 在 ECS
+权威用户库上显式迁移，不得上传本地数据库覆盖。需要归属地时，将合法获取并
+定期更新的 `GeoLite2-City.mmdb` 放在 `/var/lib/masterstock/`，并设置
+`MASTERSTOCK_GEOIP_DATABASE=/var/lib/masterstock/GeoLite2-City.mmdb`。Nginx 必须覆写
+`X-Real-IP` 与 `X-Forwarded-For`，`MASTERSTOCK_TRUSTED_PROXIES` 只列出 Nginx 到应用的
+实际来源网段。该表包含个人信息，运维时应限制数据库访问权限并按实际合规
+与分析需求设定保留期。
+
 安装 Nginx 后，把公网只读模板复制到 `/etc/nginx/sites-available/masterstock-public-readonly`
 并启用；需要 HTTPS 时，再把 HTTPS 模板复制到 `/etc/nginx/sites-available/masterstock-https`
 并与 8888 模板同时启用。把 systemd Web 模板安装到

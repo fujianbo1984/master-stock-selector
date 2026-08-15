@@ -30,7 +30,7 @@ def test_article_requires_login(tmp_path):
     assert response.headers["cache-control"] == "private, no-store"
 
 
-def test_logged_in_user_can_read_article_from_secondary_account_nav(tmp_path):
+def test_logged_in_user_can_read_article_without_account_nav_entry(tmp_path):
     client = TestClient(_app(tmp_path))
     login = client.post(
         "/login",
@@ -40,15 +40,16 @@ def test_logged_in_user_can_read_article_from_secondary_account_nav(tmp_path):
     assert login.status_code == 303
 
     account = client.get("/account/password")
-    assert f'href="{ARTICLE_PATH}"' in account.text
-    assert "交易体系随笔" in account.text
+    assert f'href="{ARTICLE_PATH}"' not in account.text
+    assert "交易体系随笔" not in account.text
 
     article = client.get(ARTICLE_PATH)
     assert article.status_code == 200
+    assert 'class="account-settings-sidebar"' not in article.text
     assert "少学一种形态，多建立一道边界" in article.text
     assert "这不是我的交易" in article.text
     assert "本文记录个人交易研究方向的整理过程" in article.text
-    assert 'aria-current="page"' in article.text
+    assert 'aria-current="page"' not in article.text
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"
 
@@ -70,17 +71,18 @@ def test_logged_in_user_can_read_adam_grimes_article_with_images(tmp_path):
     ).status_code == 303
 
     account = client.get("/account/password")
-    assert f'href="{ADAM_ARTICLE_PATH}"' in account.text
-    assert "交易模板图解" in account.text
+    assert f'href="{ADAM_ARTICLE_PATH}"' not in account.text
+    assert "交易模板图解" not in account.text
 
     article = client.get(ADAM_ARTICLE_PATH)
     assert article.status_code == 200
+    assert 'class="account-settings-sidebar"' not in article.text
     assert "八张示意图读懂Adam Grimes的交易模板" in article.text
     assert "失败测试" in article.text
     assert "Anti" in article.text
     assert "/static/reading/adam-trading-templates/00103.jpg" in article.text
     assert article.text.count('<figure class="reading-figure">') == 8
-    assert 'aria-current="page"' in article.text
+    assert 'aria-current="page"' not in article.text
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"
 

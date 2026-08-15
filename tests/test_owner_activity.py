@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+from typing import Any
+
+from master_stock_selector.web.owner import build_owner_trade_feed
+
+
+def _execution(
+    execution_id: str,
+    *,
+    traded_on: str,
+    side: str,
+    quantity: int,
+    price: float,
+    rationale: str = "",
+    exit_reason: str = "",
+    revision: int = 1,
+) -> dict[str, Any]:
+    return {
+        "execution_id": execution_id,
+        "symbol": "000001.SZ",
+        "traded_on": traded_on,
+        "traded_at": "10:00:00",
+        "side": side,
+        "quantity": quantity,
+        "price": price,
+        "fee": 3.0,
+        "setup_label": "简单回调",
+        "rationale": rationale,
+        "exit_reason": exit_reason,
+        "revision": revision,
+        "created_at": f"{traded_on} 10:00:00",
+        "updated_at": f"{traded_on} 10:05:00",
+    }
+
+
+def test_owner_feed_normalizes_positions_without_returning_private_quantities() -> None:
+    feed = build_owner_trade_feed(
+        [
+            _execution(
+                "buy-1",
+                traded_on="2026-08-01",
+                side="BUY",
+                quantity=613,
+                price=10.0,
+                rationale="首次建仓",
+            ),
+            _execution(
+                "buy-2",
+                traded_on="2026-08-02",
+                side="BUY",
+                quantity=387,
+                price=12.0,
+                rationale="确认后加仓",
+            ),
+            _execution(
+                "sell-1",
+                traded_on="2026-08-03",
+                side="SELL",
+                quantity=250,
+                price=15.0,
+                exit_reason="部分止盈",
+                revision=2,
+            ),
+        ],
+        {"000001.SZ": "平安银行"},
+    )
+
+    assert feed["positions"] == [
+        {
+            "symbol": "000001.SZ",
+            "stock_name": "平安银行",
+            "setup_label": "简单回调",
+            "first_buy_on": "2026-08-01",
+            "latest_trade_on": "2026-08-03",
+            "latest_action": "卖出",
+            "average_price": 11.032,
+            "remaining_percent": 75,
+            "remaining_label": "剩余 75%",
+            "bar_percent": 75,
+            "rationale": "确认后加仓",
+        }
+    ]
+    assert [row["change_label"] for row in reversed(feed["executions"])] == [
+        "建仓 61%",
+        "加仓 39%",
+        "减仓 25%",
+    ]
+    assert feed["executions"][0]["remaining_label"] == "剩余 75%"
+    assert feed["executions"][0]["revised"] is True
+    assert "quantity" not in repr(feed)
+    assert "fee" not in repr(feed)
+
+
+def test_owner_feed_resets_after_clear_and_keeps_addback_against_frozen_baseline() -> None:
+    cleared = build_owner_trade_feed(
+        [
+            _execution(
+                "buy-1", traded_on="2026-08-01", side="BUY", quantity=100, price=10
+            ),
+            _execution(
+                "sell-1", traded_on="2026-08-02", side="SELL", quantity=100, price=11
+            ),
+            _execution(
+                "buy-2", traded_on="2026-08-03", side="BUY", quantity=200, price=12
+            ),
+        ],
+        {},
+    )
+    assert cleared["positions"][0]["remaining_percent"] == 100
+    assert cleared["executions"][0]["change_label"] == "建仓 100%"
+    assert any(row["change_label"] == "清仓" for row in cleared["executions"])
+
+    addback = build_owner_trade_feed(
+        [
+            _execution(
+                "buy-1", traded_on="2026-08-01", side="BUY", quantity=100, price=10
+            ),
+            _execution(
+                "sell-1", traded_on="2026-08-02", side="SELL", quantity=50, price=11
+            ),
+            _execution(
+                "buy-2", traded_on="2026-08-03", side="BUY", quantity=70, price=12
+            ),
+        ],
+        {},
+    )
+    assert addback["executions"][0]["change_label"] == "回补 70%"
+    assert addback["positions"][0]["remaining_label"] == "剩余 120%"
+
+
+def test_owner_feed_marks_unmatched_sell_without_inventing_a_ratio() -> None:
+    feed = build_owner_trade_feed(
+        [
+            _execution(
+                "sell-only", traded_on="2026-08-01", side="SELL", quantity=10, price=10
+            )
+        ],
+        {},
+    )
+    assert feed["positions"] == []
+    assert feed["executions"][0]["change_label"] == "历史记录不完整"
+    assert feed["executions"][0]["remaining_label"] == "无法计算"

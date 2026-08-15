@@ -4,6 +4,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -84,6 +85,31 @@ def test_admin_password_reset_revokes_sessions_and_api_tokens(tmp_path):
     assert repository.session_user(session) is None
     assert repository.api_token_user(api_token) is None
     assert repository.authenticate("alice", "Reset-password-456") is not None
+
+
+def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path: Path) -> None:
+    path = tmp_path / "users.sqlite3"
+    repository = UserRepository(path)
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    with repository.connect() as connection:
+        connection.execute("DROP TABLE user_access_log")
+        connection.execute("PRAGMA user_version=3")
+
+    status = repository.schema_status()
+    assert status["status"] == "MIGRATION_REQUIRED"
+    assert status["missing_tables"] == ["user_access_log"]
+
+    backup = tmp_path / "users.before-schema-v4.sqlite3"
+    migrated = migrate_user_schema(repository, apply=True, backup=backup)
+
+    assert migrated["existing_row_counts_preserved"] is True
+    assert repository.schema_status()["compatible"] is True
+    with repository.connect(read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert user_id
 
 
 def test_explicit_user_schema_migration_backs_up_and_preserves_rows(tmp_path):

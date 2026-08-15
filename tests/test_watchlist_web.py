@@ -271,6 +271,87 @@ def _csrf(client: TestClient) -> str:
     return user.csrf_token
 
 
+def test_owner_activity_is_login_only_and_shows_only_sanitized_owner_data(tmp_path) -> None:
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    app = create_app(
+        market_database=tmp_path / "market.sqlite3",
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+        site_owner_username="我不是来玩的",
+    )
+    users = app.state.user_repository
+    owner_id = users.create_user("我不是来玩的", "Test-password-123", "站长")
+    users.save_review(owner_id, "000001.SZ", "FOCUS", "关注缩量回调后的承接")
+    users.record_trade(
+        owner_id,
+        traded_on="2026-08-01",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=613,
+        price=10.0,
+        fee=1.0,
+        method="MANUAL",
+        rationale="首次建仓",
+    )
+    users.record_trade(
+        owner_id,
+        traded_on="2026-08-02",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=387,
+        price=12.0,
+        fee=1.0,
+        method="MANUAL",
+        rationale="确认后加仓",
+    )
+    users.record_trade(
+        owner_id,
+        traded_on="2026-08-03",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=250,
+        price=15.0,
+        fee=1.0,
+        method="MANUAL",
+        exit_reason="部分止盈",
+    )
+    viewer_id = users.create_user("viewer", "Test-password-123", "读者")
+    users.save_review(viewer_id, "000001.SZ", "FOCUS", "读者私有备注")
+
+    anonymous = TestClient(app)
+    public_page = anonymous.get("/a/daily")
+    assert "站长动态" not in public_page.text
+    redirect = anonymous.get("/a/owner", follow_redirects=False)
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == "/login?next=/a/owner"
+    assert redirect.headers["x-robots-tag"] == "noindex, nofollow"
+
+    viewer = _authenticated_client(app, "viewer")
+    page = viewer.get("/a/owner")
+    assert page.status_code == 200
+    assert page.headers["cache-control"] == "private, no-store"
+    assert page.headers["x-robots-tag"] == "noindex, nofollow"
+    assert "站长动态" in page.text
+    assert "关注缩量回调后的承接" in page.text
+    assert "读者私有备注" not in page.text
+    assert "减仓 25%" in page.text
+    assert "剩余 75%" in page.text
+    assert "少学一种形态，多建立一道边界" in page.text
+    assert "八张示意图读懂 Adam Grimes 的交易模板" in page.text
+    assert ">613<" not in page.text
+    assert ">387<" not in page.text
+    assert ">250<" not in page.text
+    assert "name=\"quantity\"" not in page.text
+    assert "name=\"fee\"" not in page.text
+
+    owner = _authenticated_client(app, "我不是来玩的")
+    owner_page = owner.get("/a/owner")
+    assert owner_page.status_code == 200
+    assert "关注缩量回调后的承接" in owner_page.text
+    assert "设为重点" not in owner_page.text
+
+
 def test_relative_database_paths_are_rooted_at_project_directory() -> None:
     assert _resolve_database_path("data/example.sqlite3") == (
         PROJECT_ROOT / "data" / "example.sqlite3"

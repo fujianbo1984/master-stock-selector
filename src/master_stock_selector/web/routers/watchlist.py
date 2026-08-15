@@ -19,6 +19,7 @@ from ...watchlist.repository import (
     MarketDataReader,
     WatchlistRepository,
 )
+from ..owner import OWNER_READING_NOTES, build_owner_trade_feed
 from ..users import AuthenticatedUser, UserRepository
 from .auth import current_user, require_user
 
@@ -128,6 +129,7 @@ def build_watchlist_router(
     repository: WatchlistRepository,
     market_reader: MarketDataReader,
     users: UserRepository,
+    site_owner_username: str,
 ) -> APIRouter:
     router = APIRouter()
     row_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
@@ -368,6 +370,82 @@ def build_watchlist_router(
         query = dict(request.query_params)
         query["state"] = "FOCUS"
         return RedirectResponse(f"/a/observations?{urlencode(query)}", status_code=307)
+
+    @router.get("/a/owner", response_class=HTMLResponse, include_in_schema=False)
+    def owner_activity(request: Request) -> Response:
+        if current_user(request) is None:
+            redirect = RedirectResponse("/login?next=/a/owner", status_code=303)
+            redirect.headers["X-Robots-Tag"] = "noindex, nofollow"
+            return redirect
+
+        query_date = repository.latest_fact_date()
+        owner = users.active_user_by_username(site_owner_username)
+        positions: list[dict[str, Any]] = []
+        executions: list[dict[str, Any]] = []
+        focus_items: list[dict[str, Any]] = []
+        latest_updated_at = ""
+        if owner is not None:
+            owner_id = str(owner["user_id"])
+            symbols = users.trade_symbols(owner_id)
+            names = repository.stock_names(symbols)
+            review = users.trade_review(owner_id, names)
+            feed = build_owner_trade_feed(review["executions"], names)
+            positions = list(feed["positions"])
+            executions = list(feed["executions"])
+            latest_updated_at = str(feed["latest_updated_at"] or "")
+
+            reviews = [
+                row
+                for row in users.reviews_for_user(owner_id)
+                if str(row.get("manual_state") or "") == "FOCUS"
+            ]
+            focus_symbols = {str(row.get("symbol") or "") for row in reviews}
+            focus_names = repository.stock_names(focus_symbols)
+            public_by_symbol = {
+                str(row.get("symbol") or ""): row
+                for row in cached_rows(query_date, include_liquidity=False)
+            } if query_date else {}
+            held_symbols = {str(item["symbol"]) for item in positions}
+            for row in reviews:
+                symbol = str(row.get("symbol") or "")
+                focus_items.append(
+                    {
+                        "symbol": symbol,
+                        "name": focus_names.get(symbol)
+                        or (public_by_symbol.get(symbol) or {}).get("name")
+                        or "名称待补",
+                        "note": str(row.get("note") or ""),
+                        "reviewed_at": str(row.get("reviewed_at") or ""),
+                        "public": public_by_symbol.get(symbol),
+                        "is_held": symbol in held_symbols,
+                    }
+                )
+                latest_updated_at = max(
+                    latest_updated_at, str(row.get("reviewed_at") or "")
+                )
+            focus_items.sort(key=lambda item: (item["reviewed_at"], item["symbol"]), reverse=True)
+            for item in positions:
+                item["is_focus"] = str(item["symbol"]) in focus_symbols
+
+        page = render(
+            request,
+            "ashare/owner_activity.html",
+            {
+                "active": "站长动态",
+                "query_date": query_date,
+                "latest_date": query_date,
+                "owner": owner,
+                "owner_available": owner is not None,
+                "positions": positions,
+                "focus_items": focus_items,
+                "executions": executions,
+                "reading_notes": OWNER_READING_NOTES,
+                "latest_updated_at": latest_updated_at,
+                "suppress_research_date_note": True,
+            },
+        )
+        page.headers["X-Robots-Tag"] = "noindex, nofollow"
+        return page
 
     @router.get("/a/observations", response_class=HTMLResponse)
     def personal_observations(

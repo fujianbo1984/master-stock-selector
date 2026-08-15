@@ -100,6 +100,18 @@ scripts/run_master_watchlist.sh
 
 公开行情、指数、行业及方法事实无需登录。观察、备注、图表标注、成交与止损只属于登录用户，并按 `user_id` 隔离。
 
+登录后的“站长动态”默认读取用户 `我不是来玩的` 的重点观察和成交记录，
+以及站内现有两篇阅读心得。共享页对所有登录用户只读，不公布真实交易数量、费用、持仓总额或
+账户资产；部分卖出使用本轮基准仓位比例展示。可通过 `MASTERSTOCK_SITE_OWNER_USERNAME`
+显式更改唯一站长账号。未登录用户不会看到该菜单，直接访问会跳转登录。
+
+网站后台会把动态页面与 API 访问写入用户数据库的 `user_access_log`，仅保留
+时间、已登录用户关联、IP、国家/地区/城市、请求方法、不含查询参数的路径和状态码；
+不记录 User-Agent、Referer 和查询参数，也不记录静态资源、健康检查、favicon 或
+robots.txt。`MASTERSTOCK_TRUSTED_PROXIES` 只配置受信任的反向代理 CIDR；归属地使用
+`MASTERSTOCK_GEOIP_DATABASE` 指向的本地 GeoLite2 City `.mmdb` 离线解析，未配置时仍记录
+IP 并将归属地标为不可用。可用 `MASTERSTOCK_ACCESS_LOGGING=0` 整体关闭。
+
 Agent Token 由用户在“账户设置”中创建，建议一台设备或一个 Agent 一枚。Token 只显示一次，服务端仅保存摘要；`trades:read` 用于查询，`trades:write` 用于预检、批量录入成交和更新既有 BUY 止损。
 
 ```bash

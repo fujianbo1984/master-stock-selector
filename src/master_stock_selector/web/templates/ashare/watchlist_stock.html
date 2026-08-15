@@ -111,6 +111,7 @@
     <span class="review-timestamp">最后更新<br><strong>{{ stock.manual.reviewed_at or '尚未记录' }}</strong></span>
     <button class="button" type="submit">保存备注</button>
   </form>
+  {% if is_site_owner and stock.manual.manual_state == 'FOCUS' %}<p class="reading-note observation-share-note">当前为重点观察，此备注将在“站长动态”中向已登录用户展示。</p>{% endif %}
 </section>
 {% else %}<section class="section panel private-login-panel"><p class="eyebrow">个人工作区</p><h2>登录后记录个人观察</h2><p class="muted">观察状态、备注、价格图绘制、买卖点、成交和复盘仅你本人可见。</p><a class="button" href="/login?next=/a/stocks/{{ stock.symbol }}">登录</a></section>{% endif %}
 

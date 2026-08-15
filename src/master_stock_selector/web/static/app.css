@@ -917,6 +917,59 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .observation-updated { position: absolute; right: 16px; bottom: 4px; }
 .observation-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 0 9px; }
 .observation-note-form { grid-template-columns: minmax(0, 1fr) auto auto; }
+.observation-share-note { margin: 8px 0 0; }
+.owner-hero { display: flex; justify-content: space-between; align-items: end; gap: 28px; padding: 24px; border-top: 3px solid var(--accent); background: var(--panel); }
+.owner-hero h1 { margin: 4px 0 7px; font-family: "Songti SC", "STSong", serif; font-size: clamp(28px, 3vw, 38px); }
+.owner-hero p { max-width: 760px; margin-bottom: 0; color: var(--muted); }
+.owner-hero-meta { display: grid; justify-items: end; gap: 3px; min-width: 210px; }
+.owner-hero-meta strong { font-size: 16px; }
+.owner-hero-meta span, .owner-hero-meta small { color: var(--muted); font-size: 11px; }
+.owner-boundary { display: flex; gap: 16px; align-items: center; padding: 10px 14px; border: 1px solid #e4d3ad; background: #fff9ec; color: #735d31; font-size: 11px; }
+.owner-boundary strong { white-space: nowrap; }
+.owner-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); background: var(--panel); }
+.owner-summary article { display: grid; gap: 2px; padding: 14px 18px; border-right: 1px solid var(--line); }
+.owner-summary article:last-child { border-right: 0; }
+.owner-summary span, .owner-summary small { color: var(--muted); font-size: 10px; }
+.owner-summary strong { font-family: Georgia, "Times New Roman", serif; font-size: 24px; }
+.owner-panel { padding: 18px; scroll-margin-top: 80px; }
+.owner-position-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.owner-position-card { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); background: var(--panel-soft); }
+.owner-position-head, .owner-position-state, .owner-reading-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.owner-position-head > a, .owner-focus-stock > a { display: grid; gap: 2px; color: var(--text); text-decoration: none; }
+.owner-position-head small, .owner-focus-stock small { color: var(--muted); font-size: 10px; }
+.owner-position-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.owner-position-facts span { display: grid; gap: 2px; }
+.owner-position-facts small, .owner-position-state small { color: var(--muted); font-size: 9px; }
+.owner-position-facts strong { font-size: 11px; font-weight: 650; }
+.owner-position-track { height: 8px; overflow: hidden; border-radius: 999px; background: #e8e2d7; }
+.owner-position-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #4d7ff5); }
+.owner-position-state strong { font-size: 12px; }
+.owner-position-card > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.owner-focus-list { display: grid; gap: 8px; }
+.owner-focus-list > article { position: relative; display: grid; grid-template-columns: minmax(170px, .7fr) minmax(220px, 1fr) minmax(300px, 1.4fr); gap: 16px; align-items: center; padding: 13px 15px 19px; border: 1px solid var(--line); }
+.owner-focus-stock { display: flex; align-items: center; gap: 9px; }
+.owner-focus-methods { display: flex; flex-wrap: wrap; gap: 5px 12px; font-size: 11px; }
+.owner-focus-methods span { display: grid; gap: 2px; }
+.owner-focus-methods small { color: var(--muted); }
+.owner-focus-list p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.owner-focus-updated { position: absolute; right: 15px; bottom: 4px; color: var(--muted); font-size: 9px; }
+.owner-trade-table table { min-width: 1040px; font-size: 11px; }
+.owner-trade-table th, .owner-trade-table td { padding: 9px 10px; vertical-align: top; }
+.owner-trade-table td > small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+.owner-trade-side { font-weight: 750; }
+.owner-trade-buy { color: #a54036; }
+.owner-trade-sell { color: #16724a; }
+.owner-revised { color: #8b6b28 !important; }
+.owner-change { font-weight: 700; }
+.owner-trade-reason { max-width: 280px; color: var(--muted); white-space: normal; line-height: 1.5; }
+.owner-reading-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.owner-reading-grid > article { display: grid; gap: 10px; padding: 18px; border: 1px solid var(--line); background: var(--panel-soft); }
+.owner-reading-meta { color: var(--muted); font-size: 9px; letter-spacing: .4px; }
+.owner-reading-grid h3 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: 20px; line-height: 1.35; }
+.owner-reading-grid h3 a { color: var(--text); text-decoration: none; }
+.owner-reading-grid p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.owner-reading-grid ul { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.owner-reading-grid li { padding: 3px 7px; border: 1px solid var(--line); color: var(--muted); font-size: 9px; }
 .chart-review-control { flex-wrap: wrap; }
 .chart-navigation-context { margin-right: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .chart-navigation-context b { margin-left: 5px; color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 14px; }
@@ -1373,7 +1426,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .danger-button:hover { background: #fff2f0; }
 .token-empty-state { padding: 30px 22px; border: 1px dashed var(--line-strong); text-align: center; }
 .token-empty-state p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
-.reading-shell { grid-template-columns: 220px minmax(0, 860px); justify-content: center; gap: clamp(30px, 5vw, 64px); padding-top: 36px; }
+.reading-shell { display: grid; grid-template-columns: minmax(0, 900px); justify-content: center; max-width: 1100px; margin-right: auto; margin-left: auto; padding-top: 36px; }
 .reading-article { min-width: 0; padding: clamp(26px, 5vw, 58px); border: 1px solid var(--line); background: var(--panel); box-shadow: 0 16px 44px rgba(20, 45, 76, .06); }
 .reading-article-header { padding-bottom: 30px; border-bottom: 1px solid var(--line-strong); }
 .reading-article-header h1 { margin: 10px 0 16px; font-family: "Songti SC", "STSong", serif; font-size: clamp(32px, 4.2vw, 52px); font-weight: 700; line-height: 1.28; letter-spacing: -.5px; }
