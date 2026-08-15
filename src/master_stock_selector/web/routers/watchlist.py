@@ -19,7 +19,11 @@ from ...watchlist.repository import (
     MarketDataReader,
     WatchlistRepository,
 )
-from ..owner import OWNER_READING_NOTES, build_owner_trade_feed
+from ..owner import (
+    OWNER_READING_NOTES,
+    build_owner_activity_feed,
+    build_owner_trade_feed,
+)
 from ..users import AuthenticatedUser, UserRepository
 from .auth import current_user, require_user
 
@@ -383,6 +387,11 @@ def build_watchlist_router(
         positions: list[dict[str, Any]] = []
         executions: list[dict[str, Any]] = []
         focus_items: list[dict[str, Any]] = []
+        reading_notes = sorted(
+            OWNER_READING_NOTES,
+            key=lambda article: str(article.get("updated_on") or ""),
+            reverse=True,
+        )
         latest_updated_at = ""
         if owner is not None:
             owner_id = str(owner["user_id"])
@@ -427,6 +436,16 @@ def build_watchlist_router(
             for item in positions:
                 item["is_focus"] = str(item["symbol"]) in focus_symbols
 
+        activity_items = build_owner_activity_feed(
+            executions=executions,
+            positions=positions,
+            focus_items=focus_items,
+            reading_notes=reading_notes,
+        )
+        latest_updated_at = max(
+            [latest_updated_at, *(str(article.get("updated_on") or "") for article in reading_notes)]
+        )
+
         page = render(
             request,
             "ashare/owner_activity.html",
@@ -439,9 +458,11 @@ def build_watchlist_router(
                 "positions": positions,
                 "focus_items": focus_items,
                 "executions": executions,
-                "reading_notes": OWNER_READING_NOTES,
+                "reading_notes": reading_notes,
+                "activity_items": activity_items,
                 "latest_updated_at": latest_updated_at,
                 "suppress_research_date_note": True,
+                "suppress_investment_notice": True,
             },
         )
         page.headers["X-Robots-Tag"] = "noindex, nofollow"

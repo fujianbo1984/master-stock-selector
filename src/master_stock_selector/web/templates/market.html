@@ -44,6 +44,7 @@
     {% endif %}
   </div>
 </header>
+{% if not suppress_investment_notice %}
 {% if prominent_investment_notice %}
 <aside class="investment-notice investment-notice-prominent" role="note" aria-label="投资风险提示">
   <strong>仅供研究，不构成投资建议</strong>
@@ -51,6 +52,7 @@
 </aside>
 {% else %}
 <aside class="investment-notice investment-notice-compact" role="note"><strong>研究工具</strong><span>不构成投资建议或自动买卖指令</span></aside>
+{% endif %}
 {% endif %}
 {% if not suppress_page_intro %}
 <section class="page-intro" aria-labelledby="page-title">

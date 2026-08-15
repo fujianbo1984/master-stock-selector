@@ -339,6 +339,15 @@ def test_owner_activity_is_login_only_and_shows_only_sanitized_owner_data(tmp_pa
     assert "剩余 75%" in page.text
     assert "少学一种形态，多建立一道边界" in page.text
     assert "八张示意图读懂 Adam Grimes 的交易模板" in page.text
+    assert page.text.index("八张示意图读懂 Adam Grimes 的交易模板") < page.text.index(
+        "少学一种形态，多建立一道边界"
+    )
+    assert 'data-owner-feed' in page.text
+    assert 'data-owner-view="trade"' in page.text
+    assert 'data-owner-item-kind="trade"' in page.text
+    assert "查看全部交易记录" in page.text
+    assert "加载更多" in page.text
+    assert "研究工具" not in page.text
     assert ">613<" not in page.text
     assert ">387<" not in page.text
     assert ">250<" not in page.text

@@ -2,139 +2,227 @@
 {% set suppress_page_intro = true %}
 {% block title %}站长动态 · 龙场悟道{% endblock %}
 {% block heading %}站长动态{% endblock %}
-{% block subtitle %}重点观察、持仓变化、买卖记录与阅读心得{% endblock %}
+{% block subtitle %}近期动态索引{% endblock %}
 {% block content %}
-<section class="section owner-hero">
-  <div>
-    <p class="eyebrow">站内共享 · 仅注册用户可见</p>
-    <h1>站长动态</h1>
-    <p>重点观察、持仓状态、实际买卖记录与阅读心得。仓位已标准化，不公布真实数量和资金规模。</p>
-  </div>
-  <div class="owner-hero-meta">
-    {% if owner_available %}
-    <strong>{{ owner.display_name or owner.username }}</strong>
-    <span>@{{ owner.username }}</span>
+<section class="owner-feed-hero" aria-labelledby="owner-feed-title">
+  <div class="owner-feed-title">
+    <h1 id="owner-feed-title">站长动态</h1>
+    <span>近期动态索引</span>
     <small>最后更新 {{ latest_updated_at or '尚无动态' }}</small>
-    {% else %}
-    <strong>站长账号暂不可用</strong>
-    <small>请联系网站管理员检查站长配置。</small>
-    {% endif %}
+  </div>
+  <div class="owner-feed-boundary" role="note">
+    <strong>研究记录，不是买卖信号。</strong>
+    <span>仅用于展示研究过程和实际记录，不构成买入、卖出或收益承诺。</span>
+    {% if owner_available %}<small>{{ owner.display_name or owner.username }} · @{{ owner.username }}</small>{% endif %}
   </div>
 </section>
 
-<aside class="section owner-boundary" role="note">
-  <strong>研究记录，不是跟单信号</strong>
-  <span>站长动态仅用于展示研究过程和实际记录，不构成买入、卖出或收益承诺。</span>
-</aside>
+<section class="owner-feed-panel" data-owner-feed>
+  <nav class="owner-feed-index" aria-label="站长动态内容索引">
+    <button class="active" type="button" data-owner-view="all" aria-pressed="true">
+      <span>近期动态</span><strong>{{ activity_items|length }}</strong>
+    </button>
+    <button type="button" data-owner-view="position" aria-pressed="false">
+      <span>当前持仓</span><strong>{{ positions|length }}</strong>
+    </button>
+    <button type="button" data-owner-view="focus" aria-pressed="false">
+      <span>重点观察</span><strong>{{ focus_items|length }}</strong>
+    </button>
+    <button type="button" data-owner-view="trade" aria-pressed="false">
+      <span>交易记录</span><strong>{{ executions|length }}</strong>
+    </button>
+    <button type="button" data-owner-view="article" aria-pressed="false">
+      <span>阅读心得</span><strong>{{ reading_notes|length }}</strong>
+    </button>
+  </nav>
 
-{% if owner_available %}
-<section class="section owner-summary" aria-label="站长动态概览">
-  <article><span>当前持仓</span><strong>{{ positions|length }}</strong><small>按股票计算</small></article>
-  <article><span>重点观察</span><strong>{{ focus_items|length }}</strong><small>自动同步站长重点</small></article>
-  <article><span>买卖记录</span><strong>{{ executions|length }}</strong><small>仓位以比例展示</small></article>
-  <article><span>阅读心得</span><strong>{{ reading_notes|length }}</strong><small>站长原创文章</small></article>
-</section>
-
-<section class="section panel owner-panel" id="positions">
-  <div class="section-heading">
-    <div><p class="eyebrow">实际成交推导</p><h2>当前持仓</h2></div>
-    <span class="muted">不公布真实数量</span>
+  <div class="owner-feed-tools" aria-label="动态筛选">
+    <label>
+      <span class="sr-only">事件类型</span>
+      <select data-owner-kind>
+        <option value="all">全部事件类型</option>
+        <option value="trade">交易记录</option>
+        <option value="position">当前持仓</option>
+        <option value="focus">重点观察</option>
+        <option value="article">阅读心得</option>
+      </select>
+    </label>
+    <label>
+      <span class="sr-only">交易操作</span>
+      <select data-owner-side>
+        <option value="all">全部操作</option>
+        <option value="buy">买入</option>
+        <option value="sell">卖出</option>
+      </select>
+    </label>
+    <label class="owner-feed-search">
+      <span class="sr-only">股票或文章关键词</span>
+      <input type="search" placeholder="股票／文章关键词" autocomplete="off" data-owner-query>
+    </label>
+    <div class="owner-feed-dates">
+      <label><span class="sr-only">开始日期</span><input type="date" data-owner-from></label>
+      <span>至</span>
+      <label><span class="sr-only">结束日期</span><input type="date" data-owner-to></label>
+    </div>
+    <button class="owner-feed-reset" type="button" data-owner-reset>重置</button>
+    <button class="button button-secondary owner-feed-all-trades" type="button" data-owner-filter-shortcut="trade">查看全部交易记录</button>
   </div>
-  {% if positions %}
-  <div class="owner-position-grid">
-    {% for item in positions %}
-    <article class="owner-position-card">
-      <div class="owner-position-head">
-        <a href="/a/stocks/{{ item.symbol }}"><strong>{{ item.stock_name }}</strong><small>{{ item.symbol }}</small></a>
-        {% if item.is_focus %}<span class="manual-state manual-focus">重点</span>{% endif %}
+
+  <div class="owner-feed-layout">
+    <section class="owner-activity" aria-labelledby="owner-activity-title">
+      <div class="owner-activity-heading">
+        <h2 id="owner-activity-title">最近更新</h2>
+        <span aria-live="polite" data-owner-status></span>
       </div>
-      <div class="owner-position-facts">
-        <span><small>交易方案</small><strong>{{ item.setup_label }}</strong></span>
-        <span><small>首次建仓</small><strong>{{ item.first_buy_on }}</strong></span>
-        <span><small>持仓均价</small><strong>{{ item.average_price if item.average_price is not none else '—' }}</strong></span>
-        <span><small>最近操作</small><strong>{{ item.latest_trade_on }} {{ item.latest_action }}</strong></span>
+      <div class="owner-activity-columns" aria-hidden="true">
+        <span>时间</span><span>类型</span><span>股票／文章</span><span>事件摘要</span><span>主题依据与记录</span><span>操作</span>
       </div>
-      <div class="owner-position-track" aria-label="{{ item.remaining_label }}">
-        <span style="width: {{ item.bar_percent }}%"></span>
+      <div class="owner-activity-list" data-owner-list>
+        {% set ns = namespace(day='') %}
+        {% for item in activity_items %}
+          {% if item.day != ns.day %}
+          <div class="owner-activity-day" data-owner-day-heading="{{ item.day }}">
+            <strong>{{ item.day }}</strong><span>{{ '今天' if item.day == today else '' }}</span>
+          </div>
+          {% set ns.day = item.day %}
+          {% endif %}
+          <article class="owner-activity-row"
+                   data-owner-item
+                   data-owner-item-kind="{{ item.kind }}"
+                   data-owner-item-side="{{ item.side }}"
+                   data-owner-item-day="{{ item.day }}">
+            <time datetime="{{ item.day }}{% if item.clock %}T{{ item.clock }}{% endif %}">{{ item.clock or '—' }}</time>
+            <span class="owner-event owner-event-{{ item.kind }}{% if item.side %} owner-event-{{ item.side }}{% endif %}">{{ item.kind_label }}</span>
+            <a class="owner-activity-subject" href="{{ item.href }}">
+              <strong>{{ item.subject }}</strong>{% if item.symbol %}<small>{{ item.symbol }}</small>{% endif %}
+            </a>
+            <strong class="owner-activity-summary">{{ item.summary }}</strong>
+            <p>{{ item.detail }}</p>
+            <a class="owner-activity-action" href="{{ item.href }}">{{ item.action_label }}</a>
+          </article>
+        {% endfor %}
       </div>
-      <div class="owner-position-state"><strong>{{ item.remaining_label }}</strong><small>相对本轮基准仓位</small></div>
-      {% if item.rationale %}<p>{{ item.rationale }}</p>{% endif %}
-    </article>
-    {% endfor %}
-  </div>
-  {% else %}<div class="empty">站长当前没有可复盘持仓。</div>{% endif %}
-</section>
+      <div class="owner-activity-empty" data-owner-empty hidden>没有符合当前筛选条件的动态。</div>
+      <button class="owner-load-more" type="button" data-owner-more>加载更多</button>
+    </section>
 
-<section class="section panel owner-panel" id="focus">
-  <div class="section-heading">
-    <div><p class="eyebrow">站长手动收敛</p><h2>重点观察</h2></div>
-    <span class="muted">重点不等于建议买入</span>
-  </div>
-  {% if focus_items %}
-  <div class="owner-focus-list">
-    {% for item in focus_items %}
-    <article>
-      <div class="owner-focus-stock">
-        <a href="/a/stocks/{{ item.symbol }}"><strong>{{ item.name }}</strong><small>{{ item.symbol }}</small></a>
-        <span class="tag {{ 'tag-positive' if item.is_held else '' }}">{{ '已持仓' if item.is_held else '未持仓' }}</span>
-      </div>
-      <div class="owner-focus-methods">
-        {% if item.public %}
-          {% for method in item.public.methods.values() %}<span><b>{{ method.method_label }}</b> {{ method.result_label }}{% if method.state_label %}<small>{{ method.state_label }}</small>{% endif %}</span>{% endfor %}
-        {% else %}<span class="muted">当前不在最新公开观察池</span>{% endif %}
-      </div>
-      <p>{{ item.note or '站长尚未填写观察备注。' }}</p>
-      <small class="owner-focus-updated">更新于 {{ item.reviewed_at }}</small>
-    </article>
-    {% endfor %}
-  </div>
-  {% else %}<div class="empty">站长当前没有重点观察。</div>{% endif %}
-</section>
+    <aside class="owner-feed-rail" aria-label="站长动态摘要">
+      <section class="owner-rail-section">
+        <div class="owner-rail-heading">
+          <h2>当前持仓 <span>{{ positions|length }}</span></h2>
+          <button type="button" data-owner-filter-shortcut="position">查看全部</button>
+        </div>
+        {% if positions %}
+        <div class="owner-rail-positions">
+          {% for item in positions[:4] %}
+          <a href="/a/stocks/{{ item.symbol }}">
+            <span><strong>{{ item.stock_name }}</strong><small>{{ item.symbol }}</small></span>
+            <b>{{ item.remaining_percent }}%</b>
+            <small>{{ item.first_buy_on }}</small>
+            <small>{{ item.latest_trade_on }} {{ item.latest_action }}</small>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}<div class="owner-rail-empty">当前没有可复盘持仓。</div>{% endif %}
+      </section>
 
-<section class="section panel owner-panel" id="trades">
-  <div class="section-heading">
-    <div><p class="eyebrow">真实买卖记录</p><h2>仓位变化</h2></div>
-    <span class="muted">本轮首次减仓前的持仓 = 100%</span>
+      <section class="owner-rail-section">
+        <div class="owner-rail-heading">
+          <h2>最新阅读心得 <span>{{ reading_notes|length }}</span></h2>
+          <button type="button" data-owner-filter-shortcut="article">查看全部</button>
+        </div>
+        <div class="owner-rail-reading">
+          {% for article in reading_notes[:3] %}
+          <article>
+            <div><a href="{{ article.href }}"><strong>{{ article.title }}</strong></a><time datetime="{{ article.updated_on }}">{{ article.updated_on }}</time></div>
+            <p>{{ article.summary }}</p>
+            <ul>{% for tag in article.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
+          </article>
+          {% else %}<div class="owner-rail-empty">站长尚未发布阅读心得。</div>{% endfor %}
+        </div>
+      </section>
+    </aside>
   </div>
-  {% if executions %}
-  <div class="table-wrap owner-trade-table">
-    <table>
-      <thead><tr><th>日期</th><th>股票</th><th>操作</th><th>成交价</th><th>方案</th><th>仓位变化</th><th>操作后</th><th>记录</th></tr></thead>
-      <tbody>
-      {% for item in executions %}
-      <tr>
-        <td>{{ item.traded_on }}{% if item.traded_at %}<small>{{ item.traded_at }}</small>{% endif %}</td>
-        <td><a class="stock-link" href="/a/stocks/{{ item.symbol }}">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td>
-        <td><span class="owner-trade-side owner-trade-{{ item.side|lower }}">{{ item.side_label }}</span>{% if item.revised %}<small class="owner-revised">已修订</small>{% endif %}</td>
-        <td>{{ item.price }}</td>
-        <td>{{ item.setup_label if item.side == 'BUY' else '—' }}</td>
-        <td class="owner-change">{{ item.change_label }}</td>
-        <td>{{ item.remaining_label }}</td>
-        <td class="owner-trade-reason">{{ item.reason or '—' }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}<div class="empty">站长尚未录入买卖记录。</div>{% endif %}
 </section>
-{% endif %}
+{% endblock %}
 
-<section class="section panel owner-panel" id="reading">
-  <div class="section-heading">
-    <div><p class="eyebrow">原创研读随笔</p><h2>阅读心得</h2></div>
-    <span class="muted">方法、结构与风险边界</span>
-  </div>
-  <div class="owner-reading-grid">
-    {% for article in reading_notes %}
-    <article>
-      <div class="owner-reading-meta"><span>站长原创</span><time datetime="{{ article.updated_on }}">{{ article.updated_on }}</time></div>
-      <h3><a href="{{ article.href }}">{{ article.title }}</a></h3>
-      <p>{{ article.summary }}</p>
-      <ul>{% for tag in article.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
-      <a class="text-link" href="{{ article.href }}">阅读全文 →</a>
-    </article>
-    {% endfor %}
-  </div>
-</section>
+{% block scripts %}
+<script>
+  document.querySelectorAll("[data-owner-feed]").forEach((feed) => {
+    const pageSize = 12;
+    const kind = feed.querySelector("[data-owner-kind]");
+    const side = feed.querySelector("[data-owner-side]");
+    const query = feed.querySelector("[data-owner-query]");
+    const from = feed.querySelector("[data-owner-from]");
+    const to = feed.querySelector("[data-owner-to]");
+    const reset = feed.querySelector("[data-owner-reset]");
+    const more = feed.querySelector("[data-owner-more]");
+    const status = feed.querySelector("[data-owner-status]");
+    const empty = feed.querySelector("[data-owner-empty]");
+    const items = Array.from(feed.querySelectorAll("[data-owner-item]"));
+    const headings = Array.from(feed.querySelectorAll("[data-owner-day-heading]"));
+    const tabs = Array.from(feed.querySelectorAll("[data-owner-view]"));
+    let limit = pageSize;
+
+    const normalize = (value) => value.trim().toLocaleLowerCase("zh-Hans-CN");
+
+    const syncTabs = () => {
+      tabs.forEach((tab) => {
+        const active = tab.dataset.ownerView === kind.value;
+        tab.classList.toggle("active", active || (kind.value === "all" && tab.dataset.ownerView === "all"));
+        tab.setAttribute("aria-pressed", active || (kind.value === "all" && tab.dataset.ownerView === "all") ? "true" : "false");
+      });
+    };
+
+    const refresh = () => {
+      const needle = normalize(query.value);
+      const matches = items.filter((item) => {
+        const kindMatch = kind.value === "all" || item.dataset.ownerItemKind === kind.value;
+        const sideMatch = side.value === "all" || item.dataset.ownerItemSide === side.value;
+        const queryMatch = !needle || normalize(item.textContent).includes(needle);
+        const fromMatch = !from.value || item.dataset.ownerItemDay >= from.value;
+        const toMatch = !to.value || item.dataset.ownerItemDay <= to.value;
+        return kindMatch && sideMatch && queryMatch && fromMatch && toMatch;
+      });
+      const visible = new Set(matches.slice(0, limit));
+      items.forEach((item) => { item.hidden = !visible.has(item); });
+      headings.forEach((heading) => {
+        heading.hidden = !items.some((item) => !item.hidden && item.dataset.ownerItemDay === heading.dataset.ownerDayHeading);
+      });
+      empty.hidden = matches.length > 0;
+      more.hidden = matches.length <= limit;
+      status.textContent = matches.length
+        ? `显示 ${Math.min(limit, matches.length)} / ${matches.length} 条`
+        : "0 条";
+      syncTabs();
+    };
+
+    const selectKind = (value) => {
+      kind.value = value;
+      side.value = "all";
+      limit = pageSize;
+      refresh();
+      feed.querySelector("[data-owner-list]")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    };
+
+    tabs.forEach((tab) => tab.addEventListener("click", () => selectKind(tab.dataset.ownerView)));
+    feed.querySelectorAll("[data-owner-filter-shortcut]").forEach((button) => {
+      button.addEventListener("click", () => selectKind(button.dataset.ownerFilterShortcut));
+    });
+    [kind, side, from, to].forEach((control) => control.addEventListener("change", () => { limit = pageSize; refresh(); }));
+    query.addEventListener("input", () => { limit = pageSize; refresh(); });
+    reset.addEventListener("click", () => {
+      kind.value = "all";
+      side.value = "all";
+      query.value = "";
+      from.value = "";
+      to.value = "";
+      limit = pageSize;
+      refresh();
+      query.focus();
+    });
+    more.addEventListener("click", () => { limit += pageSize; refresh(); });
+    refresh();
+  });
+</script>
 {% endblock %}

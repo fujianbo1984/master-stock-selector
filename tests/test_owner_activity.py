@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from master_stock_selector.web.owner import build_owner_trade_feed
+from master_stock_selector.web.owner import build_owner_activity_feed, build_owner_trade_feed
 
 
 def _execution(
@@ -141,3 +141,59 @@ def test_owner_feed_marks_unmatched_sell_without_inventing_a_ratio() -> None:
     assert feed["positions"] == []
     assert feed["executions"][0]["change_label"] == "历史记录不完整"
     assert feed["executions"][0]["remaining_label"] == "无法计算"
+
+
+def test_owner_activity_feed_merges_sanitized_records_newest_first() -> None:
+    items = build_owner_activity_feed(
+        executions=[
+            {
+                "symbol": "000001.SZ",
+                "stock_name": "平安银行",
+                "traded_on": "2026-08-14",
+                "traded_at": "15:22:00",
+                "side": "SELL",
+                "side_label": "卖出",
+                "change_label": "减仓 30%",
+                "remaining_label": "剩余 70%",
+                "reason": "按计划减仓",
+            }
+        ],
+        positions=[
+            {
+                "symbol": "000001.SZ",
+                "stock_name": "平安银行",
+                "latest_trade_on": "2026-08-14",
+                "remaining_label": "剩余 70%",
+                "rationale": "等待周线确认",
+            }
+        ],
+        focus_items=[
+            {
+                "symbol": "000002.SZ",
+                "name": "万科A",
+                "reviewed_at": "2026-08-15 09:30:00",
+                "note": "观察平台突破",
+                "is_held": False,
+            }
+        ],
+        reading_notes=[
+            {
+                "title": "建立交易边界",
+                "updated_on": "2026-08-13",
+                "summary": "把知识收敛成研究边界。",
+                "href": "/a/reading/boundaries",
+            }
+        ],
+    )
+
+    assert [item["kind"] for item in items] == [
+        "focus",
+        "trade",
+        "position",
+        "article",
+    ]
+    assert items[0]["day"] == "2026-08-15"
+    assert items[0]["clock"] == "09:30:00"
+    assert items[1]["summary"] == "减仓 30% · 剩余 70%"
+    assert "quantity" not in repr(items)
+    assert "fee" not in repr(items)

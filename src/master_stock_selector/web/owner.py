@@ -68,6 +68,129 @@ def build_owner_trade_feed(
     }
 
 
+def build_owner_activity_feed(
+    *,
+    executions: Sequence[Mapping[str, Any]],
+    positions: Sequence[Mapping[str, Any]],
+    focus_items: Sequence[Mapping[str, Any]],
+    reading_notes: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge sanitized owner records into a newest-first activity index."""
+    items: list[dict[str, Any]] = []
+
+    for execution in executions:
+        day, clock = _activity_date_time(
+            str(execution.get("traded_on") or ""),
+            str(execution.get("traded_at") or ""),
+        )
+        symbol = str(execution.get("symbol") or "")
+        side = str(execution.get("side") or "").upper()
+        items.append(
+            {
+                "kind": "trade",
+                "kind_label": str(execution.get("side_label") or "成交"),
+                "side": side.lower(),
+                "day": day,
+                "clock": clock,
+                "sort_at": f"{day} {clock}",
+                "subject": str(execution.get("stock_name") or "名称待补"),
+                "symbol": symbol,
+                "href": f"/a/stocks/{symbol}",
+                "summary": " · ".join(
+                    part
+                    for part in (
+                        str(execution.get("change_label") or ""),
+                        str(execution.get("remaining_label") or ""),
+                    )
+                    if part
+                ),
+                "detail": str(execution.get("reason") or "站长未补充本次记录。"),
+                "action_label": "查看详情",
+            }
+        )
+
+    for position in positions:
+        day, clock = _activity_date_time(str(position.get("latest_trade_on") or ""), "")
+        symbol = str(position.get("symbol") or "")
+        detail = str(position.get("rationale") or "")
+        if not detail:
+            detail = f"当前交易方案：{position.get('setup_label') or '—'}"
+        items.append(
+            {
+                "kind": "position",
+                "kind_label": "持仓更新",
+                "side": "",
+                "day": day,
+                "clock": clock,
+                "sort_at": f"{day} {clock}",
+                "subject": str(position.get("stock_name") or "名称待补"),
+                "symbol": symbol,
+                "href": f"/a/stocks/{symbol}",
+                "summary": str(position.get("remaining_label") or "无法计算"),
+                "detail": detail,
+                "action_label": "查看持仓",
+            }
+        )
+
+    for focus in focus_items:
+        day, clock = _activity_date_time(str(focus.get("reviewed_at") or ""), "")
+        symbol = str(focus.get("symbol") or "")
+        items.append(
+            {
+                "kind": "focus",
+                "kind_label": "重点观察",
+                "side": "",
+                "day": day,
+                "clock": clock,
+                "sort_at": f"{day} {clock}",
+                "subject": str(focus.get("name") or "名称待补"),
+                "symbol": symbol,
+                "href": f"/a/stocks/{symbol}",
+                "summary": "已持仓" if focus.get("is_held") else "未持仓",
+                "detail": str(focus.get("note") or "站长尚未填写观察备注。"),
+                "action_label": "查看观察",
+            }
+        )
+
+    for article in reading_notes:
+        day, clock = _activity_date_time(str(article.get("updated_on") or ""), "")
+        items.append(
+            {
+                "kind": "article",
+                "kind_label": "阅读心得",
+                "side": "",
+                "day": day,
+                "clock": clock,
+                "sort_at": f"{day} {clock}",
+                "subject": str(article.get("title") or "未命名文章"),
+                "symbol": "",
+                "href": str(article.get("href") or "#"),
+                "summary": "—",
+                "detail": str(article.get("summary") or ""),
+                "action_label": "查看文章",
+            }
+        )
+
+    items.sort(
+        key=lambda item: (
+            str(item["sort_at"]),
+            {"focus": 3, "trade": 2, "position": 1, "article": 0}.get(
+                str(item["kind"]), 0
+            ),
+            str(item["subject"]),
+        ),
+        reverse=True,
+    )
+    return items
+
+
+def _activity_date_time(day_or_timestamp: str, clock: str) -> tuple[str, str]:
+    value = day_or_timestamp.strip()
+    day = value[:10]
+    time_value = clock.strip() or (value[11:19] if len(value) >= 16 else "")
+    return day, time_value
+
+
 def _split_trade_cycles(rows: Sequence[Mapping[str, Any]]) -> list[list[dict[str, Any]]]:
     cycles: list[list[dict[str, Any]]] = []
     current_cycle: list[dict[str, Any]] = []
