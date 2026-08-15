@@ -19,6 +19,16 @@ dependencies = [
 [project.scripts]
 masterstock = "master_stock_selector.cli:main"
 
+[tool.setuptools.package-data]
+"master_stock_selector.web" = [
+  "static/*",
+  "static/reading/adam-trading-templates/*",
+  "static/vendor/*",
+  "templates/*.html",
+  "templates/ashare/*.html",
+  "templates/reading/*.html",
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
