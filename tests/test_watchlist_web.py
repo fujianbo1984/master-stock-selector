@@ -1958,7 +1958,8 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
     ).json() == {"deleted": False}
 
 
-def test_login_cookie_is_secure_by_default(tmp_path):
+def test_login_cookie_is_secure_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("MASTERSTOCK_SECURE_COOKIES", raising=False)
     watchlist_path = tmp_path / "master_watchlist.sqlite3"
     _seed_watchlist(watchlist_path)
     app = create_app(
