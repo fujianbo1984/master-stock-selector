@@ -6,9 +6,9 @@
 {% block content %}
 <section class="owner-feed-hero" aria-labelledby="owner-feed-title">
   <div class="owner-feed-title">
-    <h1 id="owner-feed-title">站长动态</h1>
-    <span>近期动态索引</span>
-    <small>最后更新 {{ latest_updated_at or '尚无动态' }}</small>
+    <div><span>站内共享</span><h1 id="owner-feed-title">站长动态</h1></div>
+    <p>交易执行、重点观察与阅读思考的时间线。</p>
+    <small>最后更新 <time>{{ latest_updated_at or '尚无动态' }}</time></small>
   </div>
   <div class="owner-feed-boundary" role="note">
     <strong>研究记录，不是买卖信号。</strong>
@@ -37,8 +37,12 @@
   </nav>
 
   <div class="owner-feed-tools" aria-label="动态筛选">
+    <label class="owner-feed-search">
+      <span>搜索</span>
+      <input type="search" placeholder="股票或文章关键词" autocomplete="off" data-owner-query>
+    </label>
     <label>
-      <span class="sr-only">事件类型</span>
+      <span>内容</span>
       <select data-owner-kind>
         <option value="all">全部事件类型</option>
         <option value="trade">交易记录</option>
@@ -48,21 +52,17 @@
       </select>
     </label>
     <label>
-      <span class="sr-only">交易操作</span>
+      <span>交易操作</span>
       <select data-owner-side>
         <option value="all">全部操作</option>
         <option value="buy">买入</option>
         <option value="sell">卖出</option>
       </select>
     </label>
-    <label class="owner-feed-search">
-      <span class="sr-only">股票或文章关键词</span>
-      <input type="search" placeholder="股票／文章关键词" autocomplete="off" data-owner-query>
-    </label>
     <div class="owner-feed-dates">
-      <label><span class="sr-only">开始日期</span><input type="date" data-owner-from></label>
+      <label><span>开始</span><input type="date" data-owner-from></label>
       <span>至</span>
-      <label><span class="sr-only">结束日期</span><input type="date" data-owner-to></label>
+      <label><span>结束</span><input type="date" data-owner-to></label>
     </div>
     <button class="owner-feed-reset" type="button" data-owner-reset>重置</button>
     <button class="button button-secondary owner-feed-all-trades" type="button" data-owner-filter-shortcut="trade">查看全部交易记录</button>
@@ -73,9 +73,6 @@
       <div class="owner-activity-heading">
         <h2 id="owner-activity-title">最近更新</h2>
         <span aria-live="polite" data-owner-status></span>
-      </div>
-      <div class="owner-activity-columns" aria-hidden="true">
-        <span>时间</span><span>类型</span><span>股票／文章</span><span>事件摘要</span><span>价格、仓位、风险与记录</span><span>操作</span>
       </div>
       <div class="owner-activity-list" data-owner-list>
         {% set ns = namespace(day='') %}
@@ -91,17 +88,23 @@
                    data-owner-item-kind="{{ item.kind }}"
                    data-owner-item-side="{{ item.side }}"
                    data-owner-item-day="{{ item.day }}">
-            <time datetime="{{ item.day }}{% if item.clock %}T{{ item.clock }}{% endif %}">{{ item.clock or '—' }}</time>
-            <span class="owner-event owner-event-{{ item.kind }}{% if item.side %} owner-event-{{ item.side }}{% endif %}">{{ item.kind_label }}</span>
-            <a class="owner-activity-subject" href="{{ item.href }}">
-              <strong>{{ item.subject }}</strong>{% if item.symbol %}<small>{{ item.symbol }}</small>{% endif %}
-            </a>
-            <strong class="owner-activity-summary">{{ item.summary }}</strong>
-            <div class="owner-activity-detail">
-              {% if item.facts %}<ul>{% for fact in item.facts %}<li>{{ fact }}</li>{% endfor %}</ul>{% endif %}
-              <p>{{ item.detail }}</p>
+            <div class="owner-activity-when">
+              <time datetime="{{ item.day }}{% if item.clock %}T{{ item.clock }}{% endif %}">{{ item.clock or '—' }}</time>
+              <span class="owner-event owner-event-{{ item.kind }}{% if item.side %} owner-event-{{ item.side }}{% endif %}">{{ item.kind_label }}</span>
             </div>
-            <a class="owner-activity-action" href="{{ item.href }}">{{ item.action_label }}</a>
+            <div class="owner-activity-body">
+              <header>
+                <a class="owner-activity-subject" href="{{ item.href }}">
+                  <strong>{{ item.subject }}</strong>{% if item.symbol %}<small>{{ item.symbol }}</small>{% endif %}
+                </a>
+                <strong class="owner-activity-summary">{{ item.summary }}</strong>
+                <a class="owner-activity-action" href="{{ item.href }}">{{ item.action_label }} →</a>
+              </header>
+              <div class="owner-activity-detail">
+                {% if item.facts %}<dl>{% for fact in item.facts %}<div class="owner-fact owner-fact-{{ fact.tone }}"><dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd></div>{% endfor %}</dl>{% endif %}
+                <p>{{ item.detail }}</p>
+              </div>
+            </div>
           </article>
         {% endfor %}
       </div>
@@ -119,11 +122,12 @@
         <div class="owner-rail-positions">
           {% for item in positions[:4] %}
           <a href="/a/stocks/{{ item.symbol }}">
-            <span><strong>{{ item.stock_name }}</strong><small>{{ item.symbol }}</small></span>
-            <b>{{ item.remaining_percent }}%</b>
-            <small>{{ item.first_buy_on }}</small>
-            <small>{{ item.latest_trade_on }} {{ item.latest_action }}</small>
-            <small>持仓均价 {{ item.average_price or '—' }} · 止损 {{ item.stop_price_label or '—' }}</small>
+            <div class="owner-position-title"><span><strong>{{ item.stock_name }}</strong><small>{{ item.symbol }}</small></span><b>{{ item.remaining_percent }}%<small>剩余仓位</small></b></div>
+            <dl>
+              <div><dt>持仓均价</dt><dd>{{ item.average_price or '—' }}</dd></div>
+              <div><dt>止损设置</dt><dd>{{ item.stop_price_label or '—' }}</dd></div>
+            </dl>
+            <p>{{ item.first_buy_on }} 建仓 · {{ item.latest_trade_on }} {{ item.latest_action }}</p>
           </a>
           {% endfor %}
         </div>

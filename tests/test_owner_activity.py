@@ -102,12 +102,12 @@ def test_owner_feed_normalizes_positions_without_returning_private_quantities() 
     assert feed["executions"][0]["remaining_label"] == "剩余 75%"
     assert feed["executions"][0]["revised"] is True
     assert feed["executions"][0]["facts"] == [
-        "买入价 10",
-        "卖出价 15",
-        "卖出仓位 25%",
-        "止损设置 9",
-        "计划盈亏比 5",
-        "实际盈亏比 2.5",
+        {"label": "买入价", "value": "10", "tone": "buy"},
+        {"label": "卖出价", "value": "15", "tone": "sell"},
+        {"label": "卖出仓位", "value": "25%", "tone": "position"},
+        {"label": "止损设置", "value": "9", "tone": "risk"},
+        {"label": "计划盈亏比", "value": "5", "tone": "ratio"},
+        {"label": "实际盈亏比", "value": "2.5", "tone": "ratio"},
     ]
     assert "quantity" not in repr(feed)
     assert "fee" not in repr(feed)
@@ -177,7 +177,10 @@ def test_owner_activity_feed_merges_sanitized_records_newest_first() -> None:
                 "change_label": "减仓 30%",
                 "remaining_label": "剩余 70%",
                 "reason": "按计划减仓",
-                "facts": ["买入价 10", "卖出价 12"],
+                "facts": [
+                    {"label": "买入价", "value": "10", "tone": "buy"},
+                    {"label": "卖出价", "value": "12", "tone": "sell"},
+                ],
             }
         ],
         positions=[
@@ -217,6 +220,9 @@ def test_owner_activity_feed_merges_sanitized_records_newest_first() -> None:
     assert items[0]["day"] == "2026-08-15"
     assert items[0]["clock"] == "09:30:00"
     assert items[1]["summary"] == "减仓 30% · 剩余 70%"
-    assert items[1]["facts"] == ["买入价 10", "卖出价 12"]
+    assert items[1]["facts"] == [
+        {"label": "买入价", "value": "10", "tone": "buy"},
+        {"label": "卖出价", "value": "12", "tone": "sell"},
+    ]
     assert "quantity" not in repr(items)
     assert "fee" not in repr(items)

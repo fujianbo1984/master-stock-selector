@@ -137,8 +137,16 @@ def build_owner_activity_feed(
                 "href": f"/a/stocks/{symbol}",
                 "summary": str(position.get("remaining_label") or "无法计算"),
                 "facts": [
-                    f"持仓均价 {_price_label(position.get('average_price'))}",
-                    f"止损设置 {position.get('stop_price_label') or '—'}",
+                    {
+                        "label": "持仓均价",
+                        "value": _price_label(position.get("average_price")),
+                        "tone": "price",
+                    },
+                    {
+                        "label": "止损设置",
+                        "value": str(position.get("stop_price_label") or "—"),
+                        "tone": "risk",
+                    },
                 ],
                 "detail": detail,
                 "action_label": "查看持仓",
@@ -386,24 +394,54 @@ def _execution_facts(
     row: Mapping[str, Any],
     matched_trades: Sequence[Mapping[str, Any]],
     change_percent: int | None,
-) -> list[str]:
+) -> list[dict[str, str]]:
     side = str(row.get("side") or "").upper()
     price = _price_label(row.get("price"))
     if side == "BUY":
         return [
-            f"买入价 {price}",
-            f"止损设置 {_price_label(row.get('stop_price'))}",
-            "计划盈亏比 —",
-            "实际盈亏比 —",
+            {"label": "买入价", "value": price, "tone": "buy"},
+            {
+                "label": "止损设置",
+                "value": _price_label(row.get("stop_price")),
+                "tone": "risk",
+            },
         ]
 
     return [
-        f"买入价 {_number_range_label(item.get('entry_price') for item in matched_trades)}",
-        f"卖出价 {price}",
-        f"卖出仓位 {f'{change_percent}%' if change_percent is not None else '—'}",
-        f"止损设置 {_stop_range_label(item.get('stop_price') for item in matched_trades)}",
-        f"计划盈亏比 {_number_range_label(item.get('planned_r_multiple') for item in matched_trades)}",
-        f"实际盈亏比 {_number_range_label(item.get('actual_r_multiple') for item in matched_trades)}",
+        {
+            "label": "买入价",
+            "value": _number_range_label(
+                item.get("entry_price") for item in matched_trades
+            ),
+            "tone": "buy",
+        },
+        {"label": "卖出价", "value": price, "tone": "sell"},
+        {
+            "label": "卖出仓位",
+            "value": f"{change_percent}%" if change_percent is not None else "—",
+            "tone": "position",
+        },
+        {
+            "label": "止损设置",
+            "value": _stop_range_label(
+                item.get("stop_price") for item in matched_trades
+            ),
+            "tone": "risk",
+        },
+        {
+            "label": "计划盈亏比",
+            "value": _number_range_label(
+                item.get("planned_r_multiple") for item in matched_trades
+            ),
+            "tone": "ratio",
+        },
+        {
+            "label": "实际盈亏比",
+            "value": _number_range_label(
+                item.get("actual_r_multiple") for item in matched_trades
+            ),
+            "tone": "ratio",
+        },
     ]
 
 
