@@ -398,7 +398,10 @@ def build_watchlist_router(
             symbols = users.trade_symbols(owner_id)
             names = repository.stock_names(symbols)
             review = users.trade_review(owner_id, names)
-            feed = build_owner_trade_feed(review["executions"], names)
+            _decorate_trade_r_multiples(review["closed"], market_reader)
+            feed = build_owner_trade_feed(
+                review["executions"], names, closed_trades=review["closed"]
+            )
             positions = list(feed["positions"])
             executions = list(feed["executions"])
             latest_updated_at = str(feed["latest_updated_at"] or "")
@@ -933,27 +936,7 @@ def build_watchlist_router(
             return RedirectResponse("/login?next=/a/review", status_code=303)
         names = repository.stock_names(users.trade_symbols(user.user_id))
         review = users.trade_review(user.user_id, names)
-        for item in review["closed"]:
-            item["planned_r_multiple"] = None
-            item["actual_r_multiple"] = None
-            item["actual_drawdown_low"] = None
-            if float(item["pnl"]) <= 0:
-                continue
-            entry_price = float(item["entry_price"])
-            exit_price = float(item["exit_price"])
-            stop_price = item.get("stop_price")
-            if stop_price is not None and entry_price > float(stop_price):
-                item["planned_r_multiple"] = round(
-                    (exit_price - entry_price) / (entry_price - float(stop_price)), 2
-                )
-            drawdown_low = market_reader.safe_trade_drawdown_low(
-                str(item["symbol"]), str(item["buy_date"]), str(item["sell_date"])
-            )
-            if drawdown_low is not None and drawdown_low < entry_price:
-                item["actual_drawdown_low"] = drawdown_low
-                item["actual_r_multiple"] = round(
-                    (exit_price - entry_price) / (entry_price - drawdown_low), 2
-                )
+        _decorate_trade_r_multiples(review["closed"], market_reader)
         return render(
             request,
             "ashare/trade_review.html",
@@ -1616,6 +1599,33 @@ def build_watchlist_router(
         return JSONResponse(payload, status_code=200 if healthy else 503)
 
     return router
+
+
+def _decorate_trade_r_multiples(
+    closed_trades: list[dict[str, Any]], market_reader: MarketDataReader
+) -> None:
+    """Apply the trade-review R-multiple definitions to closed FIFO matches."""
+    for item in closed_trades:
+        item["planned_r_multiple"] = None
+        item["actual_r_multiple"] = None
+        item["actual_drawdown_low"] = None
+        if float(item["pnl"]) <= 0:
+            continue
+        entry_price = float(item["entry_price"])
+        exit_price = float(item["exit_price"])
+        stop_price = item.get("stop_price")
+        if stop_price is not None and entry_price > float(stop_price):
+            item["planned_r_multiple"] = round(
+                (exit_price - entry_price) / (entry_price - float(stop_price)), 2
+            )
+        drawdown_low = market_reader.safe_trade_drawdown_low(
+            str(item["symbol"]), str(item["buy_date"]), str(item["sell_date"])
+        )
+        if drawdown_low is not None and drawdown_low < entry_price:
+            item["actual_drawdown_low"] = drawdown_low
+            item["actual_r_multiple"] = round(
+                (exit_price - entry_price) / (entry_price - drawdown_low), 2
+            )
 
 
 def _selected_date(

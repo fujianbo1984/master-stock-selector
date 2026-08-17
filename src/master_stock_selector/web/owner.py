@@ -33,8 +33,15 @@ OWNER_READING_NOTES = (
 def build_owner_trade_feed(
     executions: Sequence[Mapping[str, Any]],
     names: Mapping[str, str],
+    closed_trades: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Return a quantity-free owner feed derived from private executions."""
+    closed_by_sell: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for trade in closed_trades:
+        sell_execution_id = str(trade.get("sell_execution_id") or "")
+        if sell_execution_id:
+            closed_by_sell[sell_execution_id].append(trade)
+
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for execution in executions:
         symbol = str(execution.get("symbol") or "").upper()
@@ -53,6 +60,7 @@ def build_owner_trade_feed(
                 symbol=symbol,
                 stock_name=names.get(symbol, "名称待补"),
                 cycle_index=cycle_index,
+                closed_by_sell=closed_by_sell,
             )
             public_executions.extend(result["executions"])
             if result["position"] is not None:
@@ -104,6 +112,7 @@ def build_owner_activity_feed(
                     )
                     if part
                 ),
+                "facts": list(execution.get("facts") or ()),
                 "detail": str(execution.get("reason") or "站长未补充本次记录。"),
                 "action_label": "查看详情",
             }
@@ -127,6 +136,10 @@ def build_owner_activity_feed(
                 "symbol": symbol,
                 "href": f"/a/stocks/{symbol}",
                 "summary": str(position.get("remaining_label") or "无法计算"),
+                "facts": [
+                    f"持仓均价 {_price_label(position.get('average_price'))}",
+                    f"止损设置 {position.get('stop_price_label') or '—'}",
+                ],
                 "detail": detail,
                 "action_label": "查看持仓",
             }
@@ -147,6 +160,7 @@ def build_owner_activity_feed(
                 "symbol": symbol,
                 "href": f"/a/stocks/{symbol}",
                 "summary": "已持仓" if focus.get("is_held") else "未持仓",
+                "facts": [],
                 "detail": str(focus.get("note") or "站长尚未填写观察备注。"),
                 "action_label": "查看观察",
             }
@@ -166,6 +180,7 @@ def build_owner_activity_feed(
                 "symbol": "",
                 "href": str(article.get("href") or "#"),
                 "summary": "—",
+                "facts": [],
                 "detail": str(article.get("summary") or ""),
                 "action_label": "查看文章",
             }
@@ -228,6 +243,7 @@ def _public_cycle(
     symbol: str,
     stock_name: str,
     cycle_index: int,
+    closed_by_sell: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> dict[str, Any]:
     baseline = _cycle_baseline(rows)
     running_quantity = 0
@@ -246,7 +262,13 @@ def _public_cycle(
         unmatched = side == "SELL" and quantity > before
         if side == "BUY":
             running_quantity += quantity
-            lots.append({"quantity": quantity, "price": float(row.get("price") or 0)})
+            lots.append(
+                {
+                    "quantity": quantity,
+                    "price": float(row.get("price") or 0),
+                    "stop_price": row.get("stop_price"),
+                }
+            )
             first_buy_on = first_buy_on or str(row.get("traded_on") or "")
             latest_buy_reason = str(row.get("rationale") or latest_buy_reason)
             latest_setup_label = str(row.get("setup_label") or latest_setup_label)
@@ -256,9 +278,11 @@ def _public_cycle(
 
         change_percent = _percent(quantity, baseline) if not unmatched else None
         remaining_percent = _percent(running_quantity, baseline) if not unmatched else None
+        execution_id = str(row.get("execution_id") or "")
+        matched_trades = list(closed_by_sell.get(execution_id, ())) if side == "SELL" else []
         public_rows.append(
             {
-                "execution_id": str(row.get("execution_id") or ""),
+                "execution_id": execution_id,
                 "symbol": symbol,
                 "stock_name": stock_name,
                 "traded_on": str(row.get("traded_on") or ""),
@@ -286,6 +310,7 @@ def _public_cycle(
                     (row.get("rationale") if side == "BUY" else row.get("exit_reason"))
                     or ""
                 ),
+                "facts": _execution_facts(row, matched_trades, change_percent),
                 "revised": int(row.get("revision") or 1) > 1,
                 "updated_at": str(row.get("updated_at") or ""),
                 "cycle_index": cycle_index,
@@ -307,6 +332,9 @@ def _public_cycle(
             "latest_trade_on": str(last_row.get("traded_on") or ""),
             "latest_action": "买入" if str(last_row.get("side")) == "BUY" else "卖出",
             "average_price": average_price,
+            "stop_price_label": _stop_range_label(
+                lot.get("stop_price") for lot in lots if int(lot["quantity"]) > 0
+            ),
             "remaining_percent": remaining_percent,
             "remaining_label": _remaining_label(remaining_percent),
             "bar_percent": min(100, remaining_percent or 0),
@@ -352,6 +380,56 @@ def _open_average_price(lots: Sequence[Mapping[str, Any]]) -> float | None:
         return None
     cost = sum(int(lot["quantity"]) * float(lot["price"]) for lot in lots)
     return round(cost / quantity, 3)
+
+
+def _execution_facts(
+    row: Mapping[str, Any],
+    matched_trades: Sequence[Mapping[str, Any]],
+    change_percent: int | None,
+) -> list[str]:
+    side = str(row.get("side") or "").upper()
+    price = _price_label(row.get("price"))
+    if side == "BUY":
+        return [
+            f"买入价 {price}",
+            f"止损设置 {_price_label(row.get('stop_price'))}",
+            "计划盈亏比 —",
+            "实际盈亏比 —",
+        ]
+
+    return [
+        f"买入价 {_number_range_label(item.get('entry_price') for item in matched_trades)}",
+        f"卖出价 {price}",
+        f"卖出仓位 {f'{change_percent}%' if change_percent is not None else '—'}",
+        f"止损设置 {_stop_range_label(item.get('stop_price') for item in matched_trades)}",
+        f"计划盈亏比 {_number_range_label(item.get('planned_r_multiple') for item in matched_trades)}",
+        f"实际盈亏比 {_number_range_label(item.get('actual_r_multiple') for item in matched_trades)}",
+    ]
+
+
+def _price_label(value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+    return f"{float(value):.3f}".rstrip("0").rstrip(".")
+
+
+def _number_range_label(values: Any) -> str:
+    normalized = sorted(
+        {round(float(value), 3) for value in values if value is not None and value != ""}
+    )
+    if not normalized:
+        return "—"
+    if len(normalized) == 1:
+        return _price_label(normalized[0])
+    return f"{_price_label(normalized[0])}–{_price_label(normalized[-1])}"
+
+
+def _stop_range_label(values: Any) -> str:
+    collected = list(values)
+    label = _number_range_label(collected)
+    if label != "—" and any(value is None or value == "" for value in collected):
+        return f"{label}（部分未设置）"
+    return label
 
 
 def _percent(quantity: int, baseline: int) -> int | None:

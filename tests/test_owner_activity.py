@@ -15,6 +15,7 @@ def _execution(
     rationale: str = "",
     exit_reason: str = "",
     revision: int = 1,
+    stop_price: float | None = None,
 ) -> dict[str, Any]:
     return {
         "execution_id": execution_id,
@@ -24,6 +25,7 @@ def _execution(
         "side": side,
         "quantity": quantity,
         "price": price,
+        "stop_price": stop_price,
         "fee": 3.0,
         "setup_label": "简单回调",
         "rationale": rationale,
@@ -44,6 +46,7 @@ def test_owner_feed_normalizes_positions_without_returning_private_quantities() 
                 quantity=613,
                 price=10.0,
                 rationale="首次建仓",
+                stop_price=9.0,
             ),
             _execution(
                 "buy-2",
@@ -64,6 +67,15 @@ def test_owner_feed_normalizes_positions_without_returning_private_quantities() 
             ),
         ],
         {"000001.SZ": "平安银行"},
+        closed_trades=[
+            {
+                "sell_execution_id": "sell-1",
+                "entry_price": 10.0,
+                "stop_price": 9.0,
+                "planned_r_multiple": 5.0,
+                "actual_r_multiple": 2.5,
+            }
+        ],
     )
 
     assert feed["positions"] == [
@@ -75,6 +87,7 @@ def test_owner_feed_normalizes_positions_without_returning_private_quantities() 
             "latest_trade_on": "2026-08-03",
             "latest_action": "卖出",
             "average_price": 11.032,
+            "stop_price_label": "9（部分未设置）",
             "remaining_percent": 75,
             "remaining_label": "剩余 75%",
             "bar_percent": 75,
@@ -88,6 +101,14 @@ def test_owner_feed_normalizes_positions_without_returning_private_quantities() 
     ]
     assert feed["executions"][0]["remaining_label"] == "剩余 75%"
     assert feed["executions"][0]["revised"] is True
+    assert feed["executions"][0]["facts"] == [
+        "买入价 10",
+        "卖出价 15",
+        "卖出仓位 25%",
+        "止损设置 9",
+        "计划盈亏比 5",
+        "实际盈亏比 2.5",
+    ]
     assert "quantity" not in repr(feed)
     assert "fee" not in repr(feed)
 
@@ -156,6 +177,7 @@ def test_owner_activity_feed_merges_sanitized_records_newest_first() -> None:
                 "change_label": "减仓 30%",
                 "remaining_label": "剩余 70%",
                 "reason": "按计划减仓",
+                "facts": ["买入价 10", "卖出价 12"],
             }
         ],
         positions=[
@@ -195,5 +217,6 @@ def test_owner_activity_feed_merges_sanitized_records_newest_first() -> None:
     assert items[0]["day"] == "2026-08-15"
     assert items[0]["clock"] == "09:30:00"
     assert items[1]["summary"] == "减仓 30% · 剩余 70%"
+    assert items[1]["facts"] == ["买入价 10", "卖出价 12"]
     assert "quantity" not in repr(items)
     assert "fee" not in repr(items)

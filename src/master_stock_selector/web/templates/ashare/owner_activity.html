@@ -75,7 +75,7 @@
         <span aria-live="polite" data-owner-status></span>
       </div>
       <div class="owner-activity-columns" aria-hidden="true">
-        <span>时间</span><span>类型</span><span>股票／文章</span><span>事件摘要</span><span>主题依据与记录</span><span>操作</span>
+        <span>时间</span><span>类型</span><span>股票／文章</span><span>事件摘要</span><span>价格、仓位、风险与记录</span><span>操作</span>
       </div>
       <div class="owner-activity-list" data-owner-list>
         {% set ns = namespace(day='') %}
@@ -97,7 +97,10 @@
               <strong>{{ item.subject }}</strong>{% if item.symbol %}<small>{{ item.symbol }}</small>{% endif %}
             </a>
             <strong class="owner-activity-summary">{{ item.summary }}</strong>
-            <p>{{ item.detail }}</p>
+            <div class="owner-activity-detail">
+              {% if item.facts %}<ul>{% for fact in item.facts %}<li>{{ fact }}</li>{% endfor %}</ul>{% endif %}
+              <p>{{ item.detail }}</p>
+            </div>
             <a class="owner-activity-action" href="{{ item.href }}">{{ item.action_label }}</a>
           </article>
         {% endfor %}
@@ -120,6 +123,7 @@
             <b>{{ item.remaining_percent }}%</b>
             <small>{{ item.first_buy_on }}</small>
             <small>{{ item.latest_trade_on }} {{ item.latest_action }}</small>
+            <small>持仓均价 {{ item.average_price or '—' }} · 止损 {{ item.stop_price_label or '—' }}</small>
           </a>
           {% endfor %}
         </div>

@@ -1049,7 +1049,20 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .owner-activity-subject strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .owner-activity-subject small { color: var(--muted); font-size: 8px; letter-spacing: .2px; }
 .owner-activity-summary { font-size: 11px; }
-.owner-activity-row > p {
+.owner-activity-detail { min-width: 0; }
+.owner-activity-detail ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  margin: 0 0 3px;
+  padding: 0;
+  list-style: none;
+  color: var(--text);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.owner-activity-detail li { white-space: nowrap; }
+.owner-activity-detail p {
   display: -webkit-box;
   overflow: hidden;
   margin: 0;

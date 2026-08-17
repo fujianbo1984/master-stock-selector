@@ -292,6 +292,7 @@ def test_owner_activity_is_login_only_and_shows_only_sanitized_owner_data(tmp_pa
         price=10.0,
         fee=1.0,
         method="MANUAL",
+        stop_price=9.0,
         rationale="首次建仓",
     )
     users.record_trade(
@@ -337,6 +338,12 @@ def test_owner_activity_is_login_only_and_shows_only_sanitized_owner_data(tmp_pa
     assert "读者私有备注" not in page.text
     assert "减仓 25%" in page.text
     assert "剩余 75%" in page.text
+    assert "买入价 10" in page.text
+    assert "卖出价 15" in page.text
+    assert "卖出仓位 25%" in page.text
+    assert "止损设置 9" in page.text
+    assert "计划盈亏比 5" in page.text
+    assert "实际盈亏比" in page.text
     assert "少学一种形态，多建立一道边界" in page.text
     assert "八张示意图读懂 Adam Grimes 的交易模板" in page.text
     assert page.text.index("八张示意图读懂 Adam Grimes 的交易模板") < page.text.index(
