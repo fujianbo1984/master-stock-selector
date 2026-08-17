@@ -8,6 +8,16 @@ DEFAULT_SITE_OWNER_USERNAME = "我不是来玩的"
 
 OWNER_READING_NOTES = (
     {
+        "title": "止损不是一个百分比",
+        "summary": (
+            "对比五位交易大师的止损思想，理解结构失效、波动噪声、"
+            "风险上限和仓位之间的关系。"
+        ),
+        "href": "/a/reading/stop-loss-is-not-a-percentage",
+        "updated_on": "2026-08-17",
+        "tags": ("止损", "风险管理", "仓位管理"),
+    },
+    {
         "title": "少学一种形态，多建立一道边界",
         "summary": (
             "从交易大师的不同方法中重新理解交易体系，"

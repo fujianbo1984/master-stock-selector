@@ -53,4 +53,15 @@ def build_content_router(*, render: Render) -> APIRouter:
             "reading/adam_grimes_trading_templates.html",
         )
 
+    @router.get(
+        "/a/reading/stop-loss-is-not-a-percentage",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    def stop_loss_is_not_a_percentage(request: Request) -> Response:
+        return render_private_article(
+            request,
+            "reading/stop_loss_is_not_a_percentage.html",
+        )
+
     return router

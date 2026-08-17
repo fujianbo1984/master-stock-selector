@@ -1620,6 +1620,9 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .reading-framework i { padding-left: 60px; color: var(--line-strong); font-style: normal; line-height: 1; }
 .reading-prose .reading-thesis { border-left-width: 5px; font-size: 19px; }
 .reading-prose .reading-closing { margin: 2em auto; padding: 24px; text-align: center; font-size: 24px; }
+.reading-prose .reading-formula { border-left-color: var(--line-strong); background: #fffdfa; font-family: Georgia, "Times New Roman", serif; font-size: 17px; text-align: center; }
+.reading-equations { margin: 1.7em 0; padding: 18px 22px; border: 1px solid var(--line-strong); background: #fffdfa; color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 16px; line-height: 1.8; text-align: center; }
+.reading-equations p { margin: 4px 0; }
 .reading-disclaimer { margin-top: 3em; padding: 20px 22px; border: 1px solid var(--line); background: var(--paper); color: var(--muted); font-size: 13px; line-height: 1.8; }
 .reading-references { margin-top: 3em; padding-top: 4px; border-top: 1px solid var(--line-strong); }
 .reading-references h2 { margin-top: 1.4em; }

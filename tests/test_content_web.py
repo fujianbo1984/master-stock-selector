@@ -5,6 +5,7 @@ from master_stock_selector.web.users import UserRepository
 
 ARTICLE_PATH = "/a/reading/trading-system-boundaries"
 ADAM_ARTICLE_PATH = "/a/reading/adam-grimes-trading-templates"
+STOP_LOSS_ARTICLE_PATH = "/a/reading/stop-loss-is-not-a-percentage"
 
 
 def _app(tmp_path):
@@ -89,3 +90,33 @@ def test_logged_in_user_can_read_adam_grimes_article_with_images(tmp_path):
     image = client.get("/static/reading/adam-trading-templates/00103.jpg")
     assert image.status_code == 200
     assert image.headers["content-type"] == "image/jpeg"
+
+
+def test_stop_loss_article_requires_login(tmp_path):
+    response = TestClient(_app(tmp_path)).get(
+        STOP_LOSS_ARTICLE_PATH,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/login?next={STOP_LOSS_ARTICLE_PATH}"
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_logged_in_user_can_read_stop_loss_article(tmp_path):
+    client = TestClient(_app(tmp_path))
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    article = client.get(STOP_LOSS_ARTICLE_PATH)
+    assert article.status_code == 200
+    assert "止损不是一个百分比" in article.text
+    assert "Minervini" in article.text
+    assert "结构失效位决定止损价格" in article.text
+    assert "本文是对交易书籍的个人研究与体系整理" in article.text
+    assert article.text.count("<h2") == 9
+    assert article.headers["cache-control"] == "private, no-store"
+    assert article.headers["x-robots-tag"] == "noindex, nofollow"
