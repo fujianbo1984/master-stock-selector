@@ -1627,6 +1627,13 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .reading-references { margin-top: 3em; padding-top: 4px; border-top: 1px solid var(--line-strong); }
 .reading-references h2 { margin-top: 1.4em; }
 .reading-references li { font-size: 14px; }
+.reading-pagination { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 42px; padding-top: 28px; border-top: 1px solid var(--line-strong); }
+.reading-pagination-item { display: grid; min-height: 92px; gap: 7px; align-content: center; padding: 16px 18px; border: 1px solid var(--line); background: var(--paper); color: var(--text); text-decoration: none; }
+a.reading-pagination-item:hover { border-color: var(--accent); background: var(--accent-soft); }
+.reading-pagination-item span { color: var(--muted); font-size: 10px; letter-spacing: .12em; }
+.reading-pagination-item strong { font-family: "Songti SC", "STSong", serif; font-size: 16px; line-height: 1.55; }
+.reading-pagination-next { text-align: right; }
+.reading-pagination-disabled { opacity: .52; }
 
 @media (max-width: 860px) {
   .observation-workspace-hero { align-items: flex-start; flex-direction: column; }

@@ -1,0 +1,20 @@
+<nav class="reading-pagination" aria-label="文章翻页">
+  {% if previous_article %}
+  <a class="reading-pagination-item reading-pagination-previous" href="{{ previous_article.href }}">
+    <span>上一篇</span><strong>{{ previous_article.title }}</strong>
+  </a>
+  {% else %}
+  <span class="reading-pagination-item reading-pagination-previous reading-pagination-disabled" aria-disabled="true">
+    <span>上一篇</span><strong>已经是第一篇</strong>
+  </span>
+  {% endif %}
+  {% if next_article %}
+  <a class="reading-pagination-item reading-pagination-next" href="{{ next_article.href }}">
+    <span>下一篇</span><strong>{{ next_article.title }}</strong>
+  </a>
+  {% else %}
+  <span class="reading-pagination-item reading-pagination-next reading-pagination-disabled" aria-disabled="true">
+    <span>下一篇</span><strong>已经是最新一篇</strong>
+  </span>
+  {% endif %}
+</nav>

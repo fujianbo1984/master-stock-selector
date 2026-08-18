@@ -8,6 +8,16 @@ DEFAULT_SITE_OWNER_USERNAME = "我不是来玩的"
 
 OWNER_READING_NOTES = (
     {
+        "title": "均线不是买卖按钮",
+        "summary": (
+            "对比五位交易大师的均线思想，理解趋势阶段、候选过滤、"
+            "价格结构与入场触发之间的区别。"
+        ),
+        "href": "/a/reading/moving-averages-are-not-trading-buttons",
+        "updated_on": "2026-08-18",
+        "tags": ("均线", "趋势交易", "价格行为"),
+    },
+    {
         "title": "止损不是一个百分比",
         "summary": (
             "对比五位交易大师的止损思想，理解结构失效、波动噪声、"

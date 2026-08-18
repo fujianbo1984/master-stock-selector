@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from ..owner import OWNER_READING_NOTES
 from .auth import current_user
 
 Render = Callable[[Request, str, dict[str, Any]], HTMLResponse]
@@ -22,10 +23,36 @@ def build_content_router(*, render: Render) -> APIRouter:
             )
             redirect.headers["Cache-Control"] = "private, no-store"
             return redirect
+        articles = sorted(
+            OWNER_READING_NOTES,
+            key=lambda article: (
+                str(article.get("updated_on") or ""),
+                str(article.get("href") or ""),
+            ),
+        )
+        current_index = next(
+            (
+                index
+                for index, article in enumerate(articles)
+                if article.get("href") == request.url.path
+            ),
+            -1,
+        )
+        previous_article = articles[current_index - 1] if current_index > 0 else None
+        next_article = (
+            articles[current_index + 1]
+            if 0 <= current_index < len(articles) - 1
+            else None
+        )
         response = render(
             request,
             template,
-            {"active": "", "suppress_research_date_note": True},
+            {
+                "active": "",
+                "suppress_research_date_note": True,
+                "previous_article": previous_article,
+                "next_article": next_article,
+            },
         )
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
@@ -62,6 +89,17 @@ def build_content_router(*, render: Render) -> APIRouter:
         return render_private_article(
             request,
             "reading/stop_loss_is_not_a_percentage.html",
+        )
+
+    @router.get(
+        "/a/reading/moving-averages-are-not-trading-buttons",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    def moving_averages_are_not_trading_buttons(request: Request) -> Response:
+        return render_private_article(
+            request,
+            "reading/moving_averages_are_not_trading_buttons.html",
         )
 
     return router
