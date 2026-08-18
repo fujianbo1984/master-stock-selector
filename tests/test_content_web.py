@@ -7,6 +7,7 @@ ARTICLE_PATH = "/a/reading/trading-system-boundaries"
 ADAM_ARTICLE_PATH = "/a/reading/adam-grimes-trading-templates"
 STOP_LOSS_ARTICLE_PATH = "/a/reading/stop-loss-is-not-a-percentage"
 MOVING_AVERAGE_ARTICLE_PATH = "/a/reading/moving-averages-are-not-trading-buttons"
+PULLBACK_ARTICLE_PATH = "/a/reading/adam-grimes-pullback-trading"
 
 
 def _app(tmp_path):
@@ -150,7 +151,7 @@ def test_logged_in_user_can_read_moving_average_article(tmp_path):
     assert article.text.count("<h2") == 9
     assert f'href="{STOP_LOSS_ARTICLE_PATH}"' in article.text
     assert "上一篇" in article.text
-    assert "已经是最新一篇" in article.text
+    assert f'href="{PULLBACK_ARTICLE_PATH}"' in article.text
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"
 
@@ -174,3 +175,43 @@ def test_article_navigation_follows_publication_dates(tmp_path):
     stop_loss = client.get(STOP_LOSS_ARTICLE_PATH)
     assert f'href="{ADAM_ARTICLE_PATH}"' in stop_loss.text
     assert f'href="{MOVING_AVERAGE_ARTICLE_PATH}"' in stop_loss.text
+
+    moving_average = client.get(MOVING_AVERAGE_ARTICLE_PATH)
+    assert f'href="{STOP_LOSS_ARTICLE_PATH}"' in moving_average.text
+    assert f'href="{PULLBACK_ARTICLE_PATH}"' in moving_average.text
+
+    newest = client.get(PULLBACK_ARTICLE_PATH)
+    assert f'href="{MOVING_AVERAGE_ARTICLE_PATH}"' in newest.text
+    assert "已经是最新一篇" in newest.text
+
+
+def test_adam_grimes_pullback_article_requires_login(tmp_path):
+    response = TestClient(_app(tmp_path)).get(
+        PULLBACK_ARTICLE_PATH,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/login?next={PULLBACK_ARTICLE_PATH}"
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_logged_in_user_can_read_adam_grimes_pullback_article(tmp_path):
+    client = TestClient(_app(tmp_path))
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    article = client.get(PULLBACK_ARTICLE_PATH)
+    assert article.status_code == 200
+    assert "Adam Grimes 如何交易回调" in article.text
+    assert "先找到一段真实而非高潮式的推动" in article.text
+    assert "允许承担的单笔风险" in article.text
+    assert "风险提示" in article.text
+    assert article.text.count("<h2") == 11
+    assert f'href="{MOVING_AVERAGE_ARTICLE_PATH}"' in article.text
+    assert "已经是最新一篇" in article.text
+    assert article.headers["cache-control"] == "private, no-store"
+    assert article.headers["x-robots-tag"] == "noindex, nofollow"

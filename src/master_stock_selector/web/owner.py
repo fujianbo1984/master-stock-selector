@@ -8,6 +8,16 @@ DEFAULT_SITE_OWNER_USERNAME = "我不是来玩的"
 
 OWNER_READING_NOTES = (
     {
+        "title": "Adam Grimes 如何交易回调",
+        "summary": (
+            "系统梳理回调交易方法，理解推动、简单与复杂回调、"
+            "结构止损、1R管理及形态失效。"
+        ),
+        "href": "/a/reading/adam-grimes-pullback-trading",
+        "updated_on": "2026-08-19",
+        "tags": ("Adam Grimes", "回调交易", "趋势交易"),
+    },
+    {
         "title": "均线不是买卖按钮",
         "summary": (
             "对比五位交易大师的均线思想，理解趋势阶段、候选过滤、"

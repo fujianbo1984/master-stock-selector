@@ -1605,6 +1605,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .reading-prose { color: #24364a; font-family: "Songti SC", "STSong", serif; font-size: 17px; line-height: 1.95; }
 .reading-prose > p { margin: 1.25em 0; }
 .reading-prose h2 { margin: 2.6em 0 .8em; color: var(--text); font-size: 25px; line-height: 1.45; }
+.reading-prose h3 { margin: 1.9em 0 .55em; color: var(--text); font-size: 19px; line-height: 1.5; }
 .reading-prose strong { color: var(--text); }
 .reading-prose ul { margin: 1.15em 0; padding-left: 1.25em; }
 .reading-prose li { margin: .45em 0; }

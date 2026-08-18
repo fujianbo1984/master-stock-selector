@@ -102,4 +102,15 @@ def build_content_router(*, render: Render) -> APIRouter:
             "reading/moving_averages_are_not_trading_buttons.html",
         )
 
+    @router.get(
+        "/a/reading/adam-grimes-pullback-trading",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    def adam_grimes_pullback_trading(request: Request) -> Response:
+        return render_private_article(
+            request,
+            "reading/adam_grimes_pullback_trading.html",
+        )
+
     return router
