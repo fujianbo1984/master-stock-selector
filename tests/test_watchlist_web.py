@@ -1847,7 +1847,6 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
     assert "一个账号对应一个独立工作区" in login.text
     assert 'data-password-toggle' in login.text
     assert "进入我的工作区" in login.text
-
     stock = client.get("/a/stocks/000001.SZ")
     chart = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30")
 
