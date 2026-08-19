@@ -4,13 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}龙场悟道 · 大师选股{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260819-pullback-article-v46">
+  <link rel="stylesheet" href="/static/app.css?v=20260819-configured-filing-footer-v47">
 </head>
 <body class="app-body {% block body_class %}{% endblock %}">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
   <main class="shell" id="main-content">
     {% block body %}{% endblock %}
   </main>
+  {% if icp_filing %}
+  <footer class="site-footer">
+    <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{{ icp_filing }}</a>
+  </footer>
+  {% endif %}
   <script>
     document.querySelectorAll("[data-password-toggle]").forEach((button) => {
       const input = document.getElementById(button.getAttribute("aria-controls"));

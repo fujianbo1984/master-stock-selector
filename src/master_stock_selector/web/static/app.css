@@ -65,6 +65,20 @@ th[role="button"]:focus-visible {
 
 .shell { width: 100%; max-width: 1600px; flex: 1 0 auto; margin: 0 auto; padding: 16px 28px 42px; }
 
+.site-footer {
+  width: 100%;
+  max-width: 1600px;
+  flex: 0 0 auto;
+  margin: 0 auto;
+  padding: 0 28px 20px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .35px;
+  text-align: right;
+}
+.site-footer a { border-bottom: 1px solid transparent; }
+.site-footer a:hover { border-bottom-color: var(--accent); }
+
 .research-header {
   display: grid;
   grid-template-columns: auto minmax(190px, 1fr) auto auto;

@@ -43,6 +43,7 @@ def create_app(
     geoip_database: str | Path | None = None,
     trusted_proxies: str | None = None,
     access_logging: bool | None = None,
+    icp_filing: str | None = None,
 ) -> FastAPI:
     """Create the user-facing two-master watchlist website."""
 
@@ -74,6 +75,11 @@ def create_app(
         if access_logging is None
         else access_logging
     )
+    configured_icp_filing = (
+        icp_filing
+        if icp_filing is not None
+        else os.environ.get("MASTERSTOCK_ICP_FILING", "")
+    ).strip()
 
     app = FastAPI(
         title="大师选股",
@@ -179,6 +185,7 @@ def create_app(
                 user is not None and user.username.casefold() == owner_username.casefold()
             ),
             "csrf_token": user.csrf_token if user is not None else "",
+            "icp_filing": configured_icp_filing,
             "research_date": (
                 context.get("query_date")
                 or context.get("latest_date")

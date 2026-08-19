@@ -1847,6 +1847,7 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
     assert "一个账号对应一个独立工作区" in login.text
     assert 'data-password-toggle' in login.text
     assert "进入我的工作区" in login.text
+    assert "site-footer" not in login.text
     stock = client.get("/a/stocks/000001.SZ")
     chart = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30")
 
@@ -1872,6 +1873,22 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
         "/api/me/stocks/000001.SZ/overlay"
         "?date=2026-06-30&price_scale_id=qfq-scale-v1"
     ).status_code == 401
+
+
+def test_icp_footer_is_rendered_only_from_explicit_local_configuration(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    app = create_app(
+        market_database=tmp_path / "market.sqlite3",
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+        icp_filing="测试ICP备2026000001号-1",
+    )
+
+    response = TestClient(app).get("/login")
+
+    assert "测试ICP备2026000001号-1" in response.text
+    assert 'href="https://beian.miit.gov.cn/"' in response.text
 
 
 def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
