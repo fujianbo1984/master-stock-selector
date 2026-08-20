@@ -1,5 +1,32 @@
 # ECS 部署资产
 
+## 单入口发布
+
+正式发布和远端候选演练统一使用：
+
+```bash
+# 默认安全模式：完整本地验证，ECS 上创建并验收临时候选，随后清理，不切换正式服务
+scripts/release_ecs.sh --rehearse
+
+# 新功能有额外登录后页面时，可重复指定烟测路径
+scripts/release_ecs.sh --rehearse \
+  --smoke-path /a/reading/al-brooks-pullback-trading
+
+# 正式切换必须显式确认当前提交；脚本拒绝脏的已跟踪工作区、跳过测试或提交不匹配
+scripts/release_ecs.sh --apply --confirm-commit "$(git rev-parse HEAD)"
+```
+
+发布器只归档已提交的 `HEAD`，禁止数据库、`.env`、日志、备份和个人数据进入归档。
+默认使用 Cloud Assistant，不修改 SSH、UFW 或安全组。远端候选使用
+`/etc/uv/uv.toml` 和持久化 `/var/cache/masterstock/uv`，依赖来自
+`requirements-runtime-lock.txt`；Ruff、Mypy 和 Pytest 不安装到生产候选。
+
+演练模式只读访问三份线上权威数据库，登录验收使用本次专属临时用户库；演练结束会
+核对两份公共库完整指纹未变，并确认用户库 inode、设备、schema 与 quick_check 正常，
+允许线上真实访问日志自然增长；随后删除精确候选和暂存目录。正式模式先创建
+独立用户库备份，只接受已兼容的用户库 schema，再原子切换代码；启动失败自动恢复旧版。
+数据库 schema 迁移仍是单独的高风险流程，不由普通代码发布器自动执行。
+
 这些模板适用于单台 Ubuntu ECS 的双入口部署：FastAPI 只监听
 `127.0.0.1:8000`，Nginx 在公网 `8888` 仅代理公开、只读页面。登录、个人空间、
 `/api/me/` 和 `/api/v1/` Agent API 均不经过公网 HTTP；私人浏览器和 CLI 通过 SSH

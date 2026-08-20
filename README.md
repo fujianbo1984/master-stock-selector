@@ -139,6 +139,13 @@ Token 不支持作为命令行参数传入。
 
 部署模板位于 [`deploy/`](deploy/)，详细操作见 [`deploy/README.md`](deploy/README.md)。模板不是线上状态声明：部署、数据库迁移与公网验收须在目标环境单独执行。ECS 上的运行数据库是线上权威数据，日常同步不得用本地数据库覆盖。
 
+已提交版本可先执行不切换正式服务的 ECS 演练；正式发布必须显式确认提交：
+
+```bash
+scripts/release_ecs.sh --rehearse
+scripts/release_ecs.sh --apply --confirm-commit "$(git rev-parse HEAD)"
+```
+
 本地验证通过后不会自动部署或发布。只有在获得明确授权后，才可同步纯代码与配置；GitHub 仅保存已经验证的代码、模板和文档。
 
 ## 验证
