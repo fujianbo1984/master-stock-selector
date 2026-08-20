@@ -70,6 +70,17 @@ def build_content_router(*, render: Render) -> APIRouter:
         )
 
     @router.get(
+        "/a/reading/al-brooks-pullback-trading",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    def al_brooks_pullback_trading(request: Request) -> Response:
+        return render_private_article(
+            request,
+            "reading/al_brooks_pullback_trading.html",
+        )
+
+    @router.get(
         "/a/reading/adam-grimes-trading-templates",
         response_class=HTMLResponse,
         include_in_schema=False,

@@ -8,6 +8,7 @@ ADAM_ARTICLE_PATH = "/a/reading/adam-grimes-trading-templates"
 STOP_LOSS_ARTICLE_PATH = "/a/reading/stop-loss-is-not-a-percentage"
 MOVING_AVERAGE_ARTICLE_PATH = "/a/reading/moving-averages-are-not-trading-buttons"
 PULLBACK_ARTICLE_PATH = "/a/reading/adam-grimes-pullback-trading"
+BROOKS_PULLBACK_ARTICLE_PATH = "/a/reading/al-brooks-pullback-trading"
 
 
 def _app(tmp_path):
@@ -182,6 +183,10 @@ def test_article_navigation_follows_publication_dates(tmp_path):
 
     newest = client.get(PULLBACK_ARTICLE_PATH)
     assert f'href="{MOVING_AVERAGE_ARTICLE_PATH}"' in newest.text
+    assert f'href="{BROOKS_PULLBACK_ARTICLE_PATH}"' in newest.text
+
+    newest = client.get(BROOKS_PULLBACK_ARTICLE_PATH)
+    assert f'href="{PULLBACK_ARTICLE_PATH}"' in newest.text
     assert "已经是最新一篇" in newest.text
 
 
@@ -212,6 +217,38 @@ def test_logged_in_user_can_read_adam_grimes_pullback_article(tmp_path):
     assert "风险提示" in article.text
     assert article.text.count("<h2") == 11
     assert f'href="{MOVING_AVERAGE_ARTICLE_PATH}"' in article.text
+    assert f'href="{BROOKS_PULLBACK_ARTICLE_PATH}"' in article.text
+    assert article.headers["cache-control"] == "private, no-store"
+    assert article.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_al_brooks_pullback_article_requires_login(tmp_path):
+    response = TestClient(_app(tmp_path)).get(
+        BROOKS_PULLBACK_ARTICLE_PATH,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/login?next={BROOKS_PULLBACK_ARTICLE_PATH}"
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_logged_in_user_can_read_al_brooks_pullback_article(tmp_path):
+    client = TestClient(_app(tmp_path))
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    article = client.get(BROOKS_PULLBACK_ARTICLE_PATH)
+    assert article.status_code == 200
+    assert "Al Brooks 如何交易回调" in article.text
+    assert "先确定市场由哪一方控制" in article.text
+    assert "交易者方程" in article.text
+    assert "风险提示" in article.text
+    assert article.text.count("<h2") == 14
+    assert f'href="{PULLBACK_ARTICLE_PATH}"' in article.text
     assert "已经是最新一篇" in article.text
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"

@@ -8,6 +8,16 @@ DEFAULT_SITE_OWNER_USERNAME = "我不是来玩的"
 
 OWNER_READING_NOTES = (
     {
+        "title": "Al Brooks 如何交易回调",
+        "summary": (
+            "从市场环境、第一次回调、高1高2、楔形旗形到突破回调，"
+            "理解回调交易的趋势恢复逻辑与风险边界。"
+        ),
+        "href": "/a/reading/al-brooks-pullback-trading",
+        "updated_on": "2026-08-20",
+        "tags": ("Al Brooks", "回调交易", "趋势交易", "价格行为"),
+    },
+    {
         "title": "Adam Grimes 如何交易回调",
         "summary": (
             "系统梳理回调交易方法，理解推动、简单与复杂回调、"
