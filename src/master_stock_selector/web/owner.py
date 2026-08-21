@@ -8,6 +8,16 @@ DEFAULT_SITE_OWNER_USERNAME = "我不是来玩的"
 
 OWNER_READING_NOTES = (
     {
+        "title": "Adam 与 Brooks 的回调交易思路",
+        "summary": (
+            "用 Adam 的结构筛选回调，再用 Brooks 的逐 K 线方法选择触发，"
+            "将趋势背景、进场、止损与利润管理连成一条决策链。"
+        ),
+        "href": "/a/reading/adam-and-brooks-pullback-execution",
+        "updated_on": "2026-08-21",
+        "tags": ("Adam Grimes", "Al Brooks", "回调交易", "价格行为"),
+    },
+    {
         "title": "Al Brooks 如何交易回调",
         "summary": (
             "从市场环境、第一次回调、高1高2、楔形旗形到突破回调，"
