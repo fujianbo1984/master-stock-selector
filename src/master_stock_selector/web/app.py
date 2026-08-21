@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
@@ -31,6 +32,14 @@ TEMPLATE_DIR = Path(__file__).with_name("templates")
 STATIC_DIR = Path(__file__).with_name("static")
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LOGGER = logging.getLogger(__name__)
+PUBLIC_HTML_CACHE_PATH = re.compile(
+    r"^/a/(?:daily|industries|indices|runs|industries/[^/]+/chart|"
+    r"stocks/[^/]+(?:/(?:chart|realtime))?)$"
+)
+PUBLIC_API_CACHE_PATH = re.compile(
+    r"^/api/a/(?:stocks/[^/]+/chart|watchlist/[^/]+|"
+    r"industries/[^/]+(?:/[^/]+)?|indices/[^/]+)$"
+)
 
 
 def create_app(
@@ -140,7 +149,7 @@ def create_app(
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if cookies_are_secure:
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if request.url.path.startswith("/static/") and request.url.path.endswith((".css", ".js")):
+        if request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif current_user(request) is not None or request.url.path.startswith(
             ("/login", "/a/focus", "/a/review", "/a/owner", "/api/me/", "/api/v1/")
@@ -149,6 +158,17 @@ def create_app(
             response.headers["Vary"] = (
                 "Authorization" if request.url.path.startswith("/api/v1/") else "Cookie"
             )
+        elif request.url.path == "/healthz":
+            response.headers["Cache-Control"] = "no-store"
+        elif request.method in {"GET", "HEAD"} and response.status_code == 200:
+            if PUBLIC_API_CACHE_PATH.fullmatch(request.url.path):
+                response.headers["Cache-Control"] = (
+                    "public, max-age=300, stale-while-revalidate=60"
+                )
+            elif PUBLIC_HTML_CACHE_PATH.fullmatch(request.url.path):
+                response.headers["Cache-Control"] = (
+                    "public, max-age=30, stale-while-revalidate=60"
+                )
         return response
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))

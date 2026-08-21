@@ -1823,6 +1823,9 @@ def test_private_review_overlays_public_cache_and_exposes_timing(tmp_path):
     realtime_controller = client.get("/static/realtime-chart.js")
     assert realtime_controller.status_code == 200
     assert realtime_controller.headers["cache-control"] == "public, max-age=31536000, immutable"
+    static_icon = client.get("/static/vendor/lucide-chevron-left.svg")
+    assert static_icon.status_code == 200
+    assert static_icon.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert 'frame.addEventListener("load"' in realtime_controller.text
     assert 'window.addEventListener("keydown"' in realtime_controller.text
     assert 'event.key === "ArrowLeft"' in realtime_controller.text
@@ -1852,6 +1855,12 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
     chart = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30")
 
     assert stock.status_code == 200
+    assert stock.headers["cache-control"] == (
+        "public, max-age=30, stale-while-revalidate=60"
+    )
+    assert chart.headers["cache-control"] == (
+        "public, max-age=300, stale-while-revalidate=60"
+    )
     assert "登录后记录个人观察" in stock.text
     assert 'action="/a/stocks/000001.SZ/review"' not in stock.text
     assert "trade_overlay" not in chart.json()
@@ -1873,6 +1882,7 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
         "/api/me/stocks/000001.SZ/overlay"
         "?date=2026-06-30&price_scale_id=qfq-scale-v1"
     ).status_code == 401
+    assert client.get("/healthz").headers["cache-control"] == "no-store"
 
 
 def test_icp_footer_is_rendered_only_from_explicit_local_configuration(tmp_path):
