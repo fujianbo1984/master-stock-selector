@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
-from ..owner import OWNER_READING_NOTES
+from ..articles import published_article, published_articles
 from .auth import current_user
 
 Render = Callable[[Request, str, dict[str, Any]], HTMLResponse]
@@ -15,135 +16,80 @@ Render = Callable[[Request, str, dict[str, Any]], HTMLResponse]
 def build_content_router(*, render: Render) -> APIRouter:
     router = APIRouter()
 
-    def render_private_article(request: Request, template: str) -> Response:
-        if current_user(request) is None:
-            redirect = RedirectResponse(
-                f"/login?next={request.url.path}",
-                status_code=303,
-            )
-            redirect.headers["Cache-Control"] = "private, no-store"
-            return redirect
-        articles = sorted(
-            OWNER_READING_NOTES,
-            key=lambda article: (
-                str(article.get("updated_on") or ""),
-                str(article.get("href") or ""),
-            ),
-        )
-        current_index = next(
-            (
-                index
-                for index, article in enumerate(articles)
-                if article.get("href") == request.url.path
-            ),
-            -1,
-        )
-        previous_article = articles[current_index - 1] if current_index > 0 else None
-        next_article = (
-            articles[current_index + 1]
-            if 0 <= current_index < len(articles) - 1
-            else None
-        )
-        response = render(
-            request,
-            template,
-            {
-                "active": "",
-                "suppress_research_date_note": True,
-                "previous_article": previous_article,
-                "next_article": next_article,
-            },
-        )
+    def require_reader(request: Request) -> Response | None:
+        if current_user(request) is not None:
+            return None
+        redirect = RedirectResponse(f"/login?next={request.url.path}", status_code=303)
+        redirect.headers["Cache-Control"] = "private, no-store"
+        return redirect
+
+    def mark_private(response: Response) -> Response:
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
         return response
 
-    @router.get(
-        "/a/reading/support-resistance-price-boundaries",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def support_resistance_price_boundaries(request: Request) -> Response:
-        return render_private_article(
-            request,
-            "reading/support_resistance_price_boundaries.html",
+    @router.get("/a/reading", response_class=HTMLResponse, include_in_schema=False)
+    def reading_archive(request: Request) -> Response:
+        redirect = require_reader(request)
+        if redirect is not None:
+            return redirect
+        return mark_private(
+            render(
+                request,
+                "reading/archive.html",
+                {
+                    "active": "",
+                    "articles": published_articles(),
+                    "suppress_research_date_note": True,
+                },
+            )
         )
 
     @router.get(
-        "/a/reading/trading-system-boundaries",
-        response_class=HTMLResponse,
+        "/a/reading/{slug}/assets/{asset_path:path}",
         include_in_schema=False,
     )
-    def trading_system_boundaries(request: Request) -> Response:
-        return render_private_article(
-            request,
-            "reading/trading_system_boundaries.html",
-        )
+    def reading_asset(request: Request, slug: str, asset_path: str) -> Response:
+        redirect = require_reader(request)
+        if redirect is not None:
+            return redirect
+        article = published_article(slug)
+        if article is None:
+            raise HTTPException(status_code=404)
+        article_dir = Path(article["source_path"]).parent.resolve()
+        asset = (article_dir / asset_path).resolve()
+        if not asset.is_relative_to(article_dir) or not asset.is_file():
+            raise HTTPException(status_code=404)
+        return mark_private(FileResponse(asset))
 
-    @router.get(
-        "/a/reading/al-brooks-pullback-trading",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def al_brooks_pullback_trading(request: Request) -> Response:
-        return render_private_article(
-            request,
-            "reading/al_brooks_pullback_trading.html",
+    @router.get("/a/reading/{slug}", response_class=HTMLResponse, include_in_schema=False)
+    def reading_article(request: Request, slug: str) -> Response:
+        redirect = require_reader(request)
+        if redirect is not None:
+            return redirect
+        article = published_article(slug)
+        if article is None:
+            raise HTTPException(status_code=404)
+        articles = sorted(
+            published_articles(),
+            key=lambda item: (str(item["published_on"]), str(item["slug"])),
         )
-
-    @router.get(
-        "/a/reading/adam-and-brooks-pullback-execution",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def adam_and_brooks_pullback_execution(request: Request) -> Response:
-        return render_private_article(
-            request,
-            "reading/adam_and_brooks_pullback_execution.html",
+        current_index = next(
+            index for index, item in enumerate(articles) if item["slug"] == slug
         )
-
-    @router.get(
-        "/a/reading/adam-grimes-trading-templates",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def adam_grimes_trading_templates(request: Request) -> Response:
-        return render_private_article(
+        response = render(
             request,
-            "reading/adam_grimes_trading_templates.html",
+            "reading/article.html",
+            {
+                "active": "",
+                "article": article,
+                "previous_article": articles[current_index - 1] if current_index > 0 else None,
+                "next_article": (
+                    articles[current_index + 1] if current_index < len(articles) - 1 else None
+                ),
+                "suppress_research_date_note": True,
+            },
         )
-
-    @router.get(
-        "/a/reading/stop-loss-is-not-a-percentage",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def stop_loss_is_not_a_percentage(request: Request) -> Response:
-        return render_private_article(
-            request,
-            "reading/stop_loss_is_not_a_percentage.html",
-        )
-
-    @router.get(
-        "/a/reading/moving-averages-are-not-trading-buttons",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def moving_averages_are_not_trading_buttons(request: Request) -> Response:
-        return render_private_article(
-            request,
-            "reading/moving_averages_are_not_trading_buttons.html",
-        )
-
-    @router.get(
-        "/a/reading/adam-grimes-pullback-trading",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def adam_grimes_pullback_trading(request: Request) -> Response:
-        return render_private_article(
-            request,
-            "reading/adam_grimes_pullback_trading.html",
-        )
+        return mark_private(response)
 
     return router

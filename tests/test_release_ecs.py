@@ -72,7 +72,6 @@ def test_baseline_and_apply_scripts_keep_safety_contract() -> None:
         region="cn-hangzhou",
         instance_id="i-example",
         canonical_url="https://example.com",
-        readonly_url="http://127.0.0.1:8888",
         smoke_paths=("/a/daily",),
         skip_tests=False,
         allow_dirty_worktree=False,

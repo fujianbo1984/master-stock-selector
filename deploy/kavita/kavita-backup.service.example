@@ -1,0 +1,14 @@
+[Unit]
+Description=Consistent backup of Kavita configuration and reader data
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/backup-kavita
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/kavita /var/lib/kavita

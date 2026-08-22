@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kavita configuration backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=10m
+Unit=kavita-backup.service
+
+[Install]
+WantedBy=timers.target

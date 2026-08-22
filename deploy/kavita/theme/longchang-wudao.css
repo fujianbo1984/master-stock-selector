@@ -1,0 +1,254 @@
+:root .bg-longchang-wudao {
+  --color-scheme: light;
+  --theme-color: #b55443;
+  --tile-color: #eee9e1;
+  --primary-color: #b55443;
+  --primary-color-dark-shade: #9a473f;
+  --primary-color-darker-shade: #833b34;
+  --primary-color-darkest-shade: #6d302b;
+  --error-color: #9a473f;
+
+  --bs-body-bg: #eee9e1;
+  --bs-body-color: #2a2521;
+  --bs-body-color-rgb: 42, 37, 33;
+  --bs-emphasis-color: #2a2521;
+  --bs-heading-color: #2a2521;
+  --bs-link-color: #9a473f;
+  --bs-link-hover-color: #6d302b;
+  --body-text-color: #2a2521;
+  --hr-color: #d7cfc5;
+  --accent-bg-color: #f0e3d9;
+  --accent-text-color: #2a2521;
+  --body-font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  --brand-font-family: "Songti SC", "STSong", serif;
+  --text-muted-color: #716a63;
+
+  --navbar-bg-color: #f7f3ed;
+  --navbar-text-color: #2a2521;
+  --navbar-fa-icon-color: #716a63;
+  --navbar-btn-hover-outline-color: #b55443;
+  --bs-navbar-color: #2a2521;
+  --bs-navbar-hover-color: #b55443;
+  --bs-navbar-disabled-color: #9b948c;
+  --bs-navbar-active-color: #2a2521;
+  --bs-navbar-brand-color: #2a2521;
+  --bs-navbar-brand-hover-color: #b55443;
+
+  --side-nav-bg-color: #f7f3ed;
+  --side-nav-mobile-bg-color: #f7f3ed;
+  --side-nav-text-color: #716a63;
+  --side-nav-hover-text-color: #2a2521;
+  --side-nav-hover-bg-color: #f0e3d9;
+  --side-nav-header-text-color: #2a2521;
+  --side-nav-closed-bg-color: #f7f3ed;
+  --side-nav-item-color: #716a63;
+  --side-nav-item-active-color: #b55443;
+  --side-nav-item-active-text-color: #2a2521;
+  --side-nav-active-bg-color: #f0e3d9;
+
+  --card-bg-color: #f7f3ed;
+  --card-body-bg-color: #f7f3ed;
+  --card-text-color: #2a2521;
+  --card-title-text-color: #2a2521;
+  --card-border-width: 1px;
+  --card-border-style: solid;
+  --card-border-color: #d7cfc5;
+  --card-progress-bar-color: #b55443;
+
+  --input-bg-color: #fbf9f5;
+  --input-bg-readonly-color: #f3eee7;
+  --input-focused-border-color: #b55443;
+  --input-text-color: #2a2521;
+  --input-placeholder-color: #716a63;
+  --input-border-color: #bdb3a7;
+  --input-focus-boxshadow-color: rgba(181, 84, 67, 0.2);
+
+  --btn-primary-text-color: #fff;
+  --btn-primary-bg-color: #b55443;
+  --btn-primary-border-color: #b55443;
+  --btn-primary-hover-text-color: #fff;
+  --btn-primary-hover-bg-color: #9a473f;
+  --btn-primary-hover-border-color: #9a473f;
+  --btn-secondary-text-color: #2a2521;
+  --btn-secondary-bg-color: #f7f3ed;
+  --btn-secondary-border-color: #bdb3a7;
+  --btn-secondary-hover-bg-color: #f0e3d9;
+  --btn-secondary-hover-border-color: #b55443;
+  --btn-outline-primary-text-color: #2a2521;
+  --btn-outline-primary-bg-color: transparent;
+  --btn-outline-primary-border-color: #b55443;
+  --btn-outline-primary-hover-text-color: #fff;
+  --btn-outline-primary-hover-bg-color: #9a473f;
+  --btn-outline-primary-hover-border-color: #9a473f;
+  --btn-secondary-outline-text-color: #2a2521;
+  --btn-secondary-outline-bg-color: #f7f3ed;
+  --btn-secondary-outline-border-color: #bdb3a7;
+  --btn-secondary-outline-hover-text-color: #2a2521;
+  --btn-secondary-outline-hover-bg-color: #f0e3d9;
+  --btn-secondary-outline-hover-border-color: #b55443;
+  --btn-danger-outline-text-color: #9a473f;
+  --btn-danger-outline-bg-color: #f7f3ed;
+  --btn-danger-outline-border-color: #9a473f;
+  --btn-primary-text-text-color: #b55443;
+  --btn-secondary-text-text-color: #716a63;
+  --btn-disabled-text-color: #716a63;
+  --btn-fa-icon-color: #b55443;
+
+  --modal-bg-color: #f7f3ed;
+  --bs-modal-bg: #f7f3ed;
+  --bs-modal-color: #2a2521;
+  --bs-offcanvas-bg: #f7f3ed;
+  --bs-offcanvas-color: #2a2521;
+  --drawer-bg-color: #f7f3ed;
+  --drawer-text-color: #2a2521;
+  --dropdown-item-bg-color: #f7f3ed;
+  --dropdown-item-text-color: #2a2521;
+  --dropdown-item-hover-bg-color: #f0e3d9;
+  --dropdown-item-hover-text-color: #2a2521;
+  --bs-dropdown-bg: #f7f3ed;
+  --bs-dropdown-color: #2a2521;
+  --bs-dropdown-link-color: #2a2521;
+  --bs-dropdown-link-hover-bg: #f0e3d9;
+  --bs-dropdown-link-hover-color: #2a2521;
+  --bs-dropdown-link-active-bg: #b55443;
+  --bs-dropdown-link-active-color: #fff;
+  --popover-bg-color: #f7f3ed;
+  --popover-body-bg-color: #f7f3ed;
+  --popover-body-text-color: #2a2521;
+  --popover-border-color: #d7cfc5;
+  --bs-popover-bg: #f7f3ed;
+  --bs-popover-body-color: #2a2521;
+  --bs-popover-border-color: #d7cfc5;
+  --tooltip-bg-color: #f7f3ed;
+  --tooltip-caret-color: #f7f3ed;
+  --tooltip-outline-color: #d7cfc5;
+  --bs-tooltip-bg: #f7f3ed;
+  --bs-tooltip-color: #2a2521;
+  --nav-header-bg-color: #f3eee7;
+  --nav-header-text-color: #2a2521;
+  --event-widget-bg-color: #f7f3ed;
+  --event-widget-item-bg-color: #f7f3ed;
+  --event-widget-text-color: #2a2521;
+  --event-widget-item-border-color: #d7cfc5;
+  --event-widget-border-color: #d7cfc5;
+  --list-group-item-bg-color: #f7f3ed;
+  --list-group-item-text-color: #2a2521;
+  --list-group-hover-bg-color: #f0e3d9;
+  --list-group-hover-text-color: #2a2521;
+  --list-group-item-border-color: #d7cfc5;
+  --table-header-bg-color: #f3eee7;
+  --table-header-text-color: #2a2521;
+  --table-body-bg-color: #f7f3ed;
+  --table-body-text-color: #2a2521;
+  --table-body-striped-bg-color: #f3eee7;
+  --table-body-border: #d7cfc5;
+  --progress-bg-color: #d7cfc5;
+  --progress-bar-color: #b55443;
+  --checkbox-checked-bg-color: #b55443;
+  --checkbox-border-color: #bdb3a7;
+
+  --pagination-active-link-bg-color: #b55443;
+  --pagination-active-link-border-color: #b55443;
+  --pagination-active-link-text-color: #fff;
+  --pagination-link-bg-color: #f7f3ed;
+  --pagination-link-border-color: #d7cfc5;
+  --pagination-link-text-color: #2a2521;
+
+  --nav-tab-text-color: #716a63;
+  --nav-tab-active-text-color: #2a2521;
+  --nav-tab-hover-text-color: #2a2521;
+  --nav-link-text-color: #716a63;
+  --nav-link-active-text-color: #2a2521;
+  --detail-title-color: #2a2521;
+  --detail-subtitle-color: #716a63;
+  --label-card-label-color: #716a63;
+  --label-card-value-color: #2a2521;
+  --label-card-value-muted-color: #716a63;
+  --file-path-color: #716a63;
+  --carousel-btn-color: #2a2521;
+  --breadcrumb-item-text-color: #2a2521;
+  --bulk-selection-text-color: #2a2521;
+  --review-spoiler-text-color: #2a2521;
+  --search-result-text-lite-color: #2a2521;
+
+  /* Complete the upstream dark-theme semantic surface for the light scheme. */
+  --setting-header-text-color: #2a2521;
+  --pref-side-nav-header-text-color: #2a2521;
+  --setting-break-color: #d7cfc5;
+  --btn-disabled-bg-color: #f3eee7;
+  --btn-disabled-text-color: #716a63;
+  --btn-disabled-border-color: #bdb3a7;
+  --btn-alt-bg-color: #f7f3ed;
+  --btn-alt-border-color: #bdb3a7;
+  --btn-alt-hover-bg-color: #f0e3d9;
+  --btn-alt-focus-bg-color: #f0e3d9;
+  --btn-danger-outline-hover-text-color: #fff;
+  --btn-danger-outline-hover-bg-color: #9a473f;
+  --btn-danger-outline-hover-border-color: #9a473f;
+  --side-nav-item-closed-hover-color: #2a2521;
+
+  --accordion-header-text-color: #9a473f;
+  --accordion-header-bg-color: #f3eee7;
+  --accordion-body-bg-color: #f7f3ed;
+  --accordion-body-border-color: #d7cfc5;
+  --accordion-body-text-color: #2a2521;
+  --accordion-header-collapsed-text-color: #9a473f;
+  --accordion-header-collapsed-bg-color: #f7f3ed;
+  --accordion-active-body-bg-color: #f7f3ed;
+  --breadcrumb-bg-color: #f3eee7;
+  --bulk-selection-bg-color: #f3eee7;
+  --bulk-selection-text-color: #2a2521;
+  --bulk-selection-highlight-text-color: #9a473f;
+
+  --select2-label-text-color: #2a2521;
+  --select2-selection-border-color: #bdb3a7;
+  --select2-selection-text-color: #2a2521;
+  --select2-selection-choice-text-color: #2a2521;
+  --select2-selection-choice-close-color: #716a63;
+  --select2-selection-choice-hover-close-color: #2a2521;
+  --select2-dropdown-background: #f7f3ed;
+  --select2-dropdown-border-color: #bdb3a7;
+  --select2-search-border-color: #bdb3a7;
+  --select2-option-text-color: #2a2521;
+  --select2-option-selected-text-color: #2a2521;
+  --select2-option-selected-background: #f0e3d9;
+  --select2-option-highlighted-text-color: #fff;
+  --select2-option-highlighted-background: #b55443;
+  --select2-option-group-text-color: #2a2521;
+  --select2-arrow-color: #716a63;
+
+  --input-hint-border-color: #bdb3a7;
+  --input-hint-text-color: #716a63;
+  --label-card-bg: #f7f3ed;
+  --label-card-border: #d7cfc5;
+  --slider-text-color: #2a2521;
+  --ratingstar-color: #716a63;
+  --ratingstar-star-empty: #bdb3a7;
+  --card-list-item-bg-color: #f7f3ed;
+  --card-download-indicator-icon-color: #fff;
+  --card-download-indicator-box-shadow: 0 0 0 1.5px rgba(42, 37, 33, 0.25), 0 1px 3px rgba(42, 37, 33, 0.2);
+
+  --login-card-bg-color: #f7f3ed;
+  --login-card-border-color: #b55443;
+  --login-input-background-color: #fbf9f5;
+  --login-input-color: #2a2521;
+  --login-input-placeholder-color: #716a63;
+  --login-background-color: #eee9e1;
+  --login-background-opacity: 0;
+}
+
+/* Kavita marks the brand as dark-exempt and otherwise forces it to white. */
+.bg-longchang-wudao .navbar-brand.dark-exempt,
+.bg-longchang-wudao .navbar-brand.dark-exempt:visited {
+  color: #2a2521 !important;
+}
+
+.bg-longchang-wudao .navbar-brand.dark-exempt:hover,
+.bg-longchang-wudao .navbar-brand.dark-exempt:focus {
+  color: #b55443 !important;
+}
+
+/* Kavita hard-codes these overlay texts for its dark default theme. */
+.bg-longchang-wudao .continue-from {
+  color: #2a2521 !important;
+}

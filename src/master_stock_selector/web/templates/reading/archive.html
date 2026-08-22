@@ -1,0 +1,24 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block title %}研读随笔 · 龙场悟道{% endblock %}
+{% block heading %}研读随笔{% endblock %}
+{% block subtitle %}交易方法、市场结构与风险边界{% endblock %}
+{% block content %}
+<section class="section reading-archive-shell">
+  <header class="reading-archive-header">
+    <p class="eyebrow">站内共享 · 持续更新</p>
+    <h1>研读随笔</h1>
+    <p>把交易书籍与市场经验收敛成可识别、可执行、可证伪的研究边界。</p>
+  </header>
+  <div class="reading-archive-list">
+    {% for article in articles %}
+    <article>
+      <time datetime="{{ article.published_on }}">{{ article.published_on }}</time>
+      <h2><a href="{{ article.href }}">{{ article.title }}</a></h2>
+      <p>{{ article.summary }}</p>
+      <ul class="reading-tags" aria-label="文章标签">{% for tag in article.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

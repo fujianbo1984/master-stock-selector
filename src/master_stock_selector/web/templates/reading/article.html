@@ -1,0 +1,19 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block title %}{{ article.heading }} · 龙场悟道{% endblock %}
+{% block heading %}研读随笔{% endblock %}
+{% block subtitle %}{{ article.subtitle }}{% endblock %}
+{% block content %}
+<section class="section reading-shell">
+  <article class="reading-article" aria-labelledby="article-title">
+    <header class="reading-article-header">
+      <p class="eyebrow">{{ article.eyebrow }}</p>
+      <h1 id="article-title">{{ article.heading }}</h1>
+      <p class="reading-deck">{{ article.deck }}</p>
+      <ul class="reading-tags" aria-label="文章标签">{% for tag in article.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
+    </header>
+    <div class="reading-prose">{{ article.body_html|safe }}</div>
+    {% include "reading/_article_navigation.html" %}
+  </article>
+</section>
+{% endblock %}

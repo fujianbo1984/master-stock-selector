@@ -11,6 +11,7 @@ PULLBACK_ARTICLE_PATH = "/a/reading/adam-grimes-pullback-trading"
 BROOKS_PULLBACK_ARTICLE_PATH = "/a/reading/al-brooks-pullback-trading"
 COMBINED_PULLBACK_ARTICLE_PATH = "/a/reading/adam-and-brooks-pullback-execution"
 SUPPORT_RESISTANCE_ARTICLE_PATH = "/a/reading/support-resistance-price-boundaries"
+READING_ARCHIVE_PATH = "/a/reading"
 
 
 def _app(tmp_path):
@@ -104,15 +105,51 @@ def test_logged_in_user_can_read_adam_grimes_article_with_images(tmp_path):
     assert "八张示意图读懂Adam Grimes的交易模板" in article.text
     assert "失败测试" in article.text
     assert "Anti" in article.text
-    assert "/static/reading/adam-trading-templates/00103.jpg" in article.text
+    image_path = f"{ADAM_ARTICLE_PATH}/assets/images/00103.jpg"
+    assert image_path in article.text
     assert article.text.count('<figure class="reading-figure">') == 8
     assert 'aria-current="page"' not in article.text
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"
 
-    image = client.get("/static/reading/adam-trading-templates/00103.jpg")
+    image = client.get(image_path)
     assert image.status_code == 200
     assert image.headers["content-type"] == "image/jpeg"
+    assert image.headers["cache-control"] == "private, no-store"
+
+
+def test_reading_archive_requires_login_and_lists_all_articles(tmp_path):
+    client = TestClient(_app(tmp_path))
+    anonymous = client.get(READING_ARCHIVE_PATH, follow_redirects=False)
+    assert anonymous.status_code == 303
+    assert anonymous.headers["location"] == f"/login?next={READING_ARCHIVE_PATH}"
+
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+    archive = client.get(READING_ARCHIVE_PATH)
+    assert archive.status_code == 200
+    assert archive.text.count('class="reading-tags"') == 8
+    assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in archive.text
+    assert f'href="{ARTICLE_PATH}"' in archive.text
+    assert archive.headers["cache-control"] == "private, no-store"
+    assert archive.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_reading_asset_rejects_missing_article_and_path_escape(tmp_path):
+    client = TestClient(_app(tmp_path))
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    missing = client.get("/a/reading/not-an-article/assets/image.jpg")
+    assert missing.status_code == 404
+    escaped = client.get(f"{ADAM_ARTICLE_PATH}/assets/../../../../owner.py")
+    assert escaped.status_code == 404
 
 
 def test_stop_loss_article_requires_login(tmp_path):

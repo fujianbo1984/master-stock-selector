@@ -5,6 +5,7 @@
   const overlay = root.querySelector("[data-drawing-overlay]");
   const context = overlay.getContext("2d");
   const volumeInput = root.querySelector("[data-volume]");
+  const keltnerInput = root.querySelector("[data-keltner]");
   const kcSummary = root.querySelector("[data-kc-summary]");
   const changeReadout = root.querySelector("[data-chart-period-change]");
   const changeDate = root.querySelector("[data-chart-change-date]");
@@ -13,6 +14,21 @@
   const drawingHint = root.querySelector("[data-drawing-hint]");
   const deleteSelectedButton = root.querySelector("[data-delete-selected]");
   const methodEventDetail = root.querySelector("[data-method-event-detail]");
+  const frameworkPanel = root.querySelector("[data-chart-framework-panel]");
+  const compareButton = root.querySelector("[data-chart-compare]");
+  const comparePanel = root.querySelector("[data-chart-compare-panel]");
+  const timelineList = root.querySelector("[data-chart-method-timeline-list]");
+  const loadState = root.querySelector("[data-chart-load-state]");
+  const stateOverlay = root.querySelector("[data-chart-state-overlay]");
+  const stateTitle = root.querySelector("[data-chart-state-title]");
+  const stateDetail = root.querySelector("[data-chart-state-detail]");
+  const retryButton = root.querySelector("[data-chart-retry]");
+  const tradeLegend = root.querySelector("[data-trade-legend]");
+  const openValue = root.querySelector("[data-chart-open]");
+  const highValue = root.querySelector("[data-chart-high]");
+  const lowValue = root.querySelector("[data-chart-low]");
+  const closeValue = root.querySelector("[data-chart-close]");
+  const volumeValue = root.querySelector("[data-chart-volume]");
   const symbol = root.dataset.symbol;
   const date = root.dataset.date;
   const privateOverlayUrl = root.dataset.privateOverlayUrl || "";
@@ -26,16 +42,24 @@
   let previewAnchor = null;
   let selectedDrawingId = null;
   let recordMode = false;
+  let compareVisible = false;
+  let requestVersion = 0;
+  let requestController = null;
   let methodEventsById = new Map();
   const canonicalDrawingAnchors = new Map();
   const chartViewStorageKey = "masterstock-chart:view";
-  const methodLayerStorageKey = "masterstock-chart:method-layers";
+  const chartLayersStorageKey = "masterstock-chart:layers:v2";
+  const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";
+  const frameworkLayerVisible = () => root.querySelector(`[data-framework-layer="${frameworkForInterval()}"]`)?.checked === true;
   const syncChartViewControls = () => {
     root.querySelectorAll("[data-chart-interval]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.chartInterval === interval)));
     root.querySelectorAll("[data-chart-limit]").forEach(button => {
       const buttonLimit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit);
       button.setAttribute("aria-pressed", String(buttonLimit === limit));
     });
+    const framework = frameworkForInterval();
+    root.querySelectorAll("[data-framework-indicator], [data-framework-legend]").forEach(item => { item.hidden = item.dataset.frameworkIndicator !== undefined ? item.dataset.frameworkIndicator !== framework : item.dataset.frameworkLegend !== framework; });
+    root.querySelectorAll("[data-framework-status]").forEach(item => { item.hidden = item.dataset.frameworkStatus !== framework; });
   };
   const restoreChartView = () => {
     try {
@@ -49,25 +73,26 @@
     try { window.sessionStorage.setItem(chartViewStorageKey, JSON.stringify({ interval, limit })); }
     catch (_) { /* Browser storage can be unavailable. */ }
   };
-  const restoreMethodLayers = () => {
+  const restoreLayerSettings = () => {
     try {
-      const saved = JSON.parse(window.sessionStorage.getItem(methodLayerStorageKey) || "null");
+      const saved = JSON.parse(window.sessionStorage.getItem(chartLayersStorageKey) || "null");
       if (!saved || typeof saved !== "object") return;
-      root.querySelectorAll("[data-method-layer]").forEach(input => {
-        if (typeof saved[input.dataset.methodLayer] === "boolean") input.checked = saved[input.dataset.methodLayer];
+      root.querySelectorAll("[data-framework-layer]").forEach(input => {
+        if (typeof saved[input.dataset.frameworkLayer] === "boolean") input.checked = saved[input.dataset.frameworkLayer];
       });
+      if (typeof saved.keltner === "boolean") keltnerInput.checked = saved.keltner;
+      if (typeof saved.volume === "boolean") volumeInput.checked = saved.volume;
     } catch (_) { /* Browser storage can be unavailable or contain stale data. */ }
   };
-  const storeMethodLayers = () => {
-    try {
-      const saved = {};
-      root.querySelectorAll("[data-method-layer]").forEach(input => { saved[input.dataset.methodLayer] = input.checked; });
-      window.sessionStorage.setItem(methodLayerStorageKey, JSON.stringify(saved));
-    } catch (_) { /* Browser storage can be unavailable. */ }
+  const storeLayerSettings = () => {
+    const saved = { keltner: keltnerInput.checked, volume: volumeInput.checked };
+    root.querySelectorAll("[data-framework-layer]").forEach(input => { saved[input.dataset.frameworkLayer] = input.checked; });
+    try { window.sessionStorage.setItem(chartLayersStorageKey, JSON.stringify(saved)); }
+    catch (_) { /* Browser storage can be unavailable. */ }
   };
   restoreChartView();
+  restoreLayerSettings();
   syncChartViewControls();
-  restoreMethodLayers();
   const chart = LightweightCharts.createChart(chartNode, {
     layout: { background: { color: "#fffdfa" }, textColor: "#142d4c" },
     grid: { vertLines: { color: "#eee8de" }, horzLines: { color: "#eee8de" } },
@@ -81,12 +106,18 @@
   const upper = chart.addSeries(LightweightCharts.LineSeries, { color: "#a9b0b7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
   const basis = chart.addSeries(LightweightCharts.LineSeries, { color: "#b9bec4", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
   const lower = chart.addSeries(LightweightCharts.LineSeries, { color: "#a9b0b7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-  const ma20 = chart.addSeries(LightweightCharts.LineSeries, { color: "#d28b18", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-  const ma50 = chart.addSeries(LightweightCharts.LineSeries, { color: "#5b6fc7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const maM50 = chart.addSeries(LightweightCharts.LineSeries, { color: "#5b6fc7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const maM150 = chart.addSeries(LightweightCharts.LineSeries, { color: "#d28b18", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const maM200 = chart.addSeries(LightweightCharts.LineSeries, { color: "#9a5c9d", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const maW10 = chart.addSeries(LightweightCharts.LineSeries, { color: "#5b6fc7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  const maW30 = chart.addSeries(LightweightCharts.LineSeries, { color: "#d28b18", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
   const initialVolumePane = chart.addPane();
   initialVolumePane.setHeight(132);
   const volume = chart.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, base: 0 }, initialVolumePane.paneIndex());
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0 } });
+  const relativeStrengthPane = chart.addPane();
+  relativeStrengthPane.setHeight(0);
+  const relativeStrength = chart.addSeries(LightweightCharts.LineSeries, { color: "#986719", lineWidth: 2, lastValueVisible: false, priceLineVisible: false, title: "相对中证全指" }, relativeStrengthPane.paneIndex());
   const markersApi = LightweightCharts.createSeriesMarkers(candles, []);
 
   const minerviniCheckLabels = {
@@ -116,9 +147,76 @@
     const source = root.querySelector("[data-kc-source]").selectedOptions[0].text;
     const basis = root.querySelector("[data-kc-ma]").value === "ema" ? "指数移动平均" : "简单移动平均";
     const style = ({ atr: "平均真实波幅", tr: "真实波幅", range: "最高最低价差" })[root.querySelector("[data-kc-style]").value];
-    kcSummary.textContent = `肯特纳通道：${root.querySelector("[data-kc-length]").value}日${basis} · ${root.querySelector("[data-kc-atr-length]").value}日${style} · ${root.querySelector("[data-kc-multiplier]").value}倍 · ${source}`;
+    const periodUnit = interval === "week" ? "周" : "日";
+    kcSummary.textContent = `肯特纳通道：${root.querySelector("[data-kc-length]").value}${periodUnit}${basis} · ${root.querySelector("[data-kc-atr-length]").value}${periodUnit}${style} · ${root.querySelector("[data-kc-multiplier]").value}倍 · ${source}`;
   };
-  const methodLayerVisible = (method) => root.querySelector(`[data-method-layer="${method}"]`)?.checked !== false;
+  const formatNumber = (value) => Number.isFinite(value) ? value.toFixed(2) : "数据不足";
+  const movingAverageFallback = (length) => payload.bars.map((row, index, rows) => {
+    if (index + 1 < length) return null;
+    const window = rows.slice(index + 1 - length, index + 1);
+    return { time: row.trade_date, value: window.reduce((sum, item) => sum + item.close, 0) / length };
+  }).filter(Boolean);
+  const movingAverage = (length) => (payload.moving_averages?.[String(length)] || movingAverageFallback(length)).map(row => ({
+    time: row.time || row.trade_date,
+    value: row.value,
+  }));
+  const latestAverage = (length) => {
+    const series = movingAverage(length);
+    return series.length ? series[series.length - 1].value : null;
+  };
+  const relativeText = (current, reference) => current !== null && reference !== null ? `${((current / reference - 1) * 100).toFixed(1)}%` : "数据不足";
+  const renderFrameworkPanel = () => {
+    if (!payload || !frameworkPanel) return;
+    const framework = frameworkForInterval();
+    const last = payload.bars[payload.bars.length - 1];
+    if (!last) return;
+    if (framework === "minervini") {
+      const ma50 = latestAverage(50), ma150 = latestAverage(150), ma200 = latestAverage(200);
+      const trailing = payload.bars.slice(-260);
+      const high52 = trailing.length >= 250 ? Math.max(...trailing.map(row => row.high)) : null;
+      const state = root.querySelector('[data-framework-status="minervini"]')?.textContent || "M大师：数据不足";
+      const rows = [
+        ["规则状态", state], ["收盘 / 50日线", `${formatNumber(last.close)} / ${formatNumber(ma50)} (${relativeText(last.close, ma50)})`],
+        ["收盘 / 150日线", `${formatNumber(last.close)} / ${formatNumber(ma150)} (${relativeText(last.close, ma150)})`],
+        ["收盘 / 200日线", `${formatNumber(last.close)} / ${formatNumber(ma200)} (${relativeText(last.close, ma200)})`],
+        ["150日线高于200日线", ma150 !== null && ma200 !== null ? (ma150 > ma200 ? "是" : "否") : "数据不足"],
+        ["距52周高点", high52 === null ? "数据不足" : `${((last.close / high52 - 1) * 100).toFixed(1)}%`],
+      ];
+      frameworkPanel.innerHTML = `<header><strong>日线 · M大师</strong><span>Minervini 条件参考</span></header><dl>${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl><p>仅呈现规则条件与数据位置，不构成买卖指令。</p>`;
+    } else {
+      const ma10 = latestAverage(10), ma30 = latestAverage(30);
+      const statusNode = root.querySelector('[data-framework-status="weinstein"]');
+      const state = statusNode?.textContent || "W大师：数据不足";
+      const stage = statusNode?.dataset.frameworkStage || "数据不足";
+      const rows = [
+        ["当前阶段", stage], ["规则状态", state], ["收盘 / 10周线", `${formatNumber(last.close)} / ${formatNumber(ma10)} (${relativeText(last.close, ma10)})`],
+        ["收盘 / 30周线", `${formatNumber(last.close)} / ${formatNumber(ma30)} (${relativeText(last.close, ma30)})`],
+        ["10周线高于30周线", ma10 !== null && ma30 !== null ? (ma10 > ma30 ? "是" : "否") : "数据不足"],
+      ];
+      frameworkPanel.innerHTML = `<header><strong>周线 · W大师</strong><span>Weinstein 阶段参考</span></header><dl>${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl><p>阶段结论以观察池规则状态为准，不构成买卖指令。</p>`;
+    }
+  };
+  const renderTimeline = () => {
+    if (!timelineList || !payload) return;
+    const events = (payload.method_events || []).filter(item => item.method === frameworkForInterval()).slice().reverse();
+    timelineList.replaceChildren(...events.map((event) => {
+      const item = document.createElement("li");
+      const state = ({ ENTERED: "进入观察", REENTERED: "重新进入", EXITED: "移出观察", DATA_GAP: "数据中断" })[event.state] || event.state;
+      item.textContent = `${event.as_of_date} · ${state}${event.summary ? `：${event.summary}` : ""}`;
+      return item;
+    }));
+    if (!events.length) {
+      const item = document.createElement("li"); item.textContent = "当前显示区间内没有可用的状态变化记录。"; timelineList.append(item);
+    }
+  };
+  const renderComparePanel = () => {
+    if (!comparePanel || !payload) return;
+    const status = (method) => root.querySelector(`[data-framework-status="${method}"]`)?.textContent || "数据不足";
+    const wStage = root.querySelector('[data-framework-status="weinstein"]')?.dataset.frameworkStage || "数据不足";
+    comparePanel.hidden = !compareVisible;
+    if (!compareVisible) return;
+    comparePanel.innerHTML = `<article><span>日线 · M大师</span><strong>${status("minervini")}</strong><p>50 / 150 / 200 日线、52周区间与相对中证全指走势。</p></article><article><span>周线 · W大师</span><strong>${wStage}</strong><p>${status("weinstein")} · 10 / 30 周线与阶段状态。</p></article>`;
+  };
   const renderMethodEventDetail = (event) => {
     if (!event) { methodEventDetail.hidden = true; methodEventDetail.replaceChildren(); return; }
     const title = document.createElement("strong");
@@ -149,7 +247,7 @@
       },
     }));
     const methods = (payload.method_events || [])
-      .filter(item => methodLayerVisible(item.method))
+      .filter(item => frameworkLayerVisible() && item.method === frameworkForInterval())
       .map(item => ({
         priority: item.method === "weinstein" ? 1 : 2,
         marker: {
@@ -191,7 +289,8 @@
     const rect = chartNode.getBoundingClientRect();
     const chartHeight = Math.max(520, Math.floor(rect.height || 640));
     const volumeHeight = volumeInput.checked ? Math.max(104, Math.round(chartHeight * 0.2)) : 0;
-    const drawingHeight = chartHeight - volumeHeight;
+    const rsHeight = frameworkForInterval() === "minervini" && frameworkLayerVisible() && (payload?.relative_strength?.points || []).length ? 104 : 1;
+    const drawingHeight = chartHeight - volumeHeight - rsHeight;
     chart.applyOptions({ width: Math.max(320, Math.floor(rect.width)), height: chartHeight });
     if (volumeInput.checked) volume.getPane().setHeight(volumeHeight);
     const ratio = window.devicePixelRatio || 1;
@@ -270,6 +369,12 @@
     try { window.sessionStorage.setItem(chartCacheKey(url), JSON.stringify(value)); } catch (_) { /* Browser storage can be unavailable. */ }
   };
   const chartDate = (value) => typeof value === "string" ? value : `${value.year}-${String(value.month).padStart(2, "0")}-${String(value.day).padStart(2, "0")}`;
+  const compactVolume = (value) => {
+    if (!Number.isFinite(value)) return "—";
+    if (Math.abs(value) >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
+    if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(1)}万`;
+    return String(Math.round(value));
+  };
   const updateChangeReadout = (row) => {
     if (!row) return;
     const label = interval === "week" ? "本周涨跌幅" : "当日涨跌幅";
@@ -278,6 +383,28 @@
     changeValue.textContent = `${label} ${value === null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`}`;
     changeReadout.classList.toggle("is-up", value !== null && value > 0);
     changeReadout.classList.toggle("is-down", value !== null && value < 0);
+    openValue.textContent = formatNumber(Number(row.open));
+    highValue.textContent = formatNumber(Number(row.high));
+    lowValue.textContent = formatNumber(Number(row.low));
+    closeValue.textContent = formatNumber(Number(row.close));
+    volumeValue.textContent = compactVolume(Number(row.volume));
+  };
+  const chartFailureText = (reason) => ({
+    INSUFFICIENT_DAILY_OHLC: "当前日期之前的有效行情不足，无法绘制价格图。",
+    INCONSISTENT_PRICE_SCALE: "前复权价格尺度不一致，已停止混合展示。",
+  })[reason] || "图表数据暂时不可用，请稍后重试。";
+  const setChartState = (mode, detail = "") => {
+    const loading = mode === "loading";
+    root.setAttribute("aria-busy", String(loading));
+    stateOverlay.hidden = mode === "idle" || mode === "refreshing";
+    retryButton.hidden = mode !== "error";
+    if (loading) {
+      stateTitle.textContent = "正在载入图表";
+      stateDetail.textContent = detail || "正在读取前复权行情与方法事实…";
+    } else if (mode === "error") {
+      stateTitle.textContent = "图表暂时无法显示";
+      stateDetail.textContent = detail;
+    }
   };
   const withPrivateOverlay = async (publicPayload) => {
     const combined = { ...publicPayload, drawings: [], trade_overlay: { executions: [], open_stops: [] } };
@@ -298,18 +425,27 @@
   const drawPayload = (nextPayload) => {
     payload = nextPayload;
     candles.setData(payload.bars.map(row => ({ time: row.trade_date, open: row.open, high: row.high, low: row.low, close: row.close })));
-    const values = (key) => payload.keltner.filter(row => row[key] !== null).map(row => ({ time: row.date, value: row[key] }));
+    const values = (key) => keltnerInput.checked ? payload.keltner.filter(row => row[key] !== null).map(row => ({ time: row.date, value: row[key] })) : [];
     upper.setData(values("upper")); basis.setData(values("basis")); lower.setData(values("lower"));
-    const simpleMa = (length) => payload.bars.map((row, index, rows) => {
-      if (index + 1 < length) return null;
-      const window = rows.slice(index + 1 - length, index + 1);
-      return { time: row.trade_date, value: window.reduce((sum, item) => sum + item.close, 0) / length };
-    }).filter(Boolean);
-    ma20.setData(root.querySelector('[data-ma="20"]').checked ? simpleMa(20) : []);
-    ma50.setData(root.querySelector('[data-ma="50"]').checked ? simpleMa(50) : []);
+    const framework = frameworkForInterval();
+    const showFrameworkLayer = frameworkLayerVisible();
+    root.querySelectorAll("[data-framework-legend]").forEach(item => { item.hidden = item.dataset.frameworkLegend !== framework || !showFrameworkLayer; });
+    root.querySelector("[data-keltner-legend]").hidden = !keltnerInput.checked;
+    maM50.setData(framework === "minervini" && showFrameworkLayer ? movingAverage(50) : []);
+    maM150.setData(framework === "minervini" && showFrameworkLayer ? movingAverage(150) : []);
+    maM200.setData(framework === "minervini" && showFrameworkLayer ? movingAverage(200) : []);
+    maW10.setData(framework === "weinstein" && showFrameworkLayer ? movingAverage(10) : []);
+    maW30.setData(framework === "weinstein" && showFrameworkLayer ? movingAverage(30) : []);
+    const rsPoints = payload.relative_strength?.points || [];
+    relativeStrength.setData(framework === "minervini" && showFrameworkLayer ? rsPoints.map(row => ({ time: row.trade_date, value: row.value })) : []);
+    relativeStrengthPane.setHeight(framework === "minervini" && showFrameworkLayer && rsPoints.length ? 104 : 1);
     volume.setData(payload.bars.map(row => ({ time: row.trade_date, value: row.volume || 0, color: row.close >= row.open ? "rgba(201,78,71,.48)" : "rgba(37,132,96,.48)" })));
+    if (tradeLegend) tradeLegend.hidden = !(payload.trade_overlay?.executions || []).length;
     syncVolumePane();
     renderMarkers();
+    renderFrameworkPanel();
+    renderTimeline();
+    renderComparePanel();
     renderMethodEventDetail(null);
     drawings = (payload.drawings || []).map(canonicalizeDrawing);
     if (!selectedDrawing()) selectedDrawingId = null;
@@ -317,17 +453,56 @@
     updateDrawingActions(); resize(); fitBarsToViewport();
   };
   const request = async () => {
+    const version = ++requestVersion;
+    requestController?.abort();
+    const controller = new AbortController();
+    requestController = controller;
     const url = chartRequest(symbol, date, settings());
     const cached = cachedPayload(url);
-    if (cached?.status === "OK") drawPayload(await withPrivateOverlay(cached));
+    setChartState(cached?.status === "OK" ? "refreshing" : "loading");
+    loadState.textContent = cached?.status === "OK" ? "正在检查更新…" : "";
     try {
-      const response = await fetch(url);
+      if (cached?.status === "OK") {
+        const combined = await withPrivateOverlay(cached);
+        if (version === requestVersion) drawPayload(combined);
+      }
+      const response = await fetch(url, { signal: controller.signal });
       const nextPayload = await response.json();
-      if (!response.ok || nextPayload.status !== "OK") return;
+      if (version !== requestVersion) return;
+      if (!response.ok || nextPayload.status !== "OK") {
+        if (cached?.status === "OK") {
+          loadState.textContent = "已显示缓存数据；更新数据不足";
+          setChartState("idle");
+        } else {
+          loadState.textContent = "";
+          setChartState("error", chartFailureText(nextPayload.reason));
+        }
+        return;
+      }
       storePayload(url, nextPayload);
-      drawPayload(await withPrivateOverlay(nextPayload));
-    } catch (_) {
-      return;
+      const combined = await withPrivateOverlay(nextPayload);
+      if (version === requestVersion) {
+        drawPayload(combined);
+        setChartState("idle");
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      console.error("Could not render stock chart", error);
+      if (version === requestVersion) {
+        if (cached?.status === "OK") {
+          loadState.textContent = "已显示缓存数据";
+          setChartState("idle");
+        } else {
+          loadState.textContent = "";
+          setChartState("error", "网络或服务异常，请重试。");
+        }
+      }
+    } finally {
+      if (version === requestVersion) {
+        requestController = null;
+        root.setAttribute("aria-busy", "false");
+        if (loadState.textContent === "正在检查更新…") loadState.textContent = "";
+      }
     }
   };
   const prefetchAdjacentCharts = () => {
@@ -424,16 +599,23 @@
     recordButton.setAttribute("aria-pressed", String(recordMode));
     drawingHint.textContent = recordMode ? "点击价格图预填成交日与价格；保存前仍可修改" : "拖拽缩放或查看价格";
   });
-  root.querySelectorAll("[data-ma]").forEach(input => input.addEventListener("change", () => { if (payload) drawPayload(payload); }));
-  root.querySelectorAll("[data-method-layer]").forEach(input => input.addEventListener("change", () => {
-    storeMethodLayers();
-    renderMarkers();
-    if (!methodLayerVisible("weinstein") && !methodLayerVisible("minervini")) renderMethodEventDetail(null);
-  }));
   volumeInput.addEventListener("change", () => {
+    storeLayerSettings();
     syncVolumePane();
     if (payload) drawPayload(payload);
     else resize();
+  });
+  keltnerInput.addEventListener("change", () => { storeLayerSettings(); if (payload) drawPayload(payload); });
+  root.querySelectorAll("[data-framework-layer]").forEach(input => input.addEventListener("change", () => {
+    storeLayerSettings();
+    if (payload) drawPayload(payload);
+  }));
+  retryButton?.addEventListener("click", request);
+  compareButton?.addEventListener("click", () => {
+    compareVisible = !compareVisible;
+    compareButton.setAttribute("aria-pressed", String(compareVisible));
+    compareButton.textContent = compareVisible ? "收起摘要" : "双框架摘要";
+    renderComparePanel();
   });
   chart.subscribeClick((param) => {
     if (!payload || !param.time) return;
@@ -464,9 +646,9 @@
     window.location.assign(target.href);
   });
   root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); syncChartViewControls(); storeChartView(); request(); }));
-  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { interval = button.dataset.chartInterval; syncChartViewControls(); storeChartView(); request(); }));
+  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { interval = button.dataset.chartInterval; syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
-  chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); syncVolumePane(); resize(); request();
+  chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); request();
   if ("requestIdleCallback" in window) window.requestIdleCallback(prefetchAdjacentCharts, { timeout: 1200 });
   else window.setTimeout(prefetchAdjacentCharts, 250);
 })();

@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+backup_dir=/var/backups/kavita
+source_dir=/var/lib/kavita/config
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+archive="$backup_dir/kavita-config-$stamp.tar.gz"
+temporary="$archive.partial"
+
+install -d -o root -g kavita -m 0750 "$backup_dir"
+
+cleanup() {
+    rm -f "$temporary"
+    systemctl start kavita
+}
+trap cleanup EXIT HUP INT TERM
+
+systemctl stop kavita
+tar \
+    --exclude='./logs' \
+    --exclude='./cache-long' \
+    -C "$source_dir" \
+    -czf "$temporary" \
+    .
+mv "$temporary" "$archive"
+chmod 0640 "$archive"
+chown root:kavita "$archive"
+
+systemctl start kavita
+trap - EXIT HUP INT TERM
+
+find "$backup_dir" \
+    -maxdepth 1 \
+    -type f \
+    -name 'kavita-config-*.tar.gz' \
+    -mtime +14 \
+    -delete

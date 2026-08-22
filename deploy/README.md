@@ -27,15 +27,14 @@ scripts/release_ecs.sh --apply --confirm-commit "$(git rev-parse HEAD)"
 独立用户库备份，只接受已兼容的用户库 schema，再原子切换代码；启动失败自动恢复旧版。
 数据库 schema 迁移仍是单独的高风险流程，不由普通代码发布器自动执行。
 
-这些模板适用于单台 Ubuntu ECS 的双入口部署：FastAPI 只监听
-`127.0.0.1:8000`，Nginx 在公网 `8888` 仅代理公开、只读页面。登录、个人空间、
-`/api/me/` 和 `/api/v1/` Agent API 均不经过公网 HTTP；私人浏览器和 CLI 通过 SSH
-隧道直连 FastAPI。三个 SQLite 数据库放在 `/var/lib/masterstock`，数据库端口不对外暴露。
+这些模板适用于单台 Ubuntu ECS 的 HTTPS 单入口部署：FastAPI 只监听
+`127.0.0.1:8000`，Nginx 在 443 代理完整应用。80 端口仅保留 ACME 验证和向 HTTPS 的
+重定向；不启用公网 8888 入口。三个 SQLite 数据库放在 `/var/lib/masterstock`，数据库
+端口不对外暴露。
 
-`deploy/nginx/masterstock-public-readonly.conf.example` 是公网 HTTP 8888 只读入口模板；
-`masterstock.conf.example` 是可与它同时启用的域名 HTTPS 入口模板。HTTPS 入口在 80
-端口保留 ACME 验证并跳转到 443，443 代理完整应用，供登录、个人空间和 Agent API
-使用。部署时必须把示例域名替换为真实域名，并确认对应证书同时覆盖根域名和 `www`。
+`deploy/nginx/masterstock.conf.example` 是域名 HTTPS 入口模板。它在 80 端口保留 ACME
+验证并跳转到 443，443 代理完整应用，供登录、个人空间和 Agent API 使用。部署时必须
+把示例域名替换为真实域名，并确认对应证书同时覆盖根域名和 `www`。
 首次签发证书前先临时启用 `masterstock-acme-http.conf.example`，它只公开 ACME 验证
 路径，其他 80 端口请求返回 404；证书签发成功后再用正式 HTTPS 模板替换它。
 HTTPS 模板对动态请求设置了按来源 IP 的限速和并发上限，静态资源与健康检查不计入
@@ -59,17 +58,14 @@ HTTPS 模板对动态请求设置了按来源 IP 的限速和并发上限，静�
 实际来源网段。该表包含个人信息，运维时应限制数据库访问权限并按实际合规
 与分析需求设定保留期。
 
-安装 Nginx 后，把公网只读模板复制到 `/etc/nginx/sites-available/masterstock-public-readonly`
-并启用；需要 HTTPS 时，再把 HTTPS 模板复制到 `/etc/nginx/sites-available/masterstock-https`
-并与 8888 模板同时启用。把 systemd Web 模板安装到
+安装 Nginx 后，把 HTTPS 模板复制到 `/etc/nginx/sites-available/masterstock-https` 并启用。
+确认未启用 `masterstock-public-readonly`，且没有服务监听 8888。把 systemd Web 模板安装到
 `/etc/systemd/system/masterstock-web.service`。
 先运行 `nginx -t`，再执行 `systemctl daemon-reload` 并重启 Web 与 Nginx。切换后必须确认：
 
-- `ss` 仅显示 FastAPI 监听 `127.0.0.1:8000`，Nginx 监听公网 `8888`；
-- 启用 HTTPS 后，Nginx 额外监听公网 `80` 和 `443`，FastAPI 仍不得监听公网；
-- 公网首页、行情和公开图表正常；公网 `/login`、`/account/`、`/api/me/`、
-  `/api/v1/` 均返回 `404`，公网 POST 返回 `403`；
-- SSH `-L 127.0.0.1:8888:127.0.0.1:8000` 后，本机登录和 Agent API 正常；
+- `ss` 显示 FastAPI 仅监听 `127.0.0.1:8000`，Nginx 监听公网 `80` 和 `443`，且没有
+  8888 监听；
+- 公网 HTTPS 首页、行情、公开图表、登录、个人空间和 Agent API 正常；
 - `http://真实域名` 跳转到 HTTPS，`https://真实域名/login` 和 `/api/v1/` 只经 443；
 - `certbot renew --dry-run` 通过，证书续期定时器为 active；
 - `masterstock-daily.timer` 和 `masterstock-backup.timer` 仍为 active。

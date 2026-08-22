@@ -4,90 +4,11 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .articles import published_article_summaries
+
 DEFAULT_SITE_OWNER_USERNAME = "我不是来玩的"
 
-OWNER_READING_NOTES = (
-    {
-        "title": "支撑与阻力不是一条线：重新理解价格边界",
-        "summary": (
-            "从五位交易作者的视角梳理支撑与阻力，"
-            "将价格位置放回供需、趋势、结构与风险边界之中理解。"
-        ),
-        "href": "/a/reading/support-resistance-price-boundaries",
-        "updated_on": "2026-08-22",
-        "tags": ("支撑与阻力", "价格行为", "趋势交易", "交易体系"),
-    },
-    {
-        "title": "Adam 与 Brooks 的回调交易思路",
-        "summary": (
-            "用 Adam 的结构筛选回调，再用 Brooks 的逐 K 线方法选择触发，"
-            "将趋势背景、进场、止损与利润管理连成一条决策链。"
-        ),
-        "href": "/a/reading/adam-and-brooks-pullback-execution",
-        "updated_on": "2026-08-21",
-        "tags": ("Adam Grimes", "Al Brooks", "回调交易", "价格行为"),
-    },
-    {
-        "title": "Al Brooks 如何交易回调",
-        "summary": (
-            "从市场环境、第一次回调、高1高2、楔形旗形到突破回调，"
-            "理解回调交易的趋势恢复逻辑与风险边界。"
-        ),
-        "href": "/a/reading/al-brooks-pullback-trading",
-        "updated_on": "2026-08-20",
-        "tags": ("Al Brooks", "回调交易", "趋势交易", "价格行为"),
-    },
-    {
-        "title": "Adam Grimes 如何交易回调",
-        "summary": (
-            "系统梳理回调交易方法，理解推动、简单与复杂回调、"
-            "结构止损、1R管理及形态失效。"
-        ),
-        "href": "/a/reading/adam-grimes-pullback-trading",
-        "updated_on": "2026-08-19",
-        "tags": ("Adam Grimes", "回调交易", "趋势交易"),
-    },
-    {
-        "title": "均线不是买卖按钮",
-        "summary": (
-            "对比五位交易大师的均线思想，理解趋势阶段、候选过滤、"
-            "价格结构与入场触发之间的区别。"
-        ),
-        "href": "/a/reading/moving-averages-are-not-trading-buttons",
-        "updated_on": "2026-08-18",
-        "tags": ("均线", "趋势交易", "价格行为"),
-    },
-    {
-        "title": "止损不是一个百分比",
-        "summary": (
-            "对比五位交易大师的止损思想，理解结构失效、波动噪声、"
-            "风险上限和仓位之间的关系。"
-        ),
-        "href": "/a/reading/stop-loss-is-not-a-percentage",
-        "updated_on": "2026-08-17",
-        "tags": ("止损", "风险管理", "仓位管理"),
-    },
-    {
-        "title": "少学一种形态，多建立一道边界",
-        "summary": (
-            "从交易大师的不同方法中重新理解交易体系，"
-            "把知识收敛成可执行、可验证的研究边界。"
-        ),
-        "href": "/a/reading/trading-system-boundaries",
-        "updated_on": "2026-08-09",
-        "tags": ("交易体系", "趋势交易", "风险管理"),
-    },
-    {
-        "title": "八张示意图读懂 Adam Grimes 的交易模板",
-        "summary": (
-            "通过八种市场结构理解失败测试、回调、Anti 与突破交易的"
-            "设置、触发和风险边界。"
-        ),
-        "href": "/a/reading/adam-grimes-trading-templates",
-        "updated_on": "2026-08-13",
-        "tags": ("Adam Grimes", "交易模板", "市场结构"),
-    },
-)
+OWNER_READING_NOTES = published_article_summaries()
 
 
 def build_owner_trade_feed(

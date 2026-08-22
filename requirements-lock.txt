@@ -56,6 +56,8 @@ jinja2==3.1.6
     # via -r requirements.txt
 librt==0.13.0
     # via mypy
+markdown==3.10.3
+    # via -r requirements.txt
 markupsafe==3.0.3
     # via jinja2
 maxminddb==3.1.1

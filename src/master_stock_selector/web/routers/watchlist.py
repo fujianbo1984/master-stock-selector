@@ -1410,9 +1410,22 @@ def build_watchlist_router(
         limit: int | None = Query(default=None, ge=30),
         interval: str = Query(default="day", pattern="^(day|week)$"),
     ) -> dict[str, Any]:
-        bars = market_reader.safe_stock_chart_bars(symbol, date, limit=limit)
-        if interval == "week":
-            bars = _weekly_bars(bars)
+        visible_daily_bars = market_reader.safe_stock_chart_bars(symbol, date, limit=limit)
+        warmup_periods = max(200, length, atr_length)
+        analysis_limit = (
+            None
+            if limit is None
+            else limit + warmup_periods * (6 if interval == "week" else 1)
+        )
+        analysis_daily_bars = (
+            visible_daily_bars
+            if analysis_limit is None
+            else market_reader.safe_stock_chart_bars(symbol, date, limit=analysis_limit)
+        )
+        bars = _weekly_bars(visible_daily_bars) if interval == "week" else visible_daily_bars
+        analysis_bars = (
+            _weekly_bars(analysis_daily_bars) if interval == "week" else analysis_daily_bars
+        )
         if len(bars) < 2:
             return {"status": "DATA_GAP", "reason": "INSUFFICIENT_DAILY_OHLC", "bars": []}
         bars = _with_period_changes(bars)
@@ -1420,12 +1433,29 @@ def build_watchlist_router(
         if len(scale_ids) != 1 or not next(iter(scale_ids)):
             return {"status": "DATA_GAP", "reason": "INCONSISTENT_PRICE_SCALE", "bars": []}
         price_scale_id = next(iter(scale_ids))
+        visible_dates = {str(row["trade_date"]) for row in bars}
+        moving_average_lengths = (10, 30) if interval == "week" else (50, 150, 200)
+        moving_averages = {
+            str(period): [
+                point
+                for point in points
+                if str(point["trade_date"]) in visible_dates
+            ]
+            for period, points in _chart_moving_averages(
+                analysis_bars, moving_average_lengths
+            ).items()
+        }
         method_overlay = _chart_method_overlay(
             repository,
             symbol=symbol,
             bars=bars,
             end_date=date,
             interval=interval,
+        )
+        relative_strength = (
+            _chart_relative_strength(bars, market_reader.safe_index_bars("000985.CSI", date))
+            if interval == "day"
+            else {"benchmark": "", "points": []}
         )
         return {
             "status": "OK",
@@ -1437,15 +1467,21 @@ def build_watchlist_router(
             "bars": bars,
             "method_events": method_overlay["events"],
             "method_event_coverage": method_overlay["coverage"],
-            "keltner": keltner_channels(
-                bars,
-                length=length,
-                multiplier=multiplier,
-                source=source,
-                use_ema=use_ema,
-                band_style=band_style,
-                atr_length=atr_length,
-            ),
+            "relative_strength": relative_strength,
+            "moving_averages": moving_averages,
+            "keltner": [
+                point
+                for point in keltner_channels(
+                    analysis_bars,
+                    length=length,
+                    multiplier=multiplier,
+                    source=source,
+                    use_ema=use_ema,
+                    band_style=band_style,
+                    atr_length=atr_length,
+                )
+                if str(point["date"]) in visible_dates
+            ],
         }
 
     @router.get("/api/me/stocks/{symbol}/overlay")
@@ -1870,6 +1906,8 @@ def _chart_method_statuses(
             )
             continue
         method_result = str(row.get("result") or "UNKNOWN")
+        profile = dict((row.get("evidence") or {}).get("profile") or {})
+        stage = str(profile.get("stage") or "") if method == "weinstein" else ""
         result.append(
             {
                 "method": method,
@@ -1877,6 +1915,7 @@ def _chart_method_statuses(
                 "result": method_result,
                 "result_label": RESULT_LABELS.get(method_result, "未知"),
                 "as_of_date": str(row.get("as_of_date") or ""),
+                "stage_label": STAGE_LABELS.get(stage, "") if stage else "",
             }
         )
     return result
@@ -2719,6 +2758,58 @@ def _breadth_regime(summaries: dict[str, dict[str, Any]]) -> dict[str, str]:
         ),
     )
     return {"label": label, "explanation": explanation, "tone": tone}
+
+
+def _chart_relative_strength(
+    stock_bars: list[dict[str, Any]], index_bars: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Return a date-aligned relative-performance line, not Minervini's percentile."""
+
+    index_closes = {
+        str(row.get("trade_date") or ""): float(row["close"])
+        for row in index_bars
+        if float(row.get("close") or 0) > 0
+    }
+    paired = [
+        (str(row["trade_date"]), float(row["close"]), index_closes[str(row["trade_date"])])
+        for row in stock_bars
+        if float(row.get("close") or 0) > 0 and str(row["trade_date"]) in index_closes
+    ]
+    if len(paired) < 2:
+        return {"benchmark": "", "points": []}
+    baseline = paired[0][1] / paired[0][2]
+    return {
+        "benchmark": "中证全指（000985.CSI）",
+        "points": [
+            {"trade_date": value, "value": round(stock_close / index_close / baseline * 100, 2)}
+            for value, stock_close, index_close in paired
+        ],
+    }
+
+
+def _chart_moving_averages(
+    bars: list[dict[str, Any]], lengths: tuple[int, ...]
+) -> dict[int, list[dict[str, Any]]]:
+    """Build warmed simple moving-average points for chart overlays."""
+
+    closes = [float(row["close"]) for row in bars]
+    result: dict[int, list[dict[str, Any]]] = {}
+    for length in lengths:
+        running = 0.0
+        points: list[dict[str, Any]] = []
+        for index, (row, close) in enumerate(zip(bars, closes, strict=True)):
+            running += close
+            if index >= length:
+                running -= closes[index - length]
+            if index >= length - 1:
+                points.append(
+                    {
+                        "trade_date": str(row["trade_date"]),
+                        "value": round(running / length, 6),
+                    }
+                )
+        result[length] = points
+    return result
 
 
 def _normalized_index_series(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:

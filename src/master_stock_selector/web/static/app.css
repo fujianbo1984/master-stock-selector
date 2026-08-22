@@ -1178,6 +1178,9 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-period-change strong { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 13px; }
 .chart-period-change.is-up strong { color: #c94e47; }
 .chart-period-change.is-down strong { color: #258460; }
+.chart-ohlcv { display: inline-flex; align-items: baseline; gap: 8px; padding-right: 12px; border-right: 1px solid var(--line); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart-ohlcv span { color: var(--muted); }
+.chart-ohlcv b { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-weight: 700; }
 .chart-page-hero h1 small { color: var(--muted); font-family: Georgia, "Times New Roman", serif; font-size: 16px; white-space: nowrap; }
 .chart-page-hero { min-height: 0; padding: 12px 22px; }
 .chart-page-hero h1 { margin: 0; font-size: 30px; }
@@ -1219,6 +1222,9 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-group-label { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
 .chart-group-divider { width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
 .chart-periods [aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.chart-period-button { display: inline-flex; align-items: baseline; gap: 5px; }
+.chart-period-button small { color: var(--muted); font-size: 9px; font-weight: 500; }
+.chart-period-button[aria-pressed="true"] small { color: inherit; }
 .chart-tool-label { color: var(--muted); font-size: 11px; }
 .kc-settings { position: relative; }
 .chart-toolbar > .kc-settings { margin-left: auto; }
@@ -1232,17 +1238,42 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-toolbar .chart-indicators { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .chart-toolbar .chart-indicators label { display: inline-flex; grid-template-columns: none; align-items: center; gap: 4px; color: var(--text); font-size: 11px; line-height: 1; white-space: nowrap; }
 .chart-toolbar .chart-indicators input[type="checkbox"] { box-sizing: border-box; width: 13px; min-width: 13px; height: 13px; min-height: 13px; margin: 0; padding: 0; accent-color: var(--accent); }
+.chart-load-state { color: var(--muted); font-weight: 700; }
+.chart-attribution { margin-left: auto; }
 .legend-buy { color: #c94e47; font-weight: 800; }.legend-sell { color: #258460; font-weight: 800; }
+.chart-legend .legend-ma-m50, .chart-legend .legend-ma-m150, .chart-legend .legend-ma-m200, .chart-legend .legend-ma-w10, .chart-legend .legend-ma-w30 { display: inline-block; width: 13px; height: 1px; margin: 0 3px 3px 7px; vertical-align: middle; background: #5b6fc7; }
+.chart-legend .legend-ma-m150, .chart-legend .legend-ma-w30 { background: #d28b18; }.chart-legend .legend-ma-m200 { background: #9a5c9d; }
 .drawing-hint { display: none; }
 .drawing-destructive-actions { display: inline-flex; align-items: center; gap: 12px; margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--line); }
 .drawing-destructive-actions .text-button:disabled { color: var(--muted); cursor: not-allowed; }
 .stock-chart-stage { position: relative; height: clamp(520px, calc(100vh - 245px), 680px); min-height: 520px; border: 1px solid var(--line); background: #fffdfa; }
 .stock-chart-canvas { width: 100%; height: 100%; }
 .drawing-overlay { position: absolute; z-index: 2; top: 0; right: 0; left: 0; pointer-events: none; }
+.chart-state-overlay { position: absolute; z-index: 4; inset: 0; display: grid; place-content: center; justify-items: center; gap: 7px; padding: 24px; background: color-mix(in srgb, #fffdfa 94%, transparent); text-align: center; }
+.chart-state-overlay[hidden] { display: none; }
+.chart-state-overlay strong { font-family: "Songti SC", "STSong", serif; font-size: 18px; }
+.chart-state-overlay span { max-width: 480px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.chart-state-overlay .button { margin-top: 4px; }
 .chart-method-event-detail { display: grid; gap: 3px; margin-top: 8px; padding: 9px 11px; border-left: 3px solid var(--accent); background: var(--panel-soft); color: var(--text); font-size: 11px; line-height: 1.45; }
 .chart-method-event-detail[hidden] { display: none; }
 .chart-method-event-detail strong { font-family: "Songti SC", "STSong", serif; font-size: 13px; }
 .chart-method-event-detail small { color: var(--muted); }
+.chart-framework-panel { display: grid; gap: 8px; margin-top: 8px; padding: 11px 13px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--panel-soft); }
+.chart-framework-panel header { display: flex; align-items: baseline; gap: 9px; }
+.chart-framework-panel header strong { font-family: "Songti SC", "STSong", serif; font-size: 15px; }
+.chart-framework-panel header span, .chart-framework-panel p { margin: 0; color: var(--muted); font-size: 11px; }
+.chart-framework-panel dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; border: 1px solid var(--line); background: var(--line); }
+.chart-framework-panel dl div { min-width: 0; padding: 7px 9px; background: var(--panel); }
+.chart-framework-panel dt { color: var(--muted); font-size: 10px; }
+.chart-framework-panel dd { margin: 3px 0 0; overflow: hidden; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.chart-compare-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin-top: 8px; border: 1px solid var(--line); background: var(--line); }
+.chart-compare-panel article { padding: 11px 13px; background: var(--panel); }
+.chart-compare-panel span { display: block; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+.chart-compare-panel strong { display: block; margin-top: 4px; font-family: "Songti SC", "STSong", serif; font-size: 16px; }
+.chart-compare-panel p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.chart-method-timeline { margin-top: 8px; border: 1px solid var(--line); background: var(--panel); }
+.chart-method-timeline summary { padding: 9px 12px; color: var(--text); cursor: pointer; font-size: 12px; font-weight: 700; }
+.chart-method-timeline ol { display: grid; gap: 5px; margin: 0; padding: 0 14px 12px 31px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .industry-chart-readout { min-height: 32px; padding: 8px 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .industry-tradingview-chart { width: 100%; height: clamp(420px, 55vh, 600px); background: #fffdfa; }
 
@@ -1652,6 +1683,20 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .reading-pagination-item strong { font-family: "Songti SC", "STSong", serif; font-size: 16px; line-height: 1.55; }
 .reading-pagination-next { text-align: right; }
 .reading-pagination-disabled { opacity: .52; }
+.reading-archive-shell { max-width: 1100px; margin: 0 auto; padding-top: 36px; }
+.reading-archive-header { max-width: 760px; margin-bottom: 30px; }
+.reading-archive-header h1 { margin: 9px 0 12px; font-family: "Songti SC", "STSong", serif; font-size: 42px; line-height: 1.3; }
+.reading-archive-header > p:last-child { margin: 0; color: var(--muted); font-family: "Songti SC", "STSong", serif; font-size: 17px; line-height: 1.8; }
+.reading-archive-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.reading-archive-list > article { padding: 24px 26px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 10px 28px rgba(20, 45, 76, .04); }
+.reading-archive-list time { color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+.reading-archive-list h2 { margin: 10px 0 9px; font-family: "Songti SC", "STSong", serif; font-size: 22px; line-height: 1.5; }
+.reading-archive-list h2 a { color: var(--text); text-decoration: none; }
+.reading-archive-list h2 a:hover { color: var(--accent); }
+.reading-archive-list > article > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.reading-archive-list .reading-tags { margin-top: 18px; }
+.owner-rail-heading-link { color: var(--muted); font-size: 11px; text-decoration: none; }
+.owner-rail-heading-link:hover { color: var(--accent); }
 
 @media (max-width: 860px) {
   .observation-workspace-hero { align-items: flex-start; flex-direction: column; }

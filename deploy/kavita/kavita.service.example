@@ -1,0 +1,25 @@
+[Unit]
+Description=Kavita member EPUB library
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kavita
+Group=kavita
+WorkingDirectory=/opt/kavita/current
+ExecStart=/opt/kavita/current/Kavita
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/opt/kavita
+ReadWritePaths=/var/lib/kavita
+
+[Install]
+WantedBy=multi-user.target

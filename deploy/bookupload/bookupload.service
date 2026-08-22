@@ -1,0 +1,21 @@
+[Unit]
+Description=Kavita administrator EPUB upload service
+After=network-online.target kavita.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bookupload
+Group=bookupload
+ExecStart=/usr/local/lib/bookupload/bookupload
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kavita/books /var/lib/bookupload/tmp
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

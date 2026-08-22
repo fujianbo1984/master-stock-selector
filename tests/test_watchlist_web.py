@@ -15,7 +15,11 @@ from master_stock_selector.watchlist.methods import (
 from master_stock_selector.watchlist.repository import WatchlistRepository
 from master_stock_selector.web.app import PROJECT_ROOT, _resolve_database_path
 from master_stock_selector.web.app import create_app as _production_create_app
-from master_stock_selector.web.routers.watchlist import _industry_navigation, _web_exit_reason
+from master_stock_selector.web.routers.watchlist import (
+    _chart_moving_averages,
+    _industry_navigation,
+    _web_exit_reason,
+)
 from master_stock_selector.web.users import SESSION_COOKIE, UserRepository
 
 
@@ -504,6 +508,15 @@ def _seed_chart_market(path) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE market_index_daily_bars (
+                market TEXT NOT NULL, index_symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
+                open REAL, high REAL, low REAL, close REAL, volume REAL,
+                PRIMARY KEY (market, index_symbol, trade_date)
+            )
+            """
+        )
         qfq_rows = [("2026-05-31", 99.0, 99.0, 99.0, 99.0, "2026-05-31", "")] + [
             (f"2026-06-{day:02d}", 10 + day / 10, 11 + day / 10, 9 + day / 10, 10.5 + day / 10, f"2026-06-{day:02d}", "qfq-scale-v1")
             for day in range(1, 31)
@@ -533,6 +546,10 @@ def _seed_chart_market(path) -> None:
         connection.executemany(
             "INSERT INTO daily_adjustment_factors VALUES ('ashare', '000001.SZ', ?, 1.0)",
             [(row[0],) for row in qfq_rows],
+        )
+        connection.executemany(
+            "INSERT INTO market_index_daily_bars VALUES ('ashare', '000985.CSI', ?, ?, ?, ?, ?, 1000)",
+            [(row[0], 100 + index, 101 + index, 99 + index, 100.5 + index) for index, row in enumerate(qfq_rows)],
         )
 
 
@@ -1183,7 +1200,7 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
         'href="/a/observations?state=FOCUS&amp;date=2026-07-31"'
         in chart.text
     )
-    assert "今日观察名单" in chart.text
+    assert "当日观察池内" in chart.text
     assert "Minervini：符合" in chart.text
     assert "Weinstein：符合" in chart.text
     assert "/a/stocks/000006.SZ/chart?date=2026-07-31" in chart.text
@@ -1667,6 +1684,8 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     chart = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30")
 
     assert page.status_code == 200
+    assert "站内K线图" in page.text
+    assert "平安银行 站内K线图 · 龙场悟道" in page.text
     assert "行业：股份制银行III" in page.text
     assert "lightweight-charts-5.1.0.js" in page.text
     assert 'class="chart-workbench-title"' in page.text
@@ -1675,31 +1694,54 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260812-persist-chart-view-v25" in page.text
+    assert "stock-chart.js?v=20260823-method-workbench-v6" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
+    assert 'data-chart-ohlcv' in page.text
+    assert 'data-chart-state-overlay' in page.text
+    assert 'data-chart-retry hidden' in page.text
+    assert "当日观察池" in page.text
     assert "当日涨跌幅" in page.text
     assert 'data-kc-source' in page.text
     assert 'data-chart-limit="all"' in page.text
-    assert 'data-method-layer="weinstein" checked' not in page.text
-    assert 'data-method-layer="minervini" checked' not in page.text
-    assert 'data-method-layer="weinstein"' in page.text
-    assert 'data-method-layer="minervini"' in page.text
+    assert 'data-chart-interval="day"' in page.text
+    assert 'data-chart-interval="week"' in page.text
+    assert "方法周期" in page.text
+    assert 'data-framework-indicator="minervini"' in page.text
+    assert 'data-framework-indicator="weinstein"' in page.text
+    assert 'data-framework-layer="minervini" checked' not in page.text
+    assert 'data-framework-layer="minervini"' in page.text
+    assert 'data-framework-layer="weinstein" checked' in page.text
+    assert 'data-keltner checked' not in page.text
+    assert 'data-method-layer=' not in page.text
+    assert 'data-chart-framework-panel' in page.text
+    assert 'data-chart-compare' in page.text
+    assert 'data-chart-method-timeline' in page.text
     assert "状态事件可用区间" not in page.text
     assert "W/M 标志只表示规则观察状态变化" not in page.text
     assert "画线仅保存为个人观察标注" not in page.text
     controller = client.get("/static/stock-chart.js").text
     assert 'chartViewStorageKey = "masterstock-chart:view"' in controller
+    assert 'chartLayersStorageKey = "masterstock-chart:layers:v2"' in controller
     assert "restoreChartView();" in controller
     assert "storeChartView();" in controller
-    assert 'methodLayerStorageKey = "masterstock-chart:method-layers"' in controller
-    assert "restoreMethodLayers();" in controller
-    assert "storeMethodLayers();" in controller
+    assert 'const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";' in controller
+    assert "renderFrameworkPanel();" in controller
+    assert "renderTimeline();" in controller
+    assert "renderComparePanel();" in controller
+    assert "version !== requestVersion" in controller
+    assert "new AbortController()" in controller
+    assert 'const periodUnit = interval === "week" ? "周" : "日";' in controller
+    assert "setChartState(" in controller
+    assert "compactVolume" in controller
     assert chart.status_code == 200
     payload = chart.json()
     assert payload["status"] == "OK"
     assert payload["adjustment"] == "qfq"
     assert payload["price_scale_id"] == "qfq-scale-v1"
+    assert payload["relative_strength"]["benchmark"] == "中证全指（000985.CSI）"
+    assert len(payload["relative_strength"]["points"]) == len(payload["bars"])
+    assert set(payload["moving_averages"]) == {"50", "150", "200"}
     assert len(payload["bars"]) == 30
     assert payload["bars"][0]["change_pct"] is None
     assert payload["bars"][-1]["previous_close"] == 13.4
@@ -1736,6 +1778,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&interval=week"
     ).json()
     assert weekly["interval"] == "week"
+    assert set(weekly["moving_averages"]) == {"10", "30"}
     assert len(weekly["bars"]) < len(payload["bars"])
     assert weekly["bars"][-1]["change_pct"] is not None
     assert weekly["method_events"][0]["as_of_date"] == "2026-06-10"
@@ -1774,6 +1817,23 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     prefilled = client.get("/a/stocks/000001.SZ?traded_on=2026-06-10&trade_price=11.5")
     assert 'name="traded_on" type="date" value="2026-06-10"' in prefilled.text
     assert 'name="price" type="number" min="0.001" step="0.001" value="11.5"' in prefilled.text
+
+
+def test_chart_moving_averages_are_available_after_warmup():
+    bars = [
+        {
+            "trade_date": f"2026-{index // 28 + 1:02d}-{index % 28 + 1:02d}",
+            "close": index + 1,
+        }
+        for index in range(210)
+    ]
+
+    averages = _chart_moving_averages(bars, (50, 200))
+
+    assert len(averages[50]) == 161
+    assert averages[50][0]["value"] == 25.5
+    assert len(averages[200]) == 11
+    assert averages[200][0]["value"] == 100.5
 
 
 def test_private_review_overlays_public_cache_and_exposes_timing(tmp_path):

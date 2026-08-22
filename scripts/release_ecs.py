@@ -25,15 +25,16 @@ DEFAULT_PROFILE = "codex-aliyun"
 DEFAULT_REGION = "cn-hangzhou"
 DEFAULT_INSTANCE = "i-bp1fsztec7chovv51eyw"
 DEFAULT_CANONICAL_URL = "https://trading.longchangwudao.cn"
-DEFAULT_READONLY_URL = "http://47.110.74.48:8888"
 REQUIRED_WHEEL_RESOURCES = (
     "master_stock_selector/web/static/app.css",
     "master_stock_selector/web/templates/base.html",
     "master_stock_selector/web/templates/ashare/owner_activity.html",
     "master_stock_selector/web/static/vendor/lightweight-charts-5.1.0.js",
     "master_stock_selector/web/static/vendor/lucide-chevron-left.svg",
-    "master_stock_selector/web/templates/reading/adam_grimes_trading_templates.html",
-    "master_stock_selector/web/static/reading/adam-trading-templates/00103.jpg",
+    "master_stock_selector/web/templates/reading/archive.html",
+    "master_stock_selector/web/templates/reading/article.html",
+    "master_stock_selector/web/content/reading/adam-grimes-trading-templates/index.md",
+    "master_stock_selector/web/content/reading/adam-grimes-trading-templates/images/00103.jpg",
 )
 FORBIDDEN_ARCHIVE_PATTERNS = (
     re.compile(r"(^|/)(data|logs|artifacts|backups)/"),
@@ -55,7 +56,6 @@ class ReleaseConfig:
     region: str
     instance_id: str
     canonical_url: str
-    readonly_url: str
     smoke_paths: tuple[str, ...]
     skip_tests: bool
     allow_dirty_worktree: bool
@@ -104,7 +104,6 @@ def parse_args(argv: Sequence[str] | None = None) -> ReleaseConfig:
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--instance-id", default=DEFAULT_INSTANCE)
     parser.add_argument("--canonical-url", default=DEFAULT_CANONICAL_URL)
-    parser.add_argument("--readonly-url", default=DEFAULT_READONLY_URL)
     parser.add_argument(
         "--smoke-path",
         action="append",
@@ -151,7 +150,6 @@ def parse_args(argv: Sequence[str] | None = None) -> ReleaseConfig:
         region=str(args.region),
         instance_id=str(args.instance_id),
         canonical_url=str(args.canonical_url).rstrip("/"),
-        readonly_url=str(args.readonly_url).rstrip("/"),
         smoke_paths=smoke_paths,
         skip_tests=bool(args.skip_tests),
         allow_dirty_worktree=bool(args.allow_dirty_worktree),
@@ -637,8 +635,10 @@ test -f "$pkg/web/templates/base.html"
 test -f "$pkg/web/templates/ashare/owner_activity.html"
 test -f "$pkg/web/static/vendor/lightweight-charts-5.1.0.js"
 test -f "$pkg/web/static/vendor/lucide-chevron-left.svg"
-test -f "$pkg/web/templates/reading/adam_grimes_trading_templates.html"
-test -f "$pkg/web/static/reading/adam-trading-templates/00103.jpg"
+test -f "$pkg/web/templates/reading/archive.html"
+test -f "$pkg/web/templates/reading/article.html"
+test -f "$pkg/web/content/reading/adam-grimes-trading-templates/index.md"
+test -f "$pkg/web/content/reading/adam-grimes-trading-templates/images/00103.jpg"
 test "$(sha256sum "$pkg/web/static/app.css" | awk '{{print $1}}')" = {context.css_sha256}
 install -d -o masterstock -g masterstock -m 700 "$state"
 userdb="$state/users.sqlite3"
@@ -794,14 +794,10 @@ echo FINAL_REMOTE_OK
 
 def public_acceptance(config: ReleaseConfig) -> None:
     canonical = config.canonical_url
-    readonly = config.readonly_url
     checks = (
         (f"{canonical}/healthz", "200"),
         (f"{canonical}/login", "200"),
         (f"{canonical}/a/daily", "200"),
-        (f"{readonly}/healthz", "200"),
-        (f"{readonly}/login", "404"),
-        (f"{readonly}/api/v1/", "404"),
     )
     for url, expected in checks:
         code = output_of(

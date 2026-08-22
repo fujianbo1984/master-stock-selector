@@ -1,0 +1,16 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name books.longchangwudao.cn;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    # Do not expose Kavita's first-run setup over plaintext HTTP.
+    location / {
+        return 404;
+    }
+}
