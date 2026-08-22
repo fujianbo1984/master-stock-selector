@@ -10,6 +10,7 @@ MOVING_AVERAGE_ARTICLE_PATH = "/a/reading/moving-averages-are-not-trading-button
 PULLBACK_ARTICLE_PATH = "/a/reading/adam-grimes-pullback-trading"
 BROOKS_PULLBACK_ARTICLE_PATH = "/a/reading/al-brooks-pullback-trading"
 COMBINED_PULLBACK_ARTICLE_PATH = "/a/reading/adam-and-brooks-pullback-execution"
+SUPPORT_RESISTANCE_ARTICLE_PATH = "/a/reading/support-resistance-price-boundaries"
 
 
 def _app(tmp_path):
@@ -33,6 +34,24 @@ def test_article_requires_login(tmp_path):
     assert response.status_code == 303
     assert response.headers["location"] == f"/login?next={ARTICLE_PATH}"
     assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_logged_in_user_can_read_support_resistance_article(tmp_path):
+    client = TestClient(_app(tmp_path))
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    article = client.get(SUPPORT_RESISTANCE_ARTICLE_PATH)
+    assert article.status_code == 200
+    assert "支撑与阻力不是一条线" in article.text
+    assert "Weinstein" in article.text
+    assert "支撑与阻力是在特定时间框架和市场状态下" in article.text
+    assert article.text.count("<h2") == 10
+    assert article.headers["cache-control"] == "private, no-store"
+    assert article.headers["x-robots-tag"] == "noindex, nofollow"
 
 
 def test_logged_in_user_can_read_article_without_account_nav_entry(tmp_path):
@@ -192,6 +211,10 @@ def test_article_navigation_follows_publication_dates(tmp_path):
 
     newest = client.get(COMBINED_PULLBACK_ARTICLE_PATH)
     assert f'href="{BROOKS_PULLBACK_ARTICLE_PATH}"' in newest.text
+    assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in newest.text
+
+    newest = client.get(SUPPORT_RESISTANCE_ARTICLE_PATH)
+    assert f'href="{COMBINED_PULLBACK_ARTICLE_PATH}"' in newest.text
     assert "已经是最新一篇" in newest.text
 
 
@@ -284,6 +307,6 @@ def test_logged_in_user_can_read_combined_pullback_article(tmp_path):
     assert "Adam 擅长筛选回调，Brooks 擅长执行回调" in article.text
     assert "这笔交易为什么值得做，以及现在为什么可以进场" in article.text
     assert f'href="{BROOKS_PULLBACK_ARTICLE_PATH}"' in article.text
-    assert "已经是最新一篇" in article.text
+    assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in article.text
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"

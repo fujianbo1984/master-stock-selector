@@ -8,6 +8,16 @@ DEFAULT_SITE_OWNER_USERNAME = "我不是来玩的"
 
 OWNER_READING_NOTES = (
     {
+        "title": "支撑与阻力不是一条线：重新理解价格边界",
+        "summary": (
+            "从五位交易作者的视角梳理支撑与阻力，"
+            "将价格位置放回供需、趋势、结构与风险边界之中理解。"
+        ),
+        "href": "/a/reading/support-resistance-price-boundaries",
+        "updated_on": "2026-08-22",
+        "tags": ("支撑与阻力", "价格行为", "趋势交易", "交易体系"),
+    },
+    {
         "title": "Adam 与 Brooks 的回调交易思路",
         "summary": (
             "用 Adam 的结构筛选回调，再用 Brooks 的逐 K 线方法选择触发，"

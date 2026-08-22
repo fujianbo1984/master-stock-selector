@@ -59,6 +59,17 @@ def build_content_router(*, render: Render) -> APIRouter:
         return response
 
     @router.get(
+        "/a/reading/support-resistance-price-boundaries",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    def support_resistance_price_boundaries(request: Request) -> Response:
+        return render_private_article(
+            request,
+            "reading/support_resistance_price_boundaries.html",
+        )
+
+    @router.get(
         "/a/reading/trading-system-boundaries",
         response_class=HTMLResponse,
         include_in_schema=False,
