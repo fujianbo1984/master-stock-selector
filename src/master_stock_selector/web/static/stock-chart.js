@@ -15,8 +15,6 @@
   const deleteSelectedButton = root.querySelector("[data-delete-selected]");
   const methodEventDetail = root.querySelector("[data-method-event-detail]");
   const frameworkPanel = root.querySelector("[data-chart-framework-panel]");
-  const compareButton = root.querySelector("[data-chart-compare]");
-  const comparePanel = root.querySelector("[data-chart-compare-panel]");
   const timelineList = root.querySelector("[data-chart-method-timeline-list]");
   const loadState = root.querySelector("[data-chart-load-state]");
   const stateOverlay = root.querySelector("[data-chart-state-overlay]");
@@ -41,14 +39,12 @@
   let pendingAnchor = null;
   let previewAnchor = null;
   let selectedDrawingId = null;
-  let recordMode = false;
-  let compareVisible = false;
   let requestVersion = 0;
   let requestController = null;
   let methodEventsById = new Map();
   const canonicalDrawingAnchors = new Map();
   const chartViewStorageKey = "masterstock-chart:view";
-  const chartLayersStorageKey = "masterstock-chart:layers:v2";
+  const chartLayersStorageKey = "masterstock-chart:layers:v3";
   const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";
   const frameworkLayerVisible = () => root.querySelector(`[data-framework-layer="${frameworkForInterval()}"]`)?.checked === true;
   const syncChartViewControls = () => {
@@ -115,9 +111,6 @@
   initialVolumePane.setHeight(132);
   const volume = chart.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, base: 0 }, initialVolumePane.paneIndex());
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0 } });
-  const relativeStrengthPane = chart.addPane();
-  relativeStrengthPane.setHeight(0);
-  const relativeStrength = chart.addSeries(LightweightCharts.LineSeries, { color: "#986719", lineWidth: 2, lastValueVisible: false, priceLineVisible: false, title: "相对中证全指" }, relativeStrengthPane.paneIndex());
   const markersApi = LightweightCharts.createSeriesMarkers(candles, []);
 
   const minerviniCheckLabels = {
@@ -209,14 +202,6 @@
       const item = document.createElement("li"); item.textContent = "当前显示区间内没有可用的状态变化记录。"; timelineList.append(item);
     }
   };
-  const renderComparePanel = () => {
-    if (!comparePanel || !payload) return;
-    const status = (method) => root.querySelector(`[data-framework-status="${method}"]`)?.textContent || "数据不足";
-    const wStage = root.querySelector('[data-framework-status="weinstein"]')?.dataset.frameworkStage || "数据不足";
-    comparePanel.hidden = !compareVisible;
-    if (!compareVisible) return;
-    comparePanel.innerHTML = `<article><span>日线 · M大师</span><strong>${status("minervini")}</strong><p>50 / 150 / 200 日线、52周区间与相对中证全指走势。</p></article><article><span>周线 · W大师</span><strong>${wStage}</strong><p>${status("weinstein")} · 10 / 30 周线与阶段状态。</p></article>`;
-  };
   const renderMethodEventDetail = (event) => {
     if (!event) { methodEventDetail.hidden = true; methodEventDetail.replaceChildren(); return; }
     const title = document.createElement("strong");
@@ -270,7 +255,6 @@
     deleteSelectedButton.disabled = !selectedDrawing();
   };
   const setActiveTool = (tool) => {
-    recordMode = false;
     activeTool = tool;
     pendingAnchor = null;
     previewAnchor = null;
@@ -289,8 +273,7 @@
     const rect = chartNode.getBoundingClientRect();
     const chartHeight = Math.max(520, Math.floor(rect.height || 640));
     const volumeHeight = volumeInput.checked ? Math.max(104, Math.round(chartHeight * 0.2)) : 0;
-    const rsHeight = frameworkForInterval() === "minervini" && frameworkLayerVisible() && (payload?.relative_strength?.points || []).length ? 104 : 1;
-    const drawingHeight = chartHeight - volumeHeight - rsHeight;
+    const drawingHeight = chartHeight - volumeHeight;
     chart.applyOptions({ width: Math.max(320, Math.floor(rect.width)), height: chartHeight });
     if (volumeInput.checked) volume.getPane().setHeight(volumeHeight);
     const ratio = window.devicePixelRatio || 1;
@@ -436,16 +419,12 @@
     maM200.setData(framework === "minervini" && showFrameworkLayer ? movingAverage(200) : []);
     maW10.setData(framework === "weinstein" && showFrameworkLayer ? movingAverage(10) : []);
     maW30.setData(framework === "weinstein" && showFrameworkLayer ? movingAverage(30) : []);
-    const rsPoints = payload.relative_strength?.points || [];
-    relativeStrength.setData(framework === "minervini" && showFrameworkLayer ? rsPoints.map(row => ({ time: row.trade_date, value: row.value })) : []);
-    relativeStrengthPane.setHeight(framework === "minervini" && showFrameworkLayer && rsPoints.length ? 104 : 1);
     volume.setData(payload.bars.map(row => ({ time: row.trade_date, value: row.volume || 0, color: row.close >= row.open ? "rgba(201,78,71,.48)" : "rgba(37,132,96,.48)" })));
     if (tradeLegend) tradeLegend.hidden = !(payload.trade_overlay?.executions || []).length;
     syncVolumePane();
     renderMarkers();
     renderFrameworkPanel();
     renderTimeline();
-    renderComparePanel();
     renderMethodEventDetail(null);
     drawings = (payload.drawings || []).map(canonicalizeDrawing);
     if (!selectedDrawing()) selectedDrawingId = null;
@@ -593,12 +572,6 @@
     try { await removeDrawing(selectedDrawing()); drawingHint.textContent = "已删除选中画线"; } catch (_) { drawingHint.textContent = "删除失败，请重试"; }
   });
   root.querySelectorAll("[data-draw-tool]").forEach(button => button.addEventListener("click", () => setActiveTool(button.dataset.drawTool)));
-  const recordButton = root.querySelector("[data-chart-record]");
-  recordButton?.addEventListener("click", () => {
-    const nextRecordMode = !recordMode; setActiveTool("browse"); recordMode = nextRecordMode;
-    recordButton.setAttribute("aria-pressed", String(recordMode));
-    drawingHint.textContent = recordMode ? "点击价格图预填成交日与价格；保存前仍可修改" : "拖拽缩放或查看价格";
-  });
   volumeInput.addEventListener("change", () => {
     storeLayerSettings();
     syncVolumePane();
@@ -611,22 +584,13 @@
     if (payload) drawPayload(payload);
   }));
   retryButton?.addEventListener("click", request);
-  compareButton?.addEventListener("click", () => {
-    compareVisible = !compareVisible;
-    compareButton.setAttribute("aria-pressed", String(compareVisible));
-    compareButton.textContent = compareVisible ? "收起摘要" : "双框架摘要";
-    renderComparePanel();
-  });
   chart.subscribeClick((param) => {
     if (!payload || !param.time) return;
     const methodEvent = methodEventsById.get(param.hoveredObjectId || "");
     if (methodEvent) { renderMethodEventDetail(methodEvent); return; }
     const selectedDate = chartDate(param.time);
     const matches = (payload.trade_overlay?.executions || []).filter(item => item.traded_on === selectedDate);
-    if (matches.length && !recordMode) { window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?edit_trade=${encodeURIComponent(matches[0].execution_id)}#trade-journal`); return; }
-    if (!recordMode || !param.point) return;
-    const price = candles.coordinateToPrice(param.point.y);
-    if (price) window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?traded_on=${encodeURIComponent(selectedDate)}&trade_price=${encodeURIComponent(price.toFixed(3))}#trade-journal`);
+    if (matches.length) window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?edit_trade=${encodeURIComponent(matches[0].execution_id)}#trade-journal`);
   });
   chart.subscribeCrosshairMove((param) => {
     if (!payload?.bars?.length) return;

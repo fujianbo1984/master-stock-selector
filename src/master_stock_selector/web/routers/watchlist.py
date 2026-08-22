@@ -1452,11 +1452,6 @@ def build_watchlist_router(
             end_date=date,
             interval=interval,
         )
-        relative_strength = (
-            _chart_relative_strength(bars, market_reader.safe_index_bars("000985.CSI", date))
-            if interval == "day"
-            else {"benchmark": "", "points": []}
-        )
         return {
             "status": "OK",
             "symbol": symbol.upper(),
@@ -1467,7 +1462,6 @@ def build_watchlist_router(
             "bars": bars,
             "method_events": method_overlay["events"],
             "method_event_coverage": method_overlay["coverage"],
-            "relative_strength": relative_strength,
             "moving_averages": moving_averages,
             "keltner": [
                 point
@@ -2758,33 +2752,6 @@ def _breadth_regime(summaries: dict[str, dict[str, Any]]) -> dict[str, str]:
         ),
     )
     return {"label": label, "explanation": explanation, "tone": tone}
-
-
-def _chart_relative_strength(
-    stock_bars: list[dict[str, Any]], index_bars: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """Return a date-aligned relative-performance line, not Minervini's percentile."""
-
-    index_closes = {
-        str(row.get("trade_date") or ""): float(row["close"])
-        for row in index_bars
-        if float(row.get("close") or 0) > 0
-    }
-    paired = [
-        (str(row["trade_date"]), float(row["close"]), index_closes[str(row["trade_date"])])
-        for row in stock_bars
-        if float(row.get("close") or 0) > 0 and str(row["trade_date"]) in index_closes
-    ]
-    if len(paired) < 2:
-        return {"benchmark": "", "points": []}
-    baseline = paired[0][1] / paired[0][2]
-    return {
-        "benchmark": "中证全指（000985.CSI）",
-        "points": [
-            {"trade_date": value, "value": round(stock_close / index_close / baseline * 100, 2)}
-            for value, stock_close, index_close in paired
-        ],
-    }
 
 
 def _chart_moving_averages(

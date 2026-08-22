@@ -1694,7 +1694,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260823-method-workbench-v6" in page.text
+    assert "stock-chart.js?v=20260823-method-workbench-v8" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert 'data-chart-ohlcv' in page.text
@@ -1706,29 +1706,40 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-chart-limit="all"' in page.text
     assert 'data-chart-interval="day"' in page.text
     assert 'data-chart-interval="week"' in page.text
-    assert "方法周期" in page.text
+    assert "方法周期" not in page.text
+    assert ">日线</button>" in page.text
+    assert ">周线</button>" in page.text
     assert 'data-framework-indicator="minervini"' in page.text
     assert 'data-framework-indicator="weinstein"' in page.text
     assert 'data-framework-layer="minervini" checked' not in page.text
     assert 'data-framework-layer="minervini"' in page.text
     assert 'data-framework-layer="weinstein" checked' in page.text
-    assert 'data-keltner checked' not in page.text
+    assert 'data-keltner checked' in page.text
     assert 'data-method-layer=' not in page.text
     assert 'data-chart-framework-panel' in page.text
-    assert 'data-chart-compare' in page.text
+    assert page.text.count("> 均线</label>") == 2
+    assert "M大师均线与RS" not in page.text
+    assert "W大师均线" not in page.text
+    assert "叠加" not in page.text
+    assert 'data-chart-compare' not in page.text
+    assert "双框架摘要" not in page.text
+    assert 'data-chart-record' not in page.text
+    assert "录入成交" not in page.text
     assert 'data-chart-method-timeline' in page.text
     assert "状态事件可用区间" not in page.text
     assert "W/M 标志只表示规则观察状态变化" not in page.text
     assert "画线仅保存为个人观察标注" not in page.text
     controller = client.get("/static/stock-chart.js").text
     assert 'chartViewStorageKey = "masterstock-chart:view"' in controller
-    assert 'chartLayersStorageKey = "masterstock-chart:layers:v2"' in controller
+    assert 'chartLayersStorageKey = "masterstock-chart:layers:v3"' in controller
     assert "restoreChartView();" in controller
     assert "storeChartView();" in controller
     assert 'const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";' in controller
     assert "renderFrameworkPanel();" in controller
     assert "renderTimeline();" in controller
-    assert "renderComparePanel();" in controller
+    assert "renderComparePanel" not in controller
+    assert "relativeStrength" not in controller
+    assert "recordMode" not in controller
     assert "version !== requestVersion" in controller
     assert "new AbortController()" in controller
     assert 'const periodUnit = interval === "week" ? "周" : "日";' in controller
@@ -1739,8 +1750,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert payload["status"] == "OK"
     assert payload["adjustment"] == "qfq"
     assert payload["price_scale_id"] == "qfq-scale-v1"
-    assert payload["relative_strength"]["benchmark"] == "中证全指（000985.CSI）"
-    assert len(payload["relative_strength"]["points"]) == len(payload["bars"])
+    assert "relative_strength" not in payload
     assert set(payload["moving_averages"]) == {"50", "150", "200"}
     assert len(payload["bars"]) == 30
     assert payload["bars"][0]["change_pct"] is None

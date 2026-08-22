@@ -1223,7 +1223,6 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-group-divider { width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
 .chart-periods [aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
 .chart-period-button { display: inline-flex; align-items: baseline; gap: 5px; }
-.chart-period-button small { color: var(--muted); font-size: 9px; font-weight: 500; }
 .chart-period-button[aria-pressed="true"] small { color: inherit; }
 .chart-tool-label { color: var(--muted); font-size: 11px; }
 .kc-settings { position: relative; }
@@ -1266,11 +1265,6 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-framework-panel dl div { min-width: 0; padding: 7px 9px; background: var(--panel); }
 .chart-framework-panel dt { color: var(--muted); font-size: 10px; }
 .chart-framework-panel dd { margin: 3px 0 0; overflow: hidden; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
-.chart-compare-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin-top: 8px; border: 1px solid var(--line); background: var(--line); }
-.chart-compare-panel article { padding: 11px 13px; background: var(--panel); }
-.chart-compare-panel span { display: block; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
-.chart-compare-panel strong { display: block; margin-top: 4px; font-family: "Songti SC", "STSong", serif; font-size: 16px; }
-.chart-compare-panel p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .chart-method-timeline { margin-top: 8px; border: 1px solid var(--line); background: var(--panel); }
 .chart-method-timeline summary { padding: 9px 12px; color: var(--text); cursor: pointer; font-size: 12px; font-weight: 700; }
 .chart-method-timeline ol { display: grid; gap: 5px; margin: 0; padding: 0 14px 12px 31px; color: var(--muted); font-size: 11px; line-height: 1.5; }
