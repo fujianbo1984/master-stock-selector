@@ -1747,3 +1747,30 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
   .token-item-meta { grid-template-columns: 1fr; }
   .workspace-empty { grid-template-columns: 1fr; gap: 8px; padding: 30px 20px; }
 }
+.plan-rule-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.plan-rule-list > div {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.35fr) minmax(0, 1fr);
+  gap: 18px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line, #d8d2c4);
+}
+
+.plan-rule-list dt {
+  font-weight: 700;
+}
+
+.plan-rule-list dd {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.settings-form textarea {
+  width: 100%;
+  resize: vertical;
+}

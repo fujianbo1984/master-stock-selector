@@ -41,6 +41,9 @@
             <legend>允许的操作</legend>
             <label><input type="checkbox" name="trades:read" checked><span><strong>读取交易</strong><small>查询成交、持仓和提交验收结果</small></span></label>
             <label><input type="checkbox" name="trades:write" checked><span><strong>写入交易</strong><small>预检、批量录入和更新既有 BUY 止损</small></span></label>
+            <label><input type="checkbox" name="plans:read"><span><strong>读取交易计划</strong><small>读取私有计划、版本与 Grill 问题</small></span></label>
+            <label><input type="checkbox" name="plans:write"><span><strong>讨论交易计划</strong><small>保存 Grill 草稿回答，不能发布</small></span></label>
+            <label><input type="checkbox" name="plans:publish"><span><strong>发布交易计划</strong><small>允许 Agent 冻结并发布新版本</small></span></label>
           </fieldset>
           <button class="button auth-submit" type="submit">生成 Token</button>
         </form>

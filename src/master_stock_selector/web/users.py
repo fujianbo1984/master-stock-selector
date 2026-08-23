@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from time import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from argon2 import PasswordHasher
@@ -22,6 +22,7 @@ from ..watchlist.repository import (
     TRADE_METHOD_LABELS,
     TRADE_SETUP_ALIASES,
     TRADE_SETUP_LABELS,
+    _aggregate_completed_trades,
     _match_trade_executions,
     _open_quantity,
     _summarize_open_lots,
@@ -31,8 +32,17 @@ from ..watchlist.repository import (
 SESSION_COOKIE = "masterstock_session"
 SESSION_IDLE_SECONDS = 7 * 24 * 60 * 60
 API_TOKEN_PREFIX = "mst_"
-API_TOKEN_SCOPES = frozenset({"trades:read", "trades:write"})
-USER_SCHEMA_VERSION = 4
+API_TOKEN_SCOPES = frozenset(
+    {"trades:read", "trades:write", "plans:read", "plans:write", "plans:publish"}
+)
+PLAN_SETUP_CODES = frozenset({"A1", "A3", "B1", "B2"})
+PLAN_SETUP_BY_TRADE_SETUP = {
+    "PRE_BREAKOUT_BASE": "A1",
+    "POST_BREAKOUT_FIRST_PULLBACK": "A3",
+    "PULLBACK_SUPPORT": "B1",
+    "COMPLEX_PULLBACK": "B2",
+}
+USER_SCHEMA_VERSION = 5
 USER_REQUIRED_TABLES = frozenset(
     {
         "user_account",
@@ -44,6 +54,10 @@ USER_REQUIRED_TABLES = frozenset(
         "user_trade_execution",
         "user_chart_drawing",
         "user_access_log",
+        "user_trading_plan",
+        "user_trading_plan_version",
+        "user_plan_grill_session",
+        "user_plan_grill_event",
     }
 )
 USER_REQUIRED_INDEXES = frozenset(
@@ -52,6 +66,9 @@ USER_REQUIRED_INDEXES = frozenset(
         "idx_user_access_occurred",
         "idx_user_access_user_occurred",
         "idx_user_access_path_occurred",
+        "idx_user_plan_version_plan",
+        "idx_user_plan_session_user_updated",
+        "idx_user_plan_event_session_revision",
     }
 )
 
@@ -147,12 +164,16 @@ CREATE TABLE IF NOT EXISTS user_trade_execution (
             'POST_BREAKOUT_FIRST_PULLBACK', 'FAILED_BREAKOUT'
         )),
     stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
+    initial_stop_price REAL CHECK (initial_stop_price IS NULL OR initial_stop_price > 0),
     rationale TEXT NOT NULL DEFAULT '',
     invalidation TEXT NOT NULL DEFAULT '',
     exit_reason TEXT NOT NULL DEFAULT '',
     market_context TEXT NOT NULL DEFAULT '',
-    observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
+                            plan_version_id TEXT,
+                            evaluation_cycle_id TEXT,
+                            setup_code TEXT,
+                            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
     FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
@@ -161,6 +182,41 @@ CREATE INDEX IF NOT EXISTS idx_user_trade_date
 ON user_trade_execution(user_id, traded_on, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_trade_symbol
 ON user_trade_execution(user_id, symbol, traded_on, created_at);
+CREATE TABLE IF NOT EXISTS user_trading_plan (
+    plan_id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+    current_version_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS user_trading_plan_version (
+    version_id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, version_number TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('DRAFT','ACTIVE','ARCHIVED','REVOKED')),
+    schema_version TEXT NOT NULL, content_json TEXT NOT NULL, change_summary TEXT NOT NULL DEFAULT '',
+    change_class TEXT NOT NULL DEFAULT 'SUBSTANTIVE', evaluation_cycle_id TEXT NOT NULL,
+    supersedes_version_id TEXT, content_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    activated_at TEXT, archived_at TEXT, UNIQUE(plan_id, version_number),
+    FOREIGN KEY(plan_id) REFERENCES user_trading_plan(plan_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_plan_version_plan ON user_trading_plan_version(plan_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS user_plan_grill_session (
+    session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan_id TEXT NOT NULL, base_version_id TEXT,
+    head_version_id_at_start TEXT,
+    grill_version TEXT NOT NULL, change_goal TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+    answers_json TEXT NOT NULL DEFAULT '{}', revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_version_id TEXT,
+    FOREIGN KEY(user_id) REFERENCES user_account(user_id) ON DELETE CASCADE,
+    FOREIGN KEY(plan_id) REFERENCES user_trading_plan(plan_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_plan_session_user_updated
+ON user_plan_grill_session(user_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS user_plan_grill_event (
+    event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, question_id TEXT NOT NULL, event_type TEXT NOT NULL,
+    value_json TEXT NOT NULL, revision INTEGER NOT NULL, actor_type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(session_id) REFERENCES user_plan_grill_session(session_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_plan_event_session_revision
+ON user_plan_grill_event(session_id, revision);
 CREATE TABLE IF NOT EXISTS user_chart_drawing (
     drawing_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -231,12 +287,19 @@ class UserRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.password_hasher = PasswordHasher()
+        self._trading_plans: TradingPlanService | None = None
+
+    @property
+    def trading_plans(self) -> TradingPlanService:
+        if self._trading_plans is None:
+            from .trading_plans import TradingPlanService
+
+            self._trading_plans = TradingPlanService(self)
+        return self._trading_plans
 
     def connect(self, *, read_only: bool = False) -> sqlite3.Connection:
         if read_only:
-            connection = sqlite3.connect(
-                f"file:{self.path.resolve()}?mode=ro", uri=True, timeout=5
-            )
+            connection = sqlite3.connect(f"file:{self.path.resolve()}?mode=ro", uri=True, timeout=5)
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             connection = sqlite3.connect(self.path, timeout=5)
@@ -262,6 +325,12 @@ class UserRepository:
                 "missing_columns": [
                     "user_trade_execution.source_ref",
                     "user_trade_execution.revision",
+                    "user_trade_execution.plan_version_id",
+                    "user_trade_execution.evaluation_cycle_id",
+                    "user_trade_execution.setup_code",
+                    "user_trade_execution.initial_stop_price",
+                    "user_plan_grill_session.published_version_id",
+                    "user_plan_grill_session.head_version_id_at_start",
                 ],
                 "missing_indexes": sorted(USER_REQUIRED_INDEXES),
             }
@@ -278,6 +347,10 @@ class UserRepository:
                     str(row[1])
                     for row in connection.execute("PRAGMA table_info(user_trade_execution)")
                 }
+                grill_columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(user_plan_grill_session)")
+                }
                 indexes = {
                     str(row[0])
                     for row in connection.execute(
@@ -285,8 +358,7 @@ class UserRepository:
                     )
                 }
                 review_row = connection.execute(
-                    "SELECT sql FROM sqlite_master "
-                    "WHERE type='table' AND name='user_stock_review'"
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
                 ).fetchone()
                 review_table_sql = str(review_row[0] if review_row is not None else "")
                 trade_row = connection.execute(
@@ -306,8 +378,20 @@ class UserRepository:
         missing_tables = sorted(USER_REQUIRED_TABLES - tables)
         missing_columns = sorted(
             f"user_trade_execution.{column}"
-            for column in {"source_ref", "revision"} - trade_columns
+            for column in {
+                "source_ref",
+                "revision",
+                "plan_version_id",
+                "evaluation_cycle_id",
+                "setup_code",
+                "initial_stop_price",
+            }
+            - trade_columns
         )
+        if "published_version_id" not in grill_columns:
+            missing_columns.append("user_plan_grill_session.published_version_id")
+        if "head_version_id_at_start" not in grill_columns:
+            missing_columns.append("user_plan_grill_session.head_version_id_at_start")
         missing_indexes = sorted(USER_REQUIRED_INDEXES - indexes)
         legacy_observation_states = (
             "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql
@@ -350,22 +434,21 @@ class UserRepository:
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA secure_delete=ON")
-            trade_table_exists = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' "
-                "AND name='user_trade_execution'"
-            ).fetchone() is not None
+            trade_table_exists = (
+                connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_trade_execution'"
+                ).fetchone()
+                is not None
+            )
             trade_columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(user_trade_execution)")
+                str(row[1]) for row in connection.execute("PRAGMA table_info(user_trade_execution)")
             }
             trade_row = connection.execute(
-                "SELECT sql FROM sqlite_master "
-                "WHERE type='table' AND name='user_trade_execution'"
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_trade_execution'"
             ).fetchone()
             trade_table_sql = str(trade_row[0] if trade_row is not None else "")
             review_row = connection.execute(
-                "SELECT sql FROM sqlite_master "
-                "WHERE type='table' AND name='user_stock_review'"
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
             ).fetchone()
             review_table_sql = str(review_row[0] if review_row is not None else "")
             migration_statements: list[str] = []
@@ -378,11 +461,38 @@ class UserRepository:
                     "ALTER TABLE user_trade_execution "
                     "ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);"
                 )
+            for column, definition in (
+                ("plan_version_id", "TEXT"),
+                ("evaluation_cycle_id", "TEXT"),
+                ("setup_code", "TEXT"),
+            ):
+                if trade_table_exists and column not in trade_columns:
+                    migration_statements.append(
+                        f"ALTER TABLE user_trade_execution ADD COLUMN {column} {definition};"
+                    )
+            if trade_table_exists and "initial_stop_price" not in trade_columns:
+                migration_statements.extend(
+                    [
+                        "ALTER TABLE user_trade_execution ADD COLUMN initial_stop_price REAL;",
+                        "UPDATE user_trade_execution SET initial_stop_price=stop_price WHERE side='BUY';",
+                    ]
+                )
+            session_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(user_plan_grill_session)")
+            }
+            if session_columns and "published_version_id" not in session_columns:
+                migration_statements.append(
+                    "ALTER TABLE user_plan_grill_session ADD COLUMN published_version_id TEXT;"
+                )
+            if session_columns and "head_version_id_at_start" not in session_columns:
+                migration_statements.append(
+                    "ALTER TABLE user_plan_grill_session ADD COLUMN head_version_id_at_start TEXT;"
+                )
             if "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql:
                 migration_statements.extend(
                     [
-                        "ALTER TABLE user_stock_review "
-                        "RENAME TO user_stock_review_legacy;",
+                        "ALTER TABLE user_stock_review RENAME TO user_stock_review_legacy;",
                         """CREATE TABLE user_stock_review (
                             user_id TEXT NOT NULL,
                             symbol TEXT NOT NULL,
@@ -412,8 +522,7 @@ class UserRepository:
             if trade_table_exists and "'FAILED_TEST'" not in trade_table_sql:
                 migration_statements.extend(
                     [
-                        "ALTER TABLE user_trade_execution "
-                        "RENAME TO user_trade_execution_legacy;",
+                        "ALTER TABLE user_trade_execution RENAME TO user_trade_execution_legacy;",
                         """CREATE TABLE user_trade_execution (
                             execution_id TEXT PRIMARY KEY,
                             user_id TEXT NOT NULL,
@@ -436,11 +545,17 @@ class UserRepository:
                                     'POST_BREAKOUT_FIRST_PULLBACK', 'FAILED_BREAKOUT'
                                 )),
                             stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
+                            initial_stop_price REAL CHECK (
+                                initial_stop_price IS NULL OR initial_stop_price > 0
+                            ),
                             rationale TEXT NOT NULL DEFAULT '',
                             invalidation TEXT NOT NULL DEFAULT '',
                             exit_reason TEXT NOT NULL DEFAULT '',
                             market_context TEXT NOT NULL DEFAULT '',
-                            observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    plan_version_id TEXT,
+    evaluation_cycle_id TEXT,
+    setup_code TEXT,
                             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
@@ -450,7 +565,7 @@ class UserRepository:
                         """INSERT INTO user_trade_execution(
                             execution_id, user_id, traded_on, traded_at, source_ref,
                             symbol, side, quantity, price, fee, method, setup_method,
-                            stop_price, rationale, invalidation, exit_reason,
+                            stop_price, initial_stop_price, rationale, invalidation, exit_reason,
                             market_context, observation_snapshot_json, created_at,
                             updated_at, revision
                         )
@@ -461,7 +576,9 @@ class UserRepository:
                                    WHEN 'PULLBACK' THEN 'PULLBACK_SUPPORT'
                                    ELSE setup_method
                                END,
-                               stop_price, rationale, invalidation, exit_reason,
+                               stop_price,
+                               CASE WHEN side='BUY' THEN stop_price ELSE NULL END,
+                               rationale, invalidation, exit_reason,
                                market_context, observation_snapshot_json, created_at,
                                updated_at, revision
                         FROM user_trade_execution_legacy;""",
@@ -696,9 +813,7 @@ class UserRepository:
             if row is None:
                 return False
             try:
-                verified = self.password_hasher.verify(
-                    str(row["password_hash"]), current_password
-                )
+                verified = self.password_hasher.verify(str(row["password_hash"]), current_password)
             except (VerifyMismatchError, InvalidHashError):
                 return False
             if not verified:
@@ -1096,6 +1211,8 @@ class UserRepository:
         market_context: str = "",
         observation_snapshot: Mapping[str, Any] | None = None,
         permit_unmatched_sell: bool = False,
+        plan_version_id: str | None = None,
+        setup_code: str | None = None,
     ) -> str:
         values = _validated_trade_values(
             traded_on=traded_on,
@@ -1113,6 +1230,18 @@ class UserRepository:
             raise ValueError("股票代码格式不正确")
         execution_id = uuid4().hex
         with self.connect() as connection:
+            plan = (
+                self.trading_plans.show(user_id, plan_version_id)
+                if plan_version_id
+                else self.trading_plans.current(user_id)
+            )
+            if values["side"] == "SELL":
+                plan = None
+            if plan_version_id and plan is None:
+                raise ValueError("计划版本不存在或不属于当前用户")
+            normalized_setup_code = setup_code.upper().strip() if setup_code else None
+            if normalized_setup_code and normalized_setup_code not in PLAN_SETUP_CODES:
+                raise ValueError("计划形态必须为 A1、A3、B1 或 B2")
             existing_rows = self._trade_rows(connection, user_id, normalized_symbol)
             candidate = {
                 "execution_id": execution_id,
@@ -1133,17 +1262,16 @@ class UserRepository:
                 except ValueError as exc:
                     if not permit_unmatched_sell:
                         available = _open_quantity(existing_rows)
-                        raise ValueError(
-                            f"卖出数量超过可复盘持仓：可用 {available} 股"
-                        ) from exc
+                        raise ValueError(f"卖出数量超过可复盘持仓：可用 {available} 股") from exc
             connection.execute(
                 """
                 INSERT INTO user_trade_execution(
                     execution_id, user_id, traded_on, traded_at, symbol, side,
                     quantity, price, fee, method, setup_method, stop_price,
+                    initial_stop_price,
                     rationale, invalidation, exit_reason, market_context,
-                    observation_snapshot_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    observation_snapshot_json, plan_version_id, evaluation_cycle_id, setup_code
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     execution_id,
@@ -1158,11 +1286,17 @@ class UserRepository:
                     values["method"],
                     values["setup_method"],
                     values["stop_price"],
+                    values["stop_price"] if values["side"] == "BUY" else None,
                     rationale.strip(),
                     invalidation.strip(),
                     exit_reason.strip(),
                     market_context.strip(),
                     json.dumps(observation_snapshot or {}, ensure_ascii=False, sort_keys=True),
+                    plan["version_id"] if plan else None,
+                    plan["evaluation_cycle_id"] if plan else None,
+                    (normalized_setup_code or PLAN_SETUP_BY_TRADE_SETUP.get(values["setup_method"]))
+                    if plan
+                    else None,
                 ),
             )
         return execution_id
@@ -1170,34 +1304,75 @@ class UserRepository:
     def trade_review(self, user_id: str, names: Mapping[str, str]) -> dict[str, Any]:
         with self.connect() as connection:
             rows = self._trade_rows(connection, user_id)
+            version_rows = connection.execute(
+                """SELECT version.version_id, version.version_number
+                FROM user_trading_plan_version AS version
+                JOIN user_trading_plan AS plan ON plan.plan_id=version.plan_id
+                WHERE plan.user_id=?""",
+                (user_id,),
+            ).fetchall()
+        version_labels = {
+            str(row["version_id"]): str(row["version_number"]) for row in version_rows
+        }
         for row in rows:
             row["snapshot"] = json.loads(str(row.pop("observation_snapshot_json") or "{}"))
         closed, open_lots, unmatched_sells = _match_trade_executions(
             rows, permit_unmatched_sells=True
         )
+        completed_trades = _aggregate_completed_trades(closed, open_lots)
         open_positions = _summarize_open_lots(open_lots)
-        for collection in (rows, closed, open_positions, unmatched_sells):
+        for collection in (rows, completed_trades, open_positions, unmatched_sells):
             for item in collection:
                 symbol = str(item["symbol"])
                 item["stock_name"] = names.get(symbol, "名称待补")
                 setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
                 item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
         setups = list(TRADE_SETUP_LABELS)
+        by_plan_setup: dict[str, dict[str, Any]] = {}
+        for item in completed_trades:
+            cycle_id = str(item.get("evaluation_cycle_id") or "UNBOUND")
+            setup_code = item.get("setup_code") or item.get("setup_method") or DEFAULT_TRADE_SETUP
+            key = f"{cycle_id}:{setup_code}"
+            by_plan_setup.setdefault(
+                key,
+                {
+                    "evaluation_cycle_id": item.get("evaluation_cycle_id"),
+                    "plan_version_ids": set(),
+                    "setup_code": setup_code,
+                    "trades": [],
+                },
+            )
+            group = by_plan_setup[key]
+            if item.get("plan_version_id"):
+                group["plan_version_ids"].add(str(item["plan_version_id"]))
+            group["trades"].append(item)
+        for value in by_plan_setup.values():
+            version_ids = sorted(value.pop("plan_version_ids"))
+            value["plan_version_ids"] = version_ids
+            value["plan_versions"] = [version_labels.get(item, item) for item in version_ids]
+            value["summary"] = _trade_statistics(value.pop("trades"))
+            value["sample_state"] = (
+                "样本不足：少于 30 笔可计算R的完整交易。"
+                if value["summary"].get("r_count", 0) < 30
+                else "样本达到本计划的 30 笔可计算R交易初步评价门槛。"
+            )
         return {
             "executions": list(reversed(rows)),
-            "closed": list(reversed(closed)),
+            "closed": list(reversed(completed_trades)),
+            "closed_fragments": list(reversed(closed)),
             "open_positions": open_positions,
             "unmatched_sells": list(reversed(unmatched_sells)),
-            "summary": _trade_statistics(closed),
+            "summary": _trade_statistics(completed_trades),
             "by_setup": {
                 setup: _trade_statistics(
-                    [item for item in closed if item["setup_method"] == setup]
+                    [item for item in completed_trades if item["setup_method"] == setup]
                 )
                 for setup in setups
             },
+            "by_plan_setup": by_plan_setup,
             "sample_state": (
                 "样本不足：少于 20 笔已完成交易，仅展示描述统计。"
-                if len(closed) < 20
+                if len(completed_trades) < 20
                 else "样本达到基础复盘门槛；仍不构成策略有效性或买卖建议。"
             ),
         }
@@ -1268,6 +1443,25 @@ class UserRepository:
             ).fetchone()
             if current is None:
                 raise ValueError("成交记录不存在")
+            if values["side"] == "SELL":
+                plan_version_id = None
+                evaluation_cycle_id = None
+                setup_code = None
+            elif str(current["side"]) == "BUY":
+                plan_version_id = current["plan_version_id"]
+                evaluation_cycle_id = current["evaluation_cycle_id"]
+                setup_code = (
+                    PLAN_SETUP_BY_TRADE_SETUP.get(values["setup_method"])
+                    if plan_version_id
+                    else None
+                )
+            else:
+                plan = self.trading_plans.current(user_id)
+                plan_version_id = plan["version_id"] if plan else None
+                evaluation_cycle_id = plan["evaluation_cycle_id"] if plan else None
+                setup_code = (
+                    PLAN_SETUP_BY_TRADE_SETUP.get(values["setup_method"]) if plan else None
+                )
             rows = self._trade_rows(connection, user_id)
             for row in rows:
                 if str(row["execution_id"]) == execution_id:
@@ -1282,6 +1476,9 @@ class UserRepository:
                             "method": values["method"],
                             "setup_method": values["setup_method"],
                             "stop_price": values["stop_price"],
+                            "plan_version_id": plan_version_id,
+                            "evaluation_cycle_id": evaluation_cycle_id,
+                            "setup_code": setup_code,
                         }
                     )
                     break
@@ -1292,6 +1489,7 @@ class UserRepository:
                     traded_on=?, traded_at=?, side=?, quantity=?, price=?, fee=?,
                     method=?, setup_method=?, stop_price=?, rationale=?, invalidation=?,
                     exit_reason=?, market_context=?, observation_snapshot_json=?,
+                    plan_version_id=?, evaluation_cycle_id=?, setup_code=?,
                     revision=revision + 1, updated_at=CURRENT_TIMESTAMP
                 WHERE user_id=? AND execution_id=?
                 """,
@@ -1310,6 +1508,9 @@ class UserRepository:
                     exit_reason.strip(),
                     market_context.strip(),
                     json.dumps(observation_snapshot or {}, ensure_ascii=False, sort_keys=True),
+                    plan_version_id,
+                    evaluation_cycle_id,
+                    setup_code,
                     user_id,
                     execution_id,
                 ),
@@ -1406,9 +1607,10 @@ class UserRepository:
                     INSERT INTO user_trade_execution(
                         execution_id, user_id, traded_on, traded_at, source_ref, symbol, side,
                         quantity, price, fee, method, setup_method, stop_price,
+                        initial_stop_price,
                         rationale, invalidation, exit_reason, market_context,
-                        observation_snapshot_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        observation_snapshot_json, plan_version_id, evaluation_cycle_id, setup_code
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         candidate["execution_id"],
@@ -1424,6 +1626,7 @@ class UserRepository:
                         candidate["method"],
                         candidate["setup_method"],
                         candidate["stop_price"],
+                        candidate["stop_price"] if candidate["side"] == "BUY" else None,
                         candidate["rationale"],
                         candidate["invalidation"],
                         candidate["exit_reason"],
@@ -1434,6 +1637,9 @@ class UserRepository:
                             sort_keys=True,
                             allow_nan=False,
                         ),
+                        candidate.get("plan_version_id"),
+                        candidate.get("evaluation_cycle_id"),
+                        candidate.get("setup_code"),
                     ),
                 )
             results = []
@@ -1575,9 +1781,7 @@ class UserRepository:
                 }
             else:
                 normalized.append(item)
-        normalized.sort(
-            key=lambda item: (item["traded_on"], item["traded_at"], int(item["index"]))
-        )
+        normalized.sort(key=lambda item: (item["traded_on"], item["traded_at"], int(item["index"])))
         candidates: list[dict[str, Any]] = []
         for item in normalized:
             index = int(item["index"])
@@ -1608,6 +1812,30 @@ class UserRepository:
                     "revision": int(duplicate.get("revision") or 1),
                 }
                 continue
+            if item["side"] == "BUY":
+                requested = item.get("plan_version_id")
+                active = self.trading_plans.current(user_id)
+                if requested:
+                    plan = self.trading_plans.show(user_id, str(requested))
+                    if plan is None:
+                        results[index] = {
+                            **base_result,
+                            "status": "REJECTED",
+                            "reason": "计划版本不存在或不属于当前用户",
+                        }
+                        continue
+                else:
+                    plan = active
+                if plan is not None:
+                    item["plan_version_id"] = plan["version_id"]
+                    item["evaluation_cycle_id"] = plan["evaluation_cycle_id"]
+                item["setup_code"] = item.get("setup_code") or PLAN_SETUP_BY_TRADE_SETUP.get(
+                    item["setup_method"]
+                )
+            else:
+                item["plan_version_id"] = None
+                item["evaluation_cycle_id"] = None
+                item["setup_code"] = None
             execution_id = uuid4().hex
             candidate = {
                 **item,
@@ -1647,7 +1875,8 @@ class UserRepository:
             }
         final_results = [item for item in results if item is not None]
         return {
-            "status": "VALID" if all(item["status"] != "REJECTED" for item in final_results)
+            "status": "VALID"
+            if all(item["status"] != "REJECTED" for item in final_results)
             else "INVALID",
             "ready": sum(item["status"] == "READY" for item in final_results),
             "duplicates": sum(item["status"] == "DUPLICATE" for item in final_results),
@@ -1701,9 +1930,7 @@ class UserRepository:
                 """,
                 (user_id, symbol.upper(), price_scale_id),
             ).fetchall()
-        return [
-            {**dict(row), "anchors": json.loads(str(row["anchors_json"]))} for row in rows
-        ]
+        return [{**dict(row), "anchors": json.loads(str(row["anchors_json"]))} for row in rows]
 
     def save_chart_drawing(
         self,
@@ -1799,6 +2026,8 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         "exit_reason",
         "market_context",
         "observation_snapshot",
+        "plan_version_id",
+        "setup_code",
     }
     unknown = sorted(str(key) for key in payload if str(key) not in allowed)
     if unknown:
@@ -1844,6 +2073,9 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
     snapshot = payload.get("observation_snapshot") or {}
     if not isinstance(snapshot, Mapping):
         raise ValueError("observation_snapshot 格式不正确")
+    setup_code = str(payload.get("setup_code") or "").strip().upper() or None
+    if setup_code is not None and setup_code not in PLAN_SETUP_CODES:
+        raise ValueError("计划形态必须为 A1、A3、B1 或 B2")
     return {
         "index": index,
         "client_id": client_id,
@@ -1858,6 +2090,8 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         "method": values["method"],
         "setup_method": values["setup_method"],
         "stop_price": values["stop_price"],
+        "plan_version_id": str(payload.get("plan_version_id") or "").strip() or None,
+        "setup_code": setup_code,
         "rationale": str(payload.get("rationale") or "").strip(),
         "invalidation": str(payload.get("invalidation") or "").strip(),
         "exit_reason": str(payload.get("exit_reason") or "").strip(),
@@ -1911,7 +2145,9 @@ def _normalize_username(username: str) -> str:
     normalized = username.strip().lower()
     if len(normalized) < 3 or len(normalized) > 64:
         raise ValueError("用户名长度必须为 3 至 64 个字符")
-    if not all(character.isalnum() or character in {"@", ".", "_", "-"} for character in normalized):
+    if not all(
+        character.isalnum() or character in {"@", ".", "_", "-"} for character in normalized
+    ):
         raise ValueError("用户名只能包含字母、数字及 @ . _ -")
     return normalized
 
@@ -2025,3 +2261,5 @@ def _normalize_drawing(
         else:
             raise ValueError("invalid drawing anchor")
     return normalized
+if TYPE_CHECKING:
+    from .trading_plans import TradingPlanService

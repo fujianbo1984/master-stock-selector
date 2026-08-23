@@ -398,9 +398,9 @@ def build_watchlist_router(
             symbols = users.trade_symbols(owner_id)
             names = repository.stock_names(symbols)
             review = users.trade_review(owner_id, names)
-            _decorate_trade_r_multiples(review["closed"], market_reader)
+            _decorate_trade_r_multiples(review["closed_fragments"], market_reader)
             feed = build_owner_trade_feed(
-                review["executions"], names, closed_trades=review["closed"]
+                review["executions"], names, closed_trades=review["closed_fragments"]
             )
             positions = list(feed["positions"])
             executions = list(feed["executions"])

@@ -46,6 +46,64 @@ def _dispatch_agent(
 ) -> Any:
     if args.agent_action == "me":
         return _request_json(base_url, token, "GET", "/api/v1/me")
+    if args.agent_action == "plans":
+        action = str(args.plan_action)
+        if action == "current":
+            return _request_json(base_url, token, "GET", "/api/v1/plans/current")
+        if action == "versions":
+            return _request_json(base_url, token, "GET", "/api/v1/plans/versions")
+        if action == "show":
+            return _request_json(
+                base_url,
+                token,
+                "GET",
+                "/api/v1/plans/versions/" + urllib.parse.quote(args.version_id, safe=""),
+            )
+        if action == "diff":
+            return _request_json(
+                base_url,
+                token,
+                "GET",
+                "/api/v1/plans/diff?"
+                + urllib.parse.urlencode({"old": args.old_version_id, "new": args.new_version_id}),
+            )
+        grill = str(args.grill_action)
+        if grill == "start":
+            return _request_json(
+                base_url,
+                token,
+                "POST",
+                "/api/v1/plans/grill/sessions",
+                {
+                    "template": args.template,
+                    "from_version": args.from_version,
+                    "change_goal": args.change_goal,
+                },
+            )
+        path = "/api/v1/plans/grill/sessions/" + urllib.parse.quote(args.session_id, safe="")
+        if grill == "status":
+            return _request_json(base_url, token, "GET", path)
+        if grill == "next":
+            return _request_json(base_url, token, "GET", path + "/next")
+        if grill == "validate":
+            return _request_json(base_url, token, "POST", path + "/validate", {})
+        if grill == "answer":
+            if args.token_stdin and args.file == "-":
+                parser.error("--token-stdin 不能与从标准输入读取回答 JSON 同时使用")
+            return _request_json(
+                base_url, token, "POST", path + "/answers", _load_json_object(args.file, parser)
+            )
+        if grill == "publish":
+            if not args.commit:
+                parser.error("publish 会发布冻结版本；必须显式传入 --commit")
+            return _request_json(
+                base_url,
+                token,
+                "POST",
+                path + "/publish",
+                {"expected_revision": args.expected_revision},
+            )
+        parser.error("unknown grill action")
     if args.agent_action != "trades":
         parser.error("unknown agent action")
     action = str(args.trade_action)
@@ -54,9 +112,7 @@ def _dispatch_agent(
             parser.error("--token-stdin 不能与从标准输入读取交易 JSON 同时使用")
         payload = _load_trade_payload(str(args.file), parser)
         if action == "validate" or not bool(getattr(args, "commit", False)):
-            return _request_json(
-                base_url, token, "POST", "/api/v1/trades/validate", payload
-            )
+            return _request_json(base_url, token, "POST", "/api/v1/trades/validate", payload)
         key = str(args.idempotency_key or "").strip() or _default_idempotency_key(payload)
         return _request_json(
             base_url,
@@ -108,9 +164,7 @@ def _token(args: argparse.Namespace, parser: argparse.ArgumentParser) -> str:
     else:
         token = os.environ.get("MASTERSTOCK_AGENT_TOKEN", "").strip()
     if not token:
-        parser.error(
-            "缺少 Agent Token；请设置 MASTERSTOCK_AGENT_TOKEN 或使用 --token-stdin"
-        )
+        parser.error("缺少 Agent Token；请设置 MASTERSTOCK_AGENT_TOKEN 或使用 --token-stdin")
     return token
 
 
@@ -138,6 +192,18 @@ def _load_trade_payload(path: str, parser: argparse.ArgumentParser) -> dict[str,
         return value
     parser.error("交易 JSON 必须是数组或包含 trades 数组的对象")
     return {}
+
+
+def _load_json_object(path: str, parser: argparse.ArgumentParser) -> dict[str, Any]:
+    try:
+        value = json.loads(
+            sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        parser.error(f"无法读取 JSON：{exc}")
+    if not isinstance(value, dict):
+        parser.error("JSON 必须是对象")
+    return value
 
 
 def _default_idempotency_key(payload: dict[str, Any]) -> str:

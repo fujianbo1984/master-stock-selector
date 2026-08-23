@@ -11,8 +11,7 @@ def register_agent(subparsers: SubparserRegistry) -> None:
         "--base-url",
         default=os.environ.get("MASTERSTOCK_AGENT_URL", "https://longchangwudao.cn"),
         help=(
-            "大师选股网站地址（默认：https://longchangwudao.cn）；"
-            "也可使用 MASTERSTOCK_AGENT_URL"
+            "大师选股网站地址（默认：https://longchangwudao.cn）；也可使用 MASTERSTOCK_AGENT_URL"
         ),
     )
     parser.add_argument(
@@ -48,6 +47,35 @@ def register_agent(subparsers: SubparserRegistry) -> None:
     stop.add_argument("stop_price", type=float)
     stop.add_argument("--expected-revision", type=int, required=True)
     stop.add_argument("--commit", action="store_true", help="确认修改止损")
+
+    plans = actions.add_parser("plans", help="读取或讨论个人交易计划")
+    plan_actions = plans.add_subparsers(dest="plan_action", required=True)
+    plan_actions.add_parser("current")
+    plan_actions.add_parser("versions")
+    show = plan_actions.add_parser("show")
+    show.add_argument("version_id")
+    diff = plan_actions.add_parser("diff")
+    diff.add_argument("old_version_id")
+    diff.add_argument("new_version_id")
+    grill = plan_actions.add_parser("grill", help="确定性 Grill 讨论")
+    grill_actions = grill.add_subparsers(dest="grill_action", required=True)
+    start = grill_actions.add_parser("start")
+    start.add_argument("--template", default="blank")
+    start.add_argument("--from-version", default="")
+    start.add_argument("--change-goal", default="")
+    status = grill_actions.add_parser("status")
+    status.add_argument("session_id")
+    next_parser = grill_actions.add_parser("next")
+    next_parser.add_argument("session_id")
+    answer = grill_actions.add_parser("answer")
+    answer.add_argument("session_id")
+    answer.add_argument("--file", required=True)
+    validate_plan = grill_actions.add_parser("validate")
+    validate_plan.add_argument("session_id")
+    publish = grill_actions.add_parser("publish")
+    publish.add_argument("session_id")
+    publish.add_argument("--expected-revision", type=int, required=True)
+    publish.add_argument("--commit", action="store_true")
 
 
 REGISTRARS: dict[str, ParserRegistrar] = {"agent": register_agent}

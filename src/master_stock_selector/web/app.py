@@ -25,6 +25,7 @@ from .owner import DEFAULT_SITE_OWNER_USERNAME
 from .routers.agent_api import build_agent_api_router
 from .routers.auth import build_auth_router, current_user
 from .routers.content import build_content_router
+from .routers.trading_plan import build_trading_plan_router
 from .routers.watchlist import build_watchlist_router
 from .users import SESSION_COOKIE, UserRepository
 
@@ -60,9 +61,7 @@ def create_app(
     watchlist_path = _watchlist_database_path(watchlist_database)
     user_path = _user_database_path(user_database, watchlist_path, watchlist_database is not None)
     cookies_are_secure = (
-        _env_bool("MASTERSTOCK_SECURE_COOKIES", True)
-        if secure_cookies is None
-        else secure_cookies
+        _env_bool("MASTERSTOCK_SECURE_COOKIES", True) if secure_cookies is None else secure_cookies
     )
     owner_username = (
         site_owner_username
@@ -80,14 +79,10 @@ def create_app(
         else os.environ.get("MASTERSTOCK_TRUSTED_PROXIES", DEFAULT_TRUSTED_PROXIES)
     )
     access_logging_enabled = (
-        _env_bool("MASTERSTOCK_ACCESS_LOGGING", True)
-        if access_logging is None
-        else access_logging
+        _env_bool("MASTERSTOCK_ACCESS_LOGGING", True) if access_logging is None else access_logging
     )
     configured_icp_filing = (
-        icp_filing
-        if icp_filing is not None
-        else os.environ.get("MASTERSTOCK_ICP_FILING", "")
+        icp_filing if icp_filing is not None else os.environ.get("MASTERSTOCK_ICP_FILING", "")
     ).strip()
 
     app = FastAPI(
@@ -162,13 +157,9 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         elif request.method in {"GET", "HEAD"} and response.status_code == 200:
             if PUBLIC_API_CACHE_PATH.fullmatch(request.url.path):
-                response.headers["Cache-Control"] = (
-                    "public, max-age=300, stale-while-revalidate=60"
-                )
+                response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=60"
             elif PUBLIC_HTML_CACHE_PATH.fullmatch(request.url.path):
-                response.headers["Cache-Control"] = (
-                    "public, max-age=30, stale-while-revalidate=60"
-                )
+                response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=60"
         return response
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
@@ -185,11 +176,16 @@ def create_app(
             ("四指数判断", "/a/indices"),
             ("行业观察", "/a/industries"),
         ]
-        private_items = [
-            ("市场广度", "/a/breadth"),
-            ("我的观察", "/a/observations"),
-            ("交易复盘", "/a/review"),
-        ] if user is not None else []
+        private_items = (
+            [
+                ("市场广度", "/a/breadth"),
+                ("我的观察", "/a/observations"),
+                ("交易计划", "/a/plan"),
+                ("交易复盘", "/a/review"),
+            ]
+            if user is not None
+            else []
+        )
         nav_groups = [{"label": "公开研究", "items": public_items}]
         if user is not None:
             nav_groups.append({"label": "站内共享", "items": [("站长动态", "/a/owner")]})
@@ -233,6 +229,7 @@ def create_app(
         )
     )
     app.include_router(build_content_router(render=render))
+    app.include_router(build_trading_plan_router(render=render, users=users))
     app.include_router(build_agent_api_router(repository=repository, users=users))
 
     return app

@@ -52,15 +52,11 @@ def test_user_can_change_password_and_all_existing_sessions_are_revoked(tmp_path
     second_token, _ = repository.create_session(user_id)
     api_token, _ = repository.create_api_token(user_id, "password-change")
 
-    assert not repository.change_password(
-        user_id, "wrong-password", "New-secure-password-456"
-    )
+    assert not repository.change_password(user_id, "wrong-password", "New-secure-password-456")
     assert repository.session_user(first_token) is not None
     assert repository.authenticate("alice", "Secure-password-123") is not None
 
-    assert repository.change_password(
-        user_id, "Secure-password-123", "New-secure-password-456"
-    )
+    assert repository.change_password(user_id, "Secure-password-123", "New-secure-password-456")
     assert repository.session_user(first_token) is None
     assert repository.session_user(second_token) is None
     assert repository.api_token_user(api_token) is None
@@ -68,9 +64,7 @@ def test_user_can_change_password_and_all_existing_sessions_are_revoked(tmp_path
     assert repository.authenticate("alice", "New-secure-password-456") is not None
 
     with pytest.raises(ValueError, match="新密码不能与当前密码相同"):
-        repository.change_password(
-            user_id, "New-secure-password-456", "New-secure-password-456"
-        )
+        repository.change_password(user_id, "New-secure-password-456", "New-secure-password-456")
 
 
 def test_admin_password_reset_revokes_sessions_and_api_tokens(tmp_path):
@@ -108,8 +102,86 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
     assert user_id
+
+
+def test_frozen_full_v4_schema_migrates_to_v5_without_data_loss(tmp_path: Path) -> None:
+    path = tmp_path / "users-v4.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        (Path(__file__).parent / "fixtures" / "user_schema_v4.sql").read_text()
+    )
+    connection.executescript(
+        """
+        INSERT INTO user_account(user_id,username,password_hash,status)
+        VALUES('u1','owner','legacy-hash','ACTIVE');
+        INSERT INTO user_session(
+            session_id_hash,user_id,csrf_secret,created_at_epoch,last_seen_epoch,expires_at_epoch
+        ) VALUES('s1','u1','csrf',1,1,9999999999);
+        INSERT INTO user_api_token(
+            token_id,user_id,name,token_prefix,token_hash,scopes_json,
+            created_at_epoch,expires_at_epoch
+        ) VALUES('t1','u1','agent','mst_old','hash','["trades:read"]',1,9999999999);
+        INSERT INTO user_trade_batch(
+            batch_id,user_id,idempotency_key,request_hash,response_json
+        ) VALUES('b1','u1','key','request','{}');
+        INSERT INTO user_api_audit(
+            audit_id,user_id,token_id,action,request_id,outcome
+        ) VALUES('a1','u1','t1','read','request-1','OK');
+        INSERT INTO user_stock_review(user_id,symbol,manual_state,note)
+        VALUES('u1','000001.SZ','FOCUS','legacy note');
+        INSERT INTO user_trade_execution(
+            execution_id,user_id,traded_on,symbol,side,quantity,price,method,
+            setup_method,stop_price
+        ) VALUES('e1','u1','2026-08-01','000001.SZ','BUY',100,10,'MANUAL',
+                 'PULLBACK_SUPPORT',9);
+        INSERT INTO user_chart_drawing(
+            drawing_id,user_id,symbol,price_scale_id,tool,anchors_json
+        ) VALUES('d1','u1','000001.SZ','price','horizontal','[]');
+        INSERT INTO user_access_log(
+            access_id,user_id,client_ip,location_source,method,path,status_code
+        ) VALUES('l1','u1','127.0.0.1','test','GET','/a/daily',200);
+        """
+    )
+    connection.close()
+
+    repository = UserRepository(path)
+    with sqlite3.connect(path) as read_connection:
+        before_version = read_connection.execute("PRAGMA user_version").fetchone()[0]
+    with pytest.raises(RuntimeError, match="不会自动迁移"):
+        repository.require_schema()
+    with sqlite3.connect(path) as read_connection:
+        assert read_connection.execute("PRAGMA user_version").fetchone()[0] == before_version
+
+    backup = tmp_path / "users-v4.backup.sqlite3"
+    migrated = migrate_user_schema(repository, apply=True, backup=backup)
+    assert migrated["existing_row_counts_preserved"] is True
+    assert repository.schema_status()["compatible"] is True
+    with repository.connect(read_only=True) as migrated_connection:
+        trade = migrated_connection.execute(
+            """SELECT setup_method,plan_version_id,evaluation_cycle_id,setup_code,
+            initial_stop_price
+            FROM user_trade_execution WHERE execution_id='e1'"""
+        ).fetchone()
+        assert tuple(trade) == ("PULLBACK_SUPPORT", None, None, None, 9.0)
+        for table in (
+            "user_account",
+            "user_session",
+            "user_api_token",
+            "user_trade_batch",
+            "user_api_audit",
+            "user_stock_review",
+            "user_trade_execution",
+            "user_chart_drawing",
+            "user_access_log",
+        ):
+            assert migrated_connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 1
+        unique_indexes = {
+            str(row[1]): bool(row[2])
+            for row in migrated_connection.execute("PRAGMA index_list(user_plan_grill_event)")
+        }
+        assert unique_indexes["idx_user_plan_event_session_revision"] is True
 
 
 def test_explicit_user_schema_migration_backs_up_and_preserves_rows(tmp_path):
@@ -289,9 +361,7 @@ def test_private_rows_are_scoped_by_user_id(tmp_path):
     assert repository.trade_execution(alice, execution_id) is not None
     assert repository.trade_execution(bob, execution_id) is None
     assert repository.chart_drawings(bob, "000001.SZ", "qfq-scale-v1") == []
-    assert not repository.delete_chart_drawing(
-        bob, "line-1", "000001.SZ", "qfq-scale-v1"
-    )
+    assert not repository.delete_chart_drawing(bob, "line-1", "000001.SZ", "qfq-scale-v1")
     with pytest.raises(ValueError, match="成交记录不存在"):
         repository.update_trade(
             bob,

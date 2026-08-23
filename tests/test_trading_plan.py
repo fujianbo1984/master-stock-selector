@@ -1,0 +1,395 @@
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from master_stock_selector.web.trading_plans import PlanConflict
+from master_stock_selector.web.users import SESSION_COOKIE, UserRepository
+from tests.test_watchlist_web import _client, _csrf
+
+
+def _confirm_all(repository: UserRepository, user_id: str, session_id: str) -> int:
+    while True:
+        question = repository.trading_plans.next(user_id, session_id)
+        if question["status"] == "COMPLETE":
+            return int(question["revision"])
+        status = repository.trading_plans.status(user_id, session_id)
+        assert status is not None
+        identifier = question["question"]["question_id"]
+        proposed = status["answers"].get(identifier, {}).get("value")
+        choices = question["question"].get("choices") or []
+        value = proposed or (choices[0]["value"] if choices else "会员明确确认")
+        repository.trading_plans.answer(
+            user_id,
+            session_id,
+            {
+                "question_id": identifier,
+                "expected_revision": status["revision"],
+                "decision": {"state": "CONFIRMED", "value": value},
+            },
+        )
+
+
+def _published_demo(repository: UserRepository, user_id: str) -> dict:
+    session = repository.trading_plans.start(user_id, template="personal-a-share-v1")
+    revision = _confirm_all(repository, user_id, session["session_id"])
+    return repository.trading_plans.publish(user_id, session["session_id"], revision)
+
+
+def test_demo_grill_publishes_frozen_private_version(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    alice = repository.create_user("alice", "Secure-password-123")
+    bob = repository.create_user("bob", "Secure-password-123")
+    session = repository.trading_plans.start(alice, template="personal-a-share-v1")
+    assert (
+        repository.trading_plans.validate(alice, session["session_id"])["status"]
+        == "NEEDS_RESOLUTION"
+    )
+    revision = _confirm_all(repository, alice, session["session_id"])
+    published = repository.trading_plans.publish(alice, session["session_id"], revision)
+    assert published["version"] == "v0.1"
+    assert repository.trading_plans.current(bob) is None
+    assert repository.trading_plans.show(bob, published["version_id"]) is None
+    with pytest.raises(PlanConflict):
+        repository.trading_plans.publish(alice, session["session_id"], revision)
+
+
+def test_grill_requires_confirmed_answer_revision_and_consistent_rules(
+    tmp_path: Path,
+) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user = repository.create_user("alice", "Secure-password-123")
+    session = repository.trading_plans.start(user)
+    first = repository.trading_plans.next(user, session["session_id"])
+    assert first["question"]["question_id"] == "scope.market"
+    with pytest.raises(PlanConflict):
+        repository.trading_plans.answer(
+            user,
+            session["session_id"],
+            {
+                "question_id": "scope.market",
+                "expected_revision": 3,
+                "decision": {"state": "CONFIRMED", "value": "A股"},
+            },
+        )
+    with pytest.raises(ValueError, match="expected_revision"):
+        repository.trading_plans.answer(
+            user,
+            session["session_id"],
+            {
+                "question_id": "scope.market",
+                "decision": {"state": "CONFIRMED", "value": "A股"},
+            },
+        )
+
+    conflict = repository.trading_plans.start(user, template="personal-a-share-v1")
+    status = repository.trading_plans.status(user, conflict["session_id"])
+    assert status is not None
+    repository.trading_plans.answer(
+        user,
+        conflict["session_id"],
+        {
+            "question_id": "risk.position_sizing",
+            "expected_revision": status["revision"],
+            "decision": {"state": "CONFIRMED", "value": "FULL_R"},
+        },
+    )
+    status = repository.trading_plans.status(user, conflict["session_id"])
+    assert status is not None
+    repository.trading_plans.answer(
+        user,
+        conflict["session_id"],
+        {
+            "question_id": "portfolio.cash_shortage",
+            "expected_revision": status["revision"],
+            "decision": {"state": "CONFIRMED", "value": "REDUCE"},
+        },
+    )
+    validation = repository.trading_plans.validate(user, conflict["session_id"])
+    assert validation["status"] == "NEEDS_RESOLUTION"
+    assert any(
+        issue.get("conflict_id") == "cash.full_r_conflict"
+        for issue in validation["blocking_issues"]
+    )
+
+
+def test_minor_versions_reuse_cycle_and_trades_bind_to_active_version(
+    tmp_path: Path,
+) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    alice = repository.create_user("alice", "Secure-password-123")
+    bob = repository.create_user("bob", "Secure-password-123")
+    first = _published_demo(repository, alice)
+
+    session = repository.trading_plans.start(alice, from_version="current")
+    revision = _confirm_all(repository, alice, session["session_id"])
+    assert (
+        repository.trading_plans.validate(alice, session["session_id"])["change_class"] == "MINOR"
+    )
+    minor = repository.trading_plans.publish(alice, session["session_id"], revision)
+    assert minor["version"] == "v0.2"
+    assert minor["evaluation_cycle"] == first["evaluation_cycle"]
+
+    buy_id = repository.record_trade(
+        alice,
+        traded_on="2026-08-01",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        setup_method="PRE_BREAKOUT_BASE",
+        stop_price=9,
+    )
+    buy = repository.trade_execution(alice, buy_id)
+    assert buy is not None
+    assert buy["plan_version_id"] == minor["version_id"]
+    assert buy["setup_code"] == "A1"
+    raw_token, _ = repository.create_api_token(alice, "stop-editor", scopes=("trades:write",))
+    principal = repository.api_token_user(raw_token)
+    assert principal is not None
+    repository.update_trade_stop(
+        alice,
+        buy_id,
+        9.8,
+        expected_revision=1,
+        principal=principal,
+        request_id="move-stop",
+    )
+    repository.record_trade(
+        alice,
+        traded_on="2026-08-02",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=50,
+        price=11,
+        fee=0,
+        method="MANUAL",
+    )
+    assert repository.trade_review(alice, {"000001.SZ": "平安银行"})["by_plan_setup"] == {}
+    repository.record_trade(
+        alice,
+        traded_on="2026-08-03",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=50,
+        price=11,
+        fee=0,
+        method="MANUAL",
+    )
+    review = repository.trade_review(alice, {"000001.SZ": "平安银行"})
+    group = review["by_plan_setup"][f"{minor['evaluation_cycle']}:A1"]
+    assert group["plan_versions"] == ["v0.2"]
+    assert group["summary"]["count"] == 1
+    assert group["summary"]["gross_avg_r"] == 1.0
+    with pytest.raises(ValueError, match="不属于当前用户"):
+        repository.record_trade(
+            bob,
+            traded_on="2026-08-01",
+            symbol="000002.SZ",
+            side="BUY",
+            quantity=100,
+            price=10,
+            fee=0,
+            method="MANUAL",
+            plan_version_id=minor["version_id"],
+        )
+
+
+def test_plan_api_scopes_freeze_and_web_isolation(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    users = client.app.state.user_repository
+    user = users.session_user(client.cookies.get(SESSION_COOKIE))
+    assert user is not None
+    token, _ = users.create_api_token(
+        user.user_id,
+        "plan-agent",
+        scopes=("plans:read", "plans:write", "plans:publish"),
+    )
+    write_token, _ = users.create_api_token(
+        user.user_id,
+        "plan-writer",
+        scopes=("plans:read", "plans:write"),
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/v1/me", headers=headers).status_code == 200
+    started = client.post(
+        "/api/v1/plans/grill/sessions",
+        headers=headers,
+        json={"template": "personal-a-share-v1"},
+    )
+    session_id = started.json()["session_id"]
+    revision = _confirm_all(users, user.user_id, session_id)
+    path = f"/api/v1/plans/grill/sessions/{session_id}"
+    for malformed_revision in (True, 1.9, "1"):
+        assert (
+            client.post(
+                path + "/publish",
+                headers=headers,
+                json={"expected_revision": malformed_revision},
+            ).status_code
+            == 422
+        )
+    assert (
+        client.post(
+            path + "/publish",
+            headers={"Authorization": f"Bearer {write_token}"},
+            json={"expected_revision": revision},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            path + "/publish", headers=headers, json={"expected_revision": revision}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get("/api/v1/plans/current", headers=headers).json()["plan"]["version_number"]
+        == "v0.1"
+    )
+    assert (
+        client.post(
+            path + "/answers",
+            headers=headers,
+            json={
+                "question_id": "scope.market",
+                "expected_revision": revision,
+                "decision": {"state": "CONFIRMED", "value": "A股"},
+            },
+        ).status_code
+        == 409
+    )
+
+    bob_id = users.create_user("bob", "Secure-password-123")
+    bob_token, _ = users.create_api_token(bob_id, "bob-plan", scopes=("plans:read",))
+    assert client.get(path, headers={"Authorization": f"Bearer {bob_token}"}).status_code == 404
+
+    anonymous = TestClient(client.app)
+    assert anonymous.get("/a/plan", follow_redirects=False).status_code == 303
+    page = client.get("/a/plan")
+    assert page.status_code == 200
+    assert "风险画像" in page.text
+    assert 'href="/a/plan' in page.text
+    bob = TestClient(client.app)
+    assert (
+        bob.post(
+            "/login",
+            data={"username": "bob", "password": "Secure-password-123"},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    assert bob.get(f"/a/plan?session={session_id}").status_code == 404
+    assert client.post("/a/plan/grill/start", data={"template": "blank"}).status_code == 403
+    assert (
+        client.post(
+            "/a/plan/grill/start",
+            data={"csrf_token": _csrf(client), "template": "blank"},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+
+
+def test_stale_grill_session_cannot_overwrite_new_head(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user = repository.create_user("alice", "Secure-password-123")
+    _published_demo(repository, user)
+    first = repository.trading_plans.start(user, from_version="current")
+    stale = repository.trading_plans.start(user, from_version="current")
+    first_revision = _confirm_all(repository, user, first["session_id"])
+    stale_revision = _confirm_all(repository, user, stale["session_id"])
+    repository.trading_plans.publish(user, first["session_id"], first_revision)
+    with pytest.raises(PlanConflict, match="最新版本"):
+        repository.trading_plans.publish(user, stale["session_id"], stale_revision)
+    with pytest.raises(PlanConflict, match="当前生效版本"):
+        repository.trading_plans.start(user, from_version=first["base_version_id"])
+
+
+def test_trade_edits_keep_plan_binding_consistent(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user = repository.create_user("alice", "Secure-password-123")
+    plan = _published_demo(repository, user)
+    buy_id = repository.record_trade(
+        user,
+        traded_on="2026-08-01",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=200,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        setup_method="PRE_BREAKOUT_BASE",
+    )
+    repository.update_trade(
+        user,
+        buy_id,
+        traded_on="2026-08-01",
+        traded_at="",
+        side="BUY",
+        quantity=200,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        setup_method="COMPLEX_PULLBACK",
+    )
+    assert repository.trade_execution(user, buy_id)["setup_code"] == "B2"
+
+    second_buy = repository.record_trade(
+        user,
+        traded_on="2026-08-02",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+    )
+    repository.update_trade(
+        user,
+        second_buy,
+        traded_on="2026-08-02",
+        traded_at="",
+        side="SELL",
+        quantity=100,
+        price=11,
+        fee=0,
+        method="MANUAL",
+    )
+    changed_sell = repository.trade_execution(user, second_buy)
+    assert changed_sell["plan_version_id"] is None
+    assert changed_sell["setup_code"] is None
+
+    unmatched_sell = repository.record_trade(
+        user,
+        traded_on="2026-08-03",
+        symbol="000002.SZ",
+        side="SELL",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        permit_unmatched_sell=True,
+    )
+    repository.update_trade(
+        user,
+        unmatched_sell,
+        traded_on="2026-08-03",
+        traded_at="",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        setup_method="PULLBACK_SUPPORT",
+    )
+    changed_buy = repository.trade_execution(user, unmatched_sell)
+    assert changed_buy["plan_version_id"] == plan["version_id"]
+    assert changed_buy["setup_code"] == "B1"

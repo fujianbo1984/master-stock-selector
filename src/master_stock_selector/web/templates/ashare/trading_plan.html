@@ -1,0 +1,35 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block title %}交易计划 · 龙场悟道{% endblock %}
+{% block heading %}交易计划{% endblock %}
+{% block subtitle %}私有、版本化的个人交易执行合同{% endblock %}
+{% block content %}
+<section class="section panel review-hero">
+  <div><p class="eyebrow">个人工作区 · {{ current_user.display_name or current_user.username }}</p><h1>我的交易计划</h1>
+  {% if plan %}<p>当前生效 <strong>{{ plan.version_number }}</strong> · {{ plan.activated_at }} · 评估周期 {{ plan.evaluation_cycle_id }}</p>{% else %}<p>尚未发布计划。Grill 每次只确认一项规则，发布后版本不可覆盖修改。</p>{% endif %}</div>
+  <div class="review-hero-note"><strong>个人数据 · 仅你可见</strong><span>不预测收益，不生成自动买卖指令</span></div>
+</section>
+
+<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">Grill</p><h2>{{ '建立新版本' if plan else '建立第一份计划' }}</h2></div></div>
+  <div class="review-overview-grid">
+    <form method="post" action="/a/plan/grill/start" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="template" value="personal-a-share-v1"><label>修改目标<input name="change_goal" maxlength="500" placeholder="例如：重新评估组合总风险"></label><button class="button" type="submit">用示范计划开始</button></form>
+    <form method="post" action="/a/plan/grill/start" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if plan %}<input type="hidden" name="from_version" value="current">{% endif %}<label>修改目标<input name="change_goal" maxlength="500" placeholder="{{ '只澄清文字时可填：轻微修改' if plan else '从空白逐项讨论' }}"></label><button class="button button-secondary" type="submit">{{ '复制当前版本' if plan else '从空白开始' }}</button></form>
+  </div>
+</section>
+
+{% if grill %}<section class="section panel">
+  <div class="section-heading"><div><p class="eyebrow">草稿 revision {{ grill.revision }}</p><h2>Grill 讨论</h2></div><span class="muted">已确认 {{ grill.progress.confirmed }} / {{ grill.progress.total }}</span></div>
+  {% if next_question.status == 'QUESTION' %}<article class="settings-card"><p class="settings-section-index">{{ next_question.question.section }}</p><h3>{{ next_question.question.title }}</h3><p>{{ next_question.question.prompt }}</p><p class="muted">{{ next_question.question.why }}</p>
+  <form method="post" action="/a/plan/grill/{{ grill.session_id }}/answer" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="question_id" value="{{ next_question.question.question_id }}"><input type="hidden" name="revision" value="{{ grill.revision }}">
+  {% if next_question.question.choices %}<label>你的明确决定<select name="value" required>{% for choice in next_question.question.choices %}<option value="{{ choice.value }}">{{ choice.label }}</option>{% endfor %}</select></label>{% else %}<label>你的明确决定<textarea name="value" rows="5" required>{{ grill.answers.get(next_question.question.question_id, {}).get('value', '') }}</textarea></label>{% endif %}<button class="button" type="submit">确认并继续</button></form></article>
+  {% else %}<h3>规则讨论已完成</h3><p>校验：{{ validation.status }}；{{ validation.blocking_issues|length }} 个待解决项。</p>{% if validation.warnings %}<ul class="settings-checklist">{% for warning in validation.warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul>{% endif %}{% if validation.status == 'READY' %}<form method="post" action="/a/plan/grill/{{ grill.session_id }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}"><button class="button" type="submit">确认并发布冻结版本</button></form>{% endif %}{% endif %}
+</section>{% endif %}
+
+{% if plan %}<section class="section review-overview-grid">
+  {% for layer_key, layer_title in [('operations','第一层 · 交易运营计划'),('risk','第二层 · 风险与组合'),('setups','第三层 · 入场形态')] %}<article class="panel review-panel"><div class="section-heading"><div><h2>{{ layer_title }}</h2></div></div><dl class="plan-rule-list">{% for key, decision in plan.content.layers[layer_key].items() %}<div><dt>{{ key }}</dt><dd>{{ decision.value }}</dd></div>{% endfor %}</dl></article>{% endfor %}
+</section>
+{% if plan.content.risk_warnings %}<section class="section panel review-panel"><div class="section-heading"><div><p class="eyebrow">已确认边界</p><h2>风险画像</h2></div><span class="tag tag-caution">不阻止发布</span></div><ul class="settings-checklist">{% for warning in plan.content.risk_warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul></section>{% endif %}{% endif %}
+
+{% if versions %}<section class="section panel review-panel"><div class="section-heading"><div><p class="eyebrow">只读历史</p><h2>版本历史</h2></div><span class="muted">{{ versions|length }} 个版本</span></div><div class="table-wrap"><table><thead><tr><th>版本</th><th>状态</th><th>变更类型</th><th>评估周期</th><th>生效时间</th></tr></thead><tbody>{% for version in versions %}<tr><td>{{ version.version_number }}</td><td>{{ version.status }}</td><td>{{ version.change_class }}</td><td>{{ version.evaluation_cycle_id }}</td><td>{{ version.activated_at or '未生效' }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% endblock %}

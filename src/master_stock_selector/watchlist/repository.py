@@ -569,13 +569,7 @@ class MarketDataReader:
             return []
         try:
             quality = json.loads(str(row[0]) or "{}")
-            values = sorted(
-                {
-                    str(value)
-                    for value in quality.get("week_open_dates", [])
-                    if value
-                }
-            )
+            values = sorted({str(value) for value in quality.get("week_open_dates", []) if value})
             target = date.fromisoformat(as_of_date).isocalendar()
             return [
                 value
@@ -707,14 +701,19 @@ class MarketDataReader:
         if not symbol or not buy_date or not sell_date or buy_date > sell_date:
             return None
         with self.connect() as connection:
-            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()}
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()
+            }
             required = {"market", "symbol", "trade_date", "low", "adj_type"}
             if not required.issubset(columns):
                 return None
             as_of_clause = " AND data_as_of_date <= ?" if "data_as_of_date" in columns else ""
             parameters: tuple[str, ...] = (
-                symbol.upper(), buy_date, sell_date, sell_date
-            ) if as_of_clause else (symbol.upper(), buy_date, sell_date)
+                (symbol.upper(), buy_date, sell_date, sell_date)
+                if as_of_clause
+                else (symbol.upper(), buy_date, sell_date)
+            )
             row = connection.execute(
                 f"""
                 SELECT MIN(low) FROM daily_bars
@@ -737,9 +736,18 @@ class MarketDataReader:
     ) -> float | None:
         try:
             with self.connect() as connection:
-                columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()}
-                as_of_clause = " AND qfq.data_as_of_date <= ?" if "data_as_of_date" in columns else ""
-                parameters: tuple[str, ...] = (symbol.upper(), trade_date, as_of_date) if as_of_clause else (symbol.upper(), trade_date)
+                columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()
+                }
+                as_of_clause = (
+                    " AND qfq.data_as_of_date <= ?" if "data_as_of_date" in columns else ""
+                )
+                parameters: tuple[str, ...] = (
+                    (symbol.upper(), trade_date, as_of_date)
+                    if as_of_clause
+                    else (symbol.upper(), trade_date)
+                )
                 row = connection.execute(
                     f"""
                     SELECT qfq.close, raw.close FROM daily_bars AS qfq
@@ -759,13 +767,13 @@ class MarketDataReader:
     def security_members(self, as_of_date: str) -> dict[str, dict[str, Any]]:
         with self.connect() as connection:
             tables = {
-                str(row[0]) for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
-            if "security_master_history" in tables and connection.execute(
-                "SELECT 1 FROM security_master_history LIMIT 1"
-            ).fetchone():
+            if (
+                "security_master_history" in tables
+                and connection.execute("SELECT 1 FROM security_master_history LIMIT 1").fetchone()
+            ):
                 rows = connection.execute(
                     """
                     SELECT history.* FROM security_master_history AS history
@@ -1180,9 +1188,7 @@ class WatchlistRepository:
         if not self.path.is_file():
             return False
         try:
-            connection = sqlite3.connect(
-                f"file:{self.path.resolve()}?mode=ro", uri=True, timeout=1
-            )
+            connection = sqlite3.connect(f"file:{self.path.resolve()}?mode=ro", uri=True, timeout=1)
             try:
                 tables = {
                     str(row[0])
@@ -1202,25 +1208,26 @@ class WatchlistRepository:
                 # turning a web startup into a competing schema write.
                 return True
             return False
-        return (
-            {
-                "stock_method_daily_fact",
-                "stock_method_lifecycle_baseline",
-                "stock_weinstein_provisional_daily_fact",
-                "stock_weinstein_provisional_transition",
-                "weinstein_stage_baseline",
-                "trade_execution",
-                "security_identity_history",
-                "security_industry_membership_history",
-            }.issubset(tables)
-            and {"traded_at", "setup_method", "stop_price"}.issubset(columns)
-        )
+        return {
+            "stock_method_daily_fact",
+            "stock_method_lifecycle_baseline",
+            "stock_weinstein_provisional_daily_fact",
+            "stock_weinstein_provisional_transition",
+            "weinstein_stage_baseline",
+            "trade_execution",
+            "security_identity_history",
+            "security_industry_membership_history",
+        }.issubset(tables) and {"traded_at", "setup_method", "stop_price"}.issubset(columns)
 
     @staticmethod
     def _ensure_trade_execution_columns(connection: sqlite3.Connection) -> None:
-        columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(trade_execution)")}
+        columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(trade_execution)")
+        }
         if "traded_at" not in columns:
-            connection.execute("ALTER TABLE trade_execution ADD COLUMN traded_at TEXT NOT NULL DEFAULT ''")
+            connection.execute(
+                "ALTER TABLE trade_execution ADD COLUMN traded_at TEXT NOT NULL DEFAULT ''"
+            )
         if "setup_method" not in columns:
             connection.execute(
                 "ALTER TABLE trade_execution ADD COLUMN setup_method TEXT NOT NULL "
@@ -1231,15 +1238,19 @@ class WatchlistRepository:
 
     @staticmethod
     def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
-        return connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-        ).fetchone() is not None
+        return (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            is not None
+        )
 
     @classmethod
     def _table_has_rows(cls, connection: sqlite3.Connection, table: str) -> bool:
-        return cls._table_exists(connection, table) and connection.execute(
-            f"SELECT 1 FROM {table} LIMIT 1"
-        ).fetchone() is not None
+        return (
+            cls._table_exists(connection, table)
+            and connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None
+        )
 
     @classmethod
     def _identity_rows_as_of(
@@ -1330,8 +1341,14 @@ class WatchlistRepository:
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             fact_columns = (
-                "as_of_date", "symbol", "method", "result", "policy_version",
-                "evidence_json", "source_digest", "origin",
+                "as_of_date",
+                "symbol",
+                "method",
+                "result",
+                "policy_version",
+                "evidence_json",
+                "source_digest",
+                "origin",
             )
             fact_placeholders = ",".join("?" for _ in fact_columns)
             connection.executemany(
@@ -1339,9 +1356,14 @@ class WatchlistRepository:
                 f"({','.join(fact_columns)}) VALUES ({fact_placeholders})",
                 (
                     (
-                        row["as_of_date"], row["symbol"], row["method"], row["result"],
-                        row["policy_version"], _json(row.get("evidence") or {}),
-                        row["source_digest"], row["origin"],
+                        row["as_of_date"],
+                        row["symbol"],
+                        row["method"],
+                        row["result"],
+                        row["policy_version"],
+                        _json(row.get("evidence") or {}),
+                        row["source_digest"],
+                        row["origin"],
                     )
                     for row in stock_facts
                 ),
@@ -1351,23 +1373,41 @@ class WatchlistRepository:
                 connection,
                 "stock_weinstein_provisional_daily_fact",
                 (
-                    "as_of_date", "symbol", "projected_stage", "projected_result",
-                    "formal_stage", "prior_formal_stage",
-                    "formal_effective_week_end", "week_start",
-                    "expected_week_end", "sessions_elapsed", "sessions_total",
-                    "is_final_session", "policy_version", "evidence_json",
-                    "source_digest", "origin",
+                    "as_of_date",
+                    "symbol",
+                    "projected_stage",
+                    "projected_result",
+                    "formal_stage",
+                    "prior_formal_stage",
+                    "formal_effective_week_end",
+                    "week_start",
+                    "expected_week_end",
+                    "sessions_elapsed",
+                    "sessions_total",
+                    "is_final_session",
+                    "policy_version",
+                    "evidence_json",
+                    "source_digest",
+                    "origin",
                 ),
                 [
                     (
-                        row["as_of_date"], row["symbol"], row["projected_stage"],
-                        row["projected_result"], row["formal_stage"],
-                        row["prior_formal_stage"], row["formal_effective_week_end"],
+                        row["as_of_date"],
+                        row["symbol"],
+                        row["projected_stage"],
+                        row["projected_result"],
+                        row["formal_stage"],
+                        row["prior_formal_stage"],
+                        row["formal_effective_week_end"],
                         row["week_start"],
-                        row["expected_week_end"], int(row["sessions_elapsed"]),
-                        int(row["sessions_total"]), int(bool(row["is_final_session"])),
-                        row["policy_version"], _json(row.get("evidence") or {}),
-                        row["source_digest"], row["origin"],
+                        row["expected_week_end"],
+                        int(row["sessions_elapsed"]),
+                        int(row["sessions_total"]),
+                        int(bool(row["is_final_session"])),
+                        row["policy_version"],
+                        _json(row.get("evidence") or {}),
+                        row["source_digest"],
+                        row["origin"],
                     )
                     for row in provisional_facts
                 ],
@@ -1377,16 +1417,29 @@ class WatchlistRepository:
                 connection,
                 "index_weinstein_weekly_fact",
                 (
-                    "effective_date", "index_symbol", "index_name", "stage",
-                    "stage_started_on", "duration_weeks", "policy_version",
-                    "evidence_json", "source_digest", "origin",
+                    "effective_date",
+                    "index_symbol",
+                    "index_name",
+                    "stage",
+                    "stage_started_on",
+                    "duration_weeks",
+                    "policy_version",
+                    "evidence_json",
+                    "source_digest",
+                    "origin",
                 ),
                 [
                     (
-                        row["effective_date"], row["index_symbol"], row["index_name"],
-                        row["stage"], row["stage_started_on"],
-                        int(row.get("duration_weeks") or 0), row["policy_version"],
-                        _json(row.get("evidence") or {}), row["source_digest"], row["origin"],
+                        row["effective_date"],
+                        row["index_symbol"],
+                        row["index_name"],
+                        row["stage"],
+                        row["stage_started_on"],
+                        int(row.get("duration_weeks") or 0),
+                        row["policy_version"],
+                        _json(row.get("evidence") or {}),
+                        row["source_digest"],
+                        row["origin"],
                     )
                     for row in index_facts
                 ],
@@ -1401,33 +1454,45 @@ class WatchlistRepository:
                 weinstein_policy_version=str(receipt["weinstein_policy_version"]),
                 origin=str(receipt["origin"]),
             )
-            receipt["finished_at"] = datetime.now().astimezone().isoformat(
-                timespec="seconds"
-            )
+            receipt["finished_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
             self._insert_immutable_rows(
                 connection,
                 "watchlist_run_receipt",
                 (
-                    "run_id", "as_of_date", "from_date", "origin",
-                    "minervini_policy_version", "weinstein_policy_version",
-                    "market_database", "source_digest", "counts_json", "status",
-                    "error_message", "started_at", "finished_at",
+                    "run_id",
+                    "as_of_date",
+                    "from_date",
+                    "origin",
+                    "minervini_policy_version",
+                    "weinstein_policy_version",
+                    "market_database",
+                    "source_digest",
+                    "counts_json",
+                    "status",
+                    "error_message",
+                    "started_at",
+                    "finished_at",
                 ),
                 [
                     (
-                        receipt["run_id"], receipt["as_of_date"], receipt["from_date"],
-                        receipt["origin"], receipt["minervini_policy_version"],
-                        receipt["weinstein_policy_version"], receipt["market_database"],
-                        receipt["source_digest"], _json(receipt.get("counts") or {}),
-                        receipt["status"], str(receipt.get("error_message") or ""),
-                        receipt["started_at"], receipt["finished_at"],
+                        receipt["run_id"],
+                        receipt["as_of_date"],
+                        receipt["from_date"],
+                        receipt["origin"],
+                        receipt["minervini_policy_version"],
+                        receipt["weinstein_policy_version"],
+                        receipt["market_database"],
+                        receipt["source_digest"],
+                        _json(receipt.get("counts") or {}),
+                        receipt["status"],
+                        str(receipt.get("error_message") or ""),
+                        receipt["started_at"],
+                        receipt["finished_at"],
                     )
                 ],
             )
 
-    def persist_index_minervini_facts(
-        self, facts: Sequence[Mapping[str, Any]]
-    ) -> int:
+    def persist_index_minervini_facts(self, facts: Sequence[Mapping[str, Any]]) -> int:
         """Add index Stage 2 facts without rewriting an existing watchlist run."""
 
         self.initialize()
@@ -1524,9 +1589,7 @@ class WatchlistRepository:
         return self.import_reference_history_date(payload)
 
     @staticmethod
-    def _fact_policy_versions(
-        connection: sqlite3.Connection, as_of_date: str
-    ) -> dict[str, str]:
+    def _fact_policy_versions(connection: sqlite3.Connection, as_of_date: str) -> dict[str, str]:
         rows = connection.execute(
             """
             SELECT method, policy_version, COUNT(*) AS row_count
@@ -1613,9 +1676,7 @@ class WatchlistRepository:
                 (as_of_date, minervini_policy_version, weinstein_policy_version),
             ).fetchall()
         ]
-        source_digests = sorted(
-            {str(row.get("source_digest") or "") for row in membership_rows}
-        )
+        source_digests = sorted({str(row.get("source_digest") or "") for row in membership_rows})
         return build_industry_observations(
             as_of_date=as_of_date,
             eligible_symbols=eligible_symbols,
@@ -1645,8 +1706,13 @@ class WatchlistRepository:
             """
         ).fetchall()
         state_columns = (
-            "name", "industry", "list_date", "is_st", "is_suspended",
-            "listing_status", "trading_status",
+            "name",
+            "industry",
+            "list_date",
+            "is_st",
+            "is_suspended",
+            "listing_status",
+            "trading_status",
         )
         latest: dict[str, tuple[Any, ...]] = {
             str(row["symbol"]): tuple(row[column] for column in state_columns)
@@ -1675,16 +1741,27 @@ class WatchlistRepository:
             )
             if latest.get(symbol) == state:
                 continue
-            digest = str(row.get("source_digest") or _sha256_json({
-                "symbol": symbol, "valid_from": valid_from, "state": state,
-            }))
+            digest = str(
+                row.get("source_digest")
+                or _sha256_json(
+                    {
+                        "symbol": symbol,
+                        "valid_from": valid_from,
+                        "state": state,
+                    }
+                )
+            )
             inserts.append((valid_from, symbol, *state, digest, str(row["origin"])))
             latest[symbol] = state
         cls._insert_immutable_rows(
             connection,
             "security_identity_history",
             (
-                "valid_from", "symbol", *state_columns, "source_digest", "origin",
+                "valid_from",
+                "symbol",
+                *state_columns,
+                "source_digest",
+                "origin",
             ),
             inserts,
         )
@@ -1695,9 +1772,17 @@ class WatchlistRepository:
         cls, connection: sqlite3.Connection, rows: Sequence[Mapping[str, Any]]
     ) -> None:
         columns = (
-            "valid_from", "valid_to", "taxonomy", "industry_level", "industry_code",
-            "industry_name", "parent_industry_code", "source", "source_version",
-            "source_digest", "origin",
+            "valid_from",
+            "valid_to",
+            "taxonomy",
+            "industry_level",
+            "industry_code",
+            "industry_name",
+            "parent_industry_code",
+            "source",
+            "source_version",
+            "source_digest",
+            "origin",
         )
         latest_rows = connection.execute(
             """
@@ -1714,11 +1799,16 @@ class WatchlistRepository:
             """
         ).fetchall()
         state_columns = (
-            "industry_name", "parent_industry_code", "source", "source_version", "source_digest",
+            "industry_name",
+            "parent_industry_code",
+            "source",
+            "source_version",
+            "source_digest",
         )
         latest = {
-            (str(row["taxonomy"]), str(row["industry_level"]), str(row["industry_code"])):
-            tuple(str(row[column] or "") for column in state_columns)
+            (str(row["taxonomy"]), str(row["industry_level"]), str(row["industry_code"])): tuple(
+                str(row[column] or "") for column in state_columns
+            )
             for row in latest_rows
         }
         normalized: list[dict[str, Any]] = []
@@ -1745,8 +1835,11 @@ class WatchlistRepository:
             normalized.append(item)
             latest[key] = state
         cls._insert_or_verify_rows(
-            connection, "industry_dimension_history", columns,
-            ("taxonomy", "industry_level", "industry_code", "valid_from"), normalized,
+            connection,
+            "industry_dimension_history",
+            columns,
+            ("taxonomy", "industry_level", "industry_code", "valid_from"),
+            normalized,
         )
 
     @classmethod
@@ -1754,13 +1847,24 @@ class WatchlistRepository:
         cls, connection: sqlite3.Connection, rows: Sequence[Mapping[str, Any]]
     ) -> None:
         columns = (
-            "symbol", "taxonomy", "industry_level", "industry_code",
-            "industry_name", "valid_from", "valid_to", "assignment_state", "source",
-            "source_digest", "origin",
+            "symbol",
+            "taxonomy",
+            "industry_level",
+            "industry_code",
+            "industry_name",
+            "valid_from",
+            "valid_to",
+            "assignment_state",
+            "source",
+            "source_digest",
+            "origin",
         )
         cls._insert_or_verify_rows(
-            connection, "security_industry_membership_history", columns,
-            ("symbol", "taxonomy", "industry_level", "industry_code", "valid_from"), rows,
+            connection,
+            "security_industry_membership_history",
+            columns,
+            ("symbol", "taxonomy", "industry_level", "industry_code", "valid_from"),
+            rows,
         )
 
     @classmethod
@@ -1768,20 +1872,46 @@ class WatchlistRepository:
         cls, connection: sqlite3.Connection, rows: Sequence[Mapping[str, Any]]
     ) -> None:
         columns = (
-            "as_of_date", "taxonomy", "industry_level", "industry_code", "industry_name",
-            "eligible_member_count", "mapped_member_count", "weinstein_evaluable_count",
-            "weinstein_pass_count", "weinstein_pass_rate", "minervini_evaluable_count",
-            "minervini_pass_count", "minervini_pass_rate", "both_pass_count",
-            "union_pass_count", "w_entered_count", "w_reentered_count",
-            "w_continuing_count", "w_exited_count", "w_data_gap_count", "m_entered_count",
-            "m_reentered_count", "m_continuing_count", "m_exited_count", "m_data_gap_count",
-            "membership_coverage_pct", "membership_snapshot_date", "weinstein_policy_version",
-            "minervini_policy_version", "policy_version", "quality_state", "source_digest",
+            "as_of_date",
+            "taxonomy",
+            "industry_level",
+            "industry_code",
+            "industry_name",
+            "eligible_member_count",
+            "mapped_member_count",
+            "weinstein_evaluable_count",
+            "weinstein_pass_count",
+            "weinstein_pass_rate",
+            "minervini_evaluable_count",
+            "minervini_pass_count",
+            "minervini_pass_rate",
+            "both_pass_count",
+            "union_pass_count",
+            "w_entered_count",
+            "w_reentered_count",
+            "w_continuing_count",
+            "w_exited_count",
+            "w_data_gap_count",
+            "m_entered_count",
+            "m_reentered_count",
+            "m_continuing_count",
+            "m_exited_count",
+            "m_data_gap_count",
+            "membership_coverage_pct",
+            "membership_snapshot_date",
+            "weinstein_policy_version",
+            "minervini_policy_version",
+            "policy_version",
+            "quality_state",
+            "source_digest",
             "origin",
         )
         cls._insert_or_verify_rows(
-            connection, "industry_observation_daily_fact", columns,
-            ("as_of_date", "taxonomy", "industry_level", "industry_code", "policy_version"), rows,
+            connection,
+            "industry_observation_daily_fact",
+            columns,
+            ("as_of_date", "taxonomy", "industry_level", "industry_code", "policy_version"),
+            rows,
         )
 
     @staticmethod
@@ -1992,14 +2122,25 @@ class WatchlistRepository:
             connection,
             "index_minervini_stage2_daily_fact",
             (
-                "as_of_date", "index_symbol", "index_name", "result",
-                "policy_version", "evidence_json", "source_digest", "origin",
+                "as_of_date",
+                "index_symbol",
+                "index_name",
+                "result",
+                "policy_version",
+                "evidence_json",
+                "source_digest",
+                "origin",
             ),
             [
                 (
-                    row["as_of_date"], row["index_symbol"], row["index_name"],
-                    row["result"], row["policy_version"],
-                    _json(row.get("evidence") or {}), row["source_digest"], row["origin"],
+                    row["as_of_date"],
+                    row["index_symbol"],
+                    row["index_name"],
+                    row["result"],
+                    row["policy_version"],
+                    _json(row.get("evidence") or {}),
+                    row["source_digest"],
+                    row["origin"],
                 )
                 for row in facts
             ],
@@ -2022,12 +2163,12 @@ class WatchlistRepository:
     def latest_fact_date(self) -> str:
         self.initialize()
         with self.connect() as connection:
-            row = connection.execute("SELECT MAX(as_of_date) FROM stock_method_daily_fact").fetchone()
+            row = connection.execute(
+                "SELECT MAX(as_of_date) FROM stock_method_daily_fact"
+            ).fetchone()
         return str(row[0] or "") if row else ""
 
-    def weinstein_stage_baselines(
-        self, instrument_type: str
-    ) -> dict[str, dict[str, Any]]:
+    def weinstein_stage_baselines(self, instrument_type: str) -> dict[str, dict[str, Any]]:
         """Return retained-history seeds used by the 320-day market window."""
 
         if instrument_type not in {"stock", "index"}:
@@ -2110,9 +2251,7 @@ class WatchlistRepository:
             method = str(row["method"])
             item[f"{method}_pass"] = int(row["pass_count"] or 0)
             item[f"{method}_evaluable"] = int(row["evaluable_count"] or 0)
-            item["universe_count"] = max(
-                int(item["universe_count"]), int(row["method_total"] or 0)
-            )
+            item["universe_count"] = max(int(item["universe_count"]), int(row["method_total"] or 0))
 
         result: list[dict[str, Any]] = []
         for as_of_date in sorted(by_date)[-limit:]:
@@ -2202,10 +2341,7 @@ class WatchlistRepository:
                         else as_of_date
                     )
                     event: dict[str, Any] = {
-                        "id": (
-                            f"method:{method}:{policy_version}:"
-                            f"{as_of_date}:{state}"
-                        ),
+                        "id": (f"method:{method}:{policy_version}:{as_of_date}:{state}"),
                         "method": method,
                         "state": state,
                         "result": str(row["result"]),
@@ -2220,26 +2356,18 @@ class WatchlistRepository:
                         event.update(
                             {
                                 "stage": str(profile.get("stage") or "UNKNOWN"),
-                                "stage_started_on": str(
-                                    profile.get("stage_started_on") or ""
-                                ),
-                                "duration_weeks": int(
-                                    profile.get("duration_weeks") or 0
-                                ),
+                                "stage_started_on": str(profile.get("stage_started_on") or ""),
+                                "duration_weeks": int(profile.get("duration_weeks") or 0),
                             }
                         )
                     else:
-                        event["failed_checks"] = list(
-                            profile.get("failed_checks") or []
-                        )
+                        event["failed_checks"] = list(profile.get("failed_checks") or [])
                     events.append(event)
         events.sort(key=lambda item: (item["as_of_date"], item["method"], item["state"]))
         return {"events": events, "coverage": coverage}
 
     @staticmethod
-    def _chart_policy_versions(
-        connection: sqlite3.Connection, end_date: str
-    ) -> dict[str, str]:
+    def _chart_policy_versions(connection: sqlite3.Connection, end_date: str) -> dict[str, str]:
         receipt = connection.execute(
             """
             SELECT minervini_policy_version, weinstein_policy_version
@@ -2300,7 +2428,8 @@ class WatchlistRepository:
             ).fetchall()
             identity_rows = self._identity_rows_as_of(connection, as_of_date)
             industry_rows = [
-                row for row in self._membership_rows_as_of(connection, as_of_date)
+                row
+                for row in self._membership_rows_as_of(connection, as_of_date)
                 if str(row.get("assignment_state") or "") == "VERIFIED"
             ]
         reviews = {str(row["symbol"]): dict(row) for row in review_rows}
@@ -2373,7 +2502,8 @@ class WatchlistRepository:
             ).fetchall()
             identity_rows = self._identity_rows_as_of(connection, as_of_date)
             industry_rows = [
-                row for row in self._membership_rows_as_of(connection, as_of_date)
+                row
+                for row in self._membership_rows_as_of(connection, as_of_date)
                 if str(row.get("assignment_state") or "") == "VERIFIED"
             ]
         identities = {str(row["symbol"]): dict(row) for row in identity_rows}
@@ -2399,9 +2529,7 @@ class WatchlistRepository:
                     "projected_result": str(row["projected_result"]),
                     "formal_stage": str(row["formal_stage"]),
                     "prior_formal_stage": str(row["prior_formal_stage"]),
-                    "formal_effective_week_end": str(
-                        row["formal_effective_week_end"] or ""
-                    ),
+                    "formal_effective_week_end": str(row["formal_effective_week_end"] or ""),
                     "week_start": str(row["week_start"]),
                     "expected_week_end": str(row["expected_week_end"]),
                     "sessions_elapsed": int(row["sessions_elapsed"]),
@@ -2465,13 +2593,13 @@ class WatchlistRepository:
             return {}
         with self.connect() as connection:
             memberships = [
-                row for row in self._membership_rows_as_of(connection, as_of_date)
+                row
+                for row in self._membership_rows_as_of(connection, as_of_date)
                 if str(row.get("industry_code") or "").upper() == code
                 and str(row.get("assignment_state") or "") == "VERIFIED"
             ]
             identities = {
-                str(row["symbol"]): row
-                for row in self._identity_rows_as_of(connection, as_of_date)
+                str(row["symbol"]): row for row in self._identity_rows_as_of(connection, as_of_date)
             }
             fact_rows = connection.execute(
                 """
@@ -2493,7 +2621,8 @@ class WatchlistRepository:
         facts: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
         for row in fact_rows:
             facts[str(row["symbol"])][str(row["method"])] = {
-                "result": str(row["result"]), "state": str(row["state"] or "")
+                "result": str(row["result"]),
+                "state": str(row["state"] or ""),
             }
         members: list[dict[str, Any]] = []
         for membership in memberships:
@@ -2502,22 +2631,30 @@ class WatchlistRepository:
             if bool(identity.get("is_st")):
                 continue
             symbol_facts = facts.get(symbol, {})
-            members.append({
-                "symbol": symbol,
-                "industry_code": str(membership.get("industry_code") or ""),
-                "industry_name": str(membership.get("industry_name") or ""),
-                "name": str(identity.get("name") or ""),
-                "weinstein_result": str(symbol_facts.get("weinstein", {}).get("result") or ""),
-                "weinstein_state": str(symbol_facts.get("weinstein", {}).get("state") or ""),
-                "minervini_result": str(symbol_facts.get("minervini", {}).get("result") or ""),
-                "minervini_state": str(symbol_facts.get("minervini", {}).get("state") or ""),
-            })
-        members.sort(key=lambda row: (
-            1 if row["weinstein_result"] == "PASS" and row["minervini_result"] == "PASS"
-            else 2 if row["weinstein_result"] == "PASS"
-            else 3 if row["minervini_result"] == "PASS" else 4,
-            row["symbol"],
-        ))
+            members.append(
+                {
+                    "symbol": symbol,
+                    "industry_code": str(membership.get("industry_code") or ""),
+                    "industry_name": str(membership.get("industry_name") or ""),
+                    "name": str(identity.get("name") or ""),
+                    "weinstein_result": str(symbol_facts.get("weinstein", {}).get("result") or ""),
+                    "weinstein_state": str(symbol_facts.get("weinstein", {}).get("state") or ""),
+                    "minervini_result": str(symbol_facts.get("minervini", {}).get("result") or ""),
+                    "minervini_state": str(symbol_facts.get("minervini", {}).get("state") or ""),
+                }
+            )
+        members.sort(
+            key=lambda row: (
+                1
+                if row["weinstein_result"] == "PASS" and row["minervini_result"] == "PASS"
+                else 2
+                if row["weinstein_result"] == "PASS"
+                else 3
+                if row["minervini_result"] == "PASS"
+                else 4,
+                row["symbol"],
+            )
+        )
         return {"observation": dict(observation), "members": members}
 
     def index_facts(self, as_of_date: str) -> list[dict[str, Any]]:
@@ -2613,14 +2750,16 @@ class WatchlistRepository:
             detail_date = str(latest_row[0] or "") if latest_row else ""
             identity_row = next(
                 (
-                    row for row in self._identity_rows_as_of(connection, detail_date)
+                    row
+                    for row in self._identity_rows_as_of(connection, detail_date)
                     if str(row["symbol"]) == symbol
                 ),
                 None,
             )
             industry_row = next(
                 (
-                    row for row in self._membership_rows_as_of(connection, detail_date)
+                    row
+                    for row in self._membership_rows_as_of(connection, detail_date)
                     if str(row["symbol"]) == symbol
                     and str(row.get("assignment_state") or "") == "VERIFIED"
                 ),
@@ -2654,7 +2793,9 @@ class WatchlistRepository:
             "latest": latest,
             "history": decoded,
             "history_total": history_total,
-            "manual": dict(review) if review else {
+            "manual": dict(review)
+            if review
+            else {
                 "symbol": symbol,
                 "manual_state": "UNREVIEWED",
                 "note": "",
@@ -2736,21 +2877,32 @@ class WatchlistRepository:
         execution_id = uuid4().hex
         with self.connect() as connection:
             if normalized_side == "SELL":
-                existing_rows = [dict(row) for row in connection.execute(
+                existing_rows = [
+                    dict(row)
+                    for row in connection.execute(
                         "SELECT * FROM trade_execution WHERE symbol = ? ORDER BY traded_on, traded_at, created_at, execution_id",
                         (normalized_symbol,),
-                    ).fetchall()]
+                    ).fetchall()
+                ]
                 try:
-                    _match_trade_executions([
-                        *existing_rows,
-                        {
-                            "execution_id": execution_id, "traded_on": traded_on, "traded_at": normalized_time,
-                            "symbol": normalized_symbol, "side": normalized_side,
-                            "quantity": quantity, "price": price, "fee": fee,
-                            "method": normalized_method, "setup_method": normalized_setup,
-                            "stop_price": normalized_stop,
-                        },
-                    ])
+                    _match_trade_executions(
+                        [
+                            *existing_rows,
+                            {
+                                "execution_id": execution_id,
+                                "traded_on": traded_on,
+                                "traded_at": normalized_time,
+                                "symbol": normalized_symbol,
+                                "side": normalized_side,
+                                "quantity": quantity,
+                                "price": price,
+                                "fee": fee,
+                                "method": normalized_method,
+                                "setup_method": normalized_setup,
+                                "stop_price": normalized_stop,
+                            },
+                        ]
+                    )
                 except ValueError as exc:
                     if not permit_unmatched_sell:
                         available = _open_quantity(existing_rows)
@@ -2781,9 +2933,22 @@ class WatchlistRepository:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    execution_id, traded_on, normalized_time, normalized_symbol, normalized_side, quantity,
-                    price, fee, normalized_method, normalized_setup, normalized_stop, rationale.strip(), invalidation.strip(),
-                    exit_reason.strip(), market_context.strip(), _json(snapshot),
+                    execution_id,
+                    traded_on,
+                    normalized_time,
+                    normalized_symbol,
+                    normalized_side,
+                    quantity,
+                    price,
+                    fee,
+                    normalized_method,
+                    normalized_setup,
+                    normalized_stop,
+                    rationale.strip(),
+                    invalidation.strip(),
+                    exit_reason.strip(),
+                    market_context.strip(),
+                    _json(snapshot),
                 ),
             )
         return execution_id
@@ -2792,9 +2957,12 @@ class WatchlistRepository:
         """Return FIFO-matched completed trades and descriptive, non-predictive statistics."""
         self.initialize()
         with self.connect() as connection:
-            rows = [dict(row) for row in connection.execute(
-                "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
-            ).fetchall()]
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
+                ).fetchall()
+            ]
         for row in rows:
             row["snapshot"] = json.loads(str(row.pop("observation_snapshot_json") or "{}"))
         closed, open_lots, unmatched_sells = _match_trade_executions(
@@ -2890,18 +3058,31 @@ class WatchlistRepository:
             if current is None:
                 raise ValueError("成交记录不存在")
             symbol = str(current["symbol"])
-            rows = [dict(row) for row in connection.execute(
-                "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
-            ).fetchall()]
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
+                ).fetchall()
+            ]
             for row in rows:
                 if str(row["execution_id"]) == execution_id:
-                    row.update({
-                        "traded_on": traded_on, "traded_at": traded_at, "side": normalized_side,
-                        "quantity": quantity, "price": price, "fee": fee, "method": normalized_method,
-                        "setup_method": normalized_setup, "stop_price": normalized_stop,
-                        "rationale": rationale.strip(), "invalidation": invalidation.strip(),
-                        "exit_reason": exit_reason.strip(), "market_context": market_context.strip(),
-                    })
+                    row.update(
+                        {
+                            "traded_on": traded_on,
+                            "traded_at": traded_at,
+                            "side": normalized_side,
+                            "quantity": quantity,
+                            "price": price,
+                            "fee": fee,
+                            "method": normalized_method,
+                            "setup_method": normalized_setup,
+                            "stop_price": normalized_stop,
+                            "rationale": rationale.strip(),
+                            "invalidation": invalidation.strip(),
+                            "exit_reason": exit_reason.strip(),
+                            "market_context": market_context.strip(),
+                        }
+                    )
                     break
             _match_trade_executions(rows)
             snapshot_rows = connection.execute(
@@ -2925,9 +3106,23 @@ class WatchlistRepository:
                     method=?, setup_method=?, stop_price=?, rationale=?, invalidation=?, exit_reason=?, market_context=?,
                     observation_snapshot_json=? WHERE execution_id=?
                 """,
-                (traded_on, traded_at.strip(), normalized_side, quantity, price, fee, normalized_method,
-                 normalized_setup, normalized_stop, rationale.strip(), invalidation.strip(), exit_reason.strip(), market_context.strip(),
-                 _json(snapshot), execution_id),
+                (
+                    traded_on,
+                    traded_at.strip(),
+                    normalized_side,
+                    quantity,
+                    price,
+                    fee,
+                    normalized_method,
+                    normalized_setup,
+                    normalized_stop,
+                    rationale.strip(),
+                    invalidation.strip(),
+                    exit_reason.strip(),
+                    market_context.strip(),
+                    _json(snapshot),
+                    execution_id,
+                ),
             )
 
     def _trade_stock_names(self, symbols: set[str]) -> dict[str, str]:
@@ -3012,20 +3207,38 @@ class WatchlistRepository:
         """Return recorded trades and active stop levels for a chart overlay only."""
         self.initialize()
         with self.connect() as connection:
-            rows = [dict(row) for row in connection.execute(
-                "SELECT * FROM trade_execution WHERE symbol = ? AND traded_on <= ? "
-                "ORDER BY traded_on, traded_at, created_at, execution_id",
-                (symbol.upper(), end_date),
-            ).fetchall()]
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT * FROM trade_execution WHERE symbol = ? AND traded_on <= ? "
+                    "ORDER BY traded_on, traded_at, created_at, execution_id",
+                    (symbol.upper(), end_date),
+                ).fetchall()
+            ]
         _, open_lots, _ = _match_trade_executions(rows, permit_unmatched_sells=True)
         return {
             "executions": [
-                {key: row[key] for key in ("execution_id", "traded_on", "side", "quantity", "price", "stop_price")}
+                {
+                    key: row[key]
+                    for key in (
+                        "execution_id",
+                        "traded_on",
+                        "side",
+                        "quantity",
+                        "price",
+                        "stop_price",
+                    )
+                }
                 for row in rows
             ],
             "open_stops": [
-                {"buy_execution_id": lot["buy_execution_id"], "buy_date": lot["buy_date"], "stop_price": lot["stop_price"]}
-                for lot in open_lots if lot.get("stop_price") is not None
+                {
+                    "buy_execution_id": lot["buy_execution_id"],
+                    "buy_date": lot["buy_date"],
+                    "stop_price": lot["stop_price"],
+                }
+                for lot in open_lots
+                if lot.get("stop_price") is not None
             ],
         }
 
@@ -3056,11 +3269,23 @@ class WatchlistRepository:
             if len(date) == 10:
                 normalized.append({"date": date, "price": round(float(price), 6)})
             elif isinstance(logical_from_end, (int, float)) and float(logical_from_end) > 0:
-                normalized.append({"logical_from_end": round(float(logical_from_end), 4), "price": round(float(price), 6)})
+                normalized.append(
+                    {
+                        "logical_from_end": round(float(logical_from_end), 4),
+                        "price": round(float(price), 6),
+                    }
+                )
             elif isinstance(logical_from_start, (int, float)) and float(logical_from_start) < 0:
-                normalized.append({"logical_from_start": round(float(logical_from_start), 4), "price": round(float(price), 6)})
+                normalized.append(
+                    {
+                        "logical_from_start": round(float(logical_from_start), 4),
+                        "price": round(float(price), 6),
+                    }
+                )
             elif isinstance(logical, (int, float)):
-                normalized.append({"logical": round(float(logical), 4), "price": round(float(price), 6)})
+                normalized.append(
+                    {"logical": round(float(logical), 4), "price": round(float(price), 6)}
+                )
             else:
                 raise ValueError("invalid drawing anchor")
         self.initialize()
@@ -3099,8 +3324,7 @@ class WatchlistRepository:
                 (limit,),
             ).fetchall()
         return [
-            {**dict(row), "counts": json.loads(str(row["counts_json"]) or "{}")}
-            for row in rows
+            {**dict(row), "counts": json.loads(str(row["counts_json"]) or "{}")} for row in rows
         ]
 
     def readiness(self) -> dict[str, Any]:
@@ -3140,20 +3364,29 @@ def _match_trade_executions(
     for row in rows:
         if str(row["side"]) == "BUY":
             quantity = int(row["quantity"])
-            lots.append({
-                "symbol": str(row["symbol"]), "buy_execution_id": str(row["execution_id"]),
-                "buy_date": str(row["traded_on"]), "method": str(row["method"]),
-                "setup_method": TRADE_SETUP_ALIASES.get(
-                    str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
-                    str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
-                ),
-                "entry_price": float(row["price"]), "stop_price": row.get("stop_price"),
-                "remaining_quantity": quantity,
-                "unit_cost": (float(row["price"]) * quantity + float(row["fee"])) / quantity,
-                "rationale": str(row.get("rationale") or ""),
-                "invalidation": str(row.get("invalidation") or ""),
-                "market_context": str(row.get("market_context") or ""),
-            })
+            lots.append(
+                {
+                    "symbol": str(row["symbol"]),
+                    "buy_execution_id": str(row["execution_id"]),
+                    "buy_date": str(row["traded_on"]),
+                    "method": str(row["method"]),
+                    "setup_method": TRADE_SETUP_ALIASES.get(
+                        str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
+                        str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
+                    ),
+                    "entry_price": float(row["price"]),
+                    "stop_price": row.get("stop_price"),
+                    "initial_stop_price": row.get("initial_stop_price", row.get("stop_price")),
+                    "remaining_quantity": quantity,
+                    "unit_cost": (float(row["price"]) * quantity + float(row["fee"])) / quantity,
+                    "rationale": str(row.get("rationale") or ""),
+                    "invalidation": str(row.get("invalidation") or ""),
+                    "market_context": str(row.get("market_context") or ""),
+                    "plan_version_id": row.get("plan_version_id"),
+                    "evaluation_cycle_id": row.get("evaluation_cycle_id"),
+                    "setup_code": row.get("setup_code"),
+                }
+            )
             continue
 
         remaining_to_sell = int(row["quantity"])
@@ -3167,47 +3400,145 @@ def _match_trade_executions(
             )
             cost = float(lot["unit_cost"]) * matched_quantity
             pnl = sale_proceeds - cost
-            closed.append({
-                "symbol": str(row["symbol"]), "method": str(lot["method"]),
-                "setup_method": str(lot["setup_method"]),
-                "buy_execution_id": str(lot["buy_execution_id"]),
-                "sell_execution_id": str(row["execution_id"]),
-                "buy_date": str(lot["buy_date"]), "sell_date": str(row["traded_on"]),
-                "quantity": matched_quantity, "cost": round(cost, 2),
-                "proceeds": round(sale_proceeds, 2), "pnl": round(pnl, 2),
-                "entry_price": float(lot["entry_price"]), "exit_price": float(row["price"]),
-                "stop_price": lot.get("stop_price"),
-                "return_pct": round(pnl / cost * 100, 2) if cost else None,
-                "holding_days": (date.fromisoformat(str(row["traded_on"])) - date.fromisoformat(str(lot["buy_date"]))).days,
-                "rationale": str(lot["rationale"]), "invalidation": str(lot["invalidation"]),
-                "market_context": str(lot["market_context"]),
-                "exit_reason": str(row.get("exit_reason") or ""),
-            })
+            gross_pnl = (float(row["price"]) - float(lot["entry_price"])) * matched_quantity
+            closed.append(
+                {
+                    "symbol": str(row["symbol"]),
+                    "method": str(lot["method"]),
+                    "setup_method": str(lot["setup_method"]),
+                    "plan_version_id": lot.get("plan_version_id"),
+                    "evaluation_cycle_id": lot.get("evaluation_cycle_id"),
+                    "setup_code": lot.get("setup_code"),
+                    "buy_execution_id": str(lot["buy_execution_id"]),
+                    "sell_execution_id": str(row["execution_id"]),
+                    "buy_date": str(lot["buy_date"]),
+                    "sell_date": str(row["traded_on"]),
+                    "quantity": matched_quantity,
+                    "cost": round(cost, 2),
+                    "proceeds": round(sale_proceeds, 2),
+                    "pnl": round(pnl, 2),
+                    "gross_pnl": round(gross_pnl, 2),
+                    "entry_price": float(lot["entry_price"]),
+                    "exit_price": float(row["price"]),
+                    "stop_price": lot.get("stop_price"),
+                    "initial_stop_price": lot.get("initial_stop_price"),
+                    "return_pct": round(pnl / cost * 100, 2) if cost else None,
+                    "holding_days": (
+                        date.fromisoformat(str(row["traded_on"]))
+                        - date.fromisoformat(str(lot["buy_date"]))
+                    ).days,
+                    "rationale": str(lot["rationale"]),
+                    "invalidation": str(lot["invalidation"]),
+                    "market_context": str(lot["market_context"]),
+                    "exit_reason": str(row.get("exit_reason") or ""),
+                }
+            )
             lot["remaining_quantity"] = int(lot["remaining_quantity"]) - matched_quantity
             remaining_to_sell -= matched_quantity
         if remaining_to_sell:
             if not permit_unmatched_sells:
                 raise ValueError("卖出记录无法由已有买入记录配对")
-            unmatched_sells.append({
-                "symbol": str(row["symbol"]), "sell_date": str(row["traded_on"]),
-                "quantity": remaining_to_sell, "price": float(row["price"]),
-                "fee": round(float(row["fee"]) * remaining_to_sell / int(row["quantity"]), 2),
-                "exit_reason": str(row.get("exit_reason") or ""),
-            })
+            unmatched_sells.append(
+                {
+                    "symbol": str(row["symbol"]),
+                    "sell_date": str(row["traded_on"]),
+                    "quantity": remaining_to_sell,
+                    "price": float(row["price"]),
+                    "fee": round(float(row["fee"]) * remaining_to_sell / int(row["quantity"]), 2),
+                    "exit_reason": str(row.get("exit_reason") or ""),
+                }
+            )
     return closed, [lot for lot in lots if int(lot["remaining_quantity"]) > 0], unmatched_sells
 
 
+def _aggregate_completed_trades(
+    closed: Sequence[Mapping[str, Any]],
+    open_lots: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse FIFO exit fragments into completed BUY trade attempts."""
+    open_buy_ids = {str(lot["buy_execution_id"]) for lot in open_lots}
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for fragment in closed:
+        grouped.setdefault(str(fragment["buy_execution_id"]), []).append(fragment)
+    completed: list[dict[str, Any]] = []
+    for buy_id, fragments in grouped.items():
+        if buy_id in open_buy_ids:
+            continue
+        ordered = sorted(fragments, key=lambda item: (str(item["sell_date"]), str(item["sell_execution_id"])))
+        first = dict(ordered[0])
+        quantity = sum(int(item["quantity"]) for item in ordered)
+        pnl = sum(float(item["pnl"]) for item in ordered)
+        gross_pnl = sum(float(item.get("gross_pnl") or 0) for item in ordered)
+        cost = sum(float(item["cost"]) for item in ordered)
+        proceeds = sum(float(item["proceeds"]) for item in ordered)
+        last = ordered[-1]
+        stop_price = first.get("initial_stop_price")
+        actual_risk = (
+            (float(first["entry_price"]) - float(stop_price)) * quantity
+            if stop_price is not None and float(first["entry_price"]) > float(stop_price)
+            else None
+        )
+        first.update(
+            {
+                "sell_execution_id": ",".join(str(item["sell_execution_id"]) for item in ordered),
+                "sell_date": str(last["sell_date"]),
+                "quantity": quantity,
+                "cost": round(cost, 2),
+                "proceeds": round(proceeds, 2),
+                "pnl": round(pnl, 2),
+                "gross_pnl": round(gross_pnl, 2),
+                "exit_price": round(
+                    sum(float(item["exit_price"]) * int(item["quantity"]) for item in ordered)
+                    / quantity,
+                    6,
+                ),
+                "return_pct": round(pnl / cost * 100, 2) if cost else None,
+                "holding_days": int(last["holding_days"]),
+                "exit_reason": "；".join(
+                    dict.fromkeys(str(item.get("exit_reason") or "") for item in ordered)
+                ).strip("；"),
+                "actual_risk": round(actual_risk, 2) if actual_risk is not None else None,
+                "r_multiple": round(gross_pnl / actual_risk, 4) if actual_risk else None,
+            }
+        )
+        completed.append(first)
+    return completed
+
+
 def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for lot in lots:
-        key = (str(lot["symbol"]), str(lot.get("setup_method") or DEFAULT_TRADE_SETUP))
-        item = grouped.setdefault(key, {"symbol": key[0], "setup_method": key[1], "quantity": 0, "cost": 0.0})
+        key = (
+            str(lot["symbol"]),
+            str(lot.get("setup_method") or DEFAULT_TRADE_SETUP),
+            str(lot.get("plan_version_id") or ""),
+            str(lot.get("setup_code") or ""),
+        )
+        item = grouped.setdefault(
+            key,
+            {
+                "symbol": key[0],
+                "setup_method": key[1],
+                "plan_version_id": lot.get("plan_version_id"),
+                "evaluation_cycle_id": lot.get("evaluation_cycle_id"),
+                "setup_code": lot.get("setup_code"),
+                "quantity": 0,
+                "cost": 0.0,
+            },
+        )
         quantity = int(lot["remaining_quantity"])
         item["quantity"] += quantity
         item["cost"] += float(lot["unit_cost"]) * quantity
     return [
         {**item, "cost": round(float(item["cost"]), 2)}
-        for item in sorted(grouped.values(), key=lambda item: (str(item["symbol"]), str(item["setup_method"])))
+        for item in sorted(
+            grouped.values(),
+            key=lambda item: (
+                str(item["symbol"]),
+                str(item["setup_method"]),
+                str(item.get("plan_version_id") or ""),
+            ),
+        )
     ]
 
 
@@ -3217,6 +3548,7 @@ def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     gains = [value for value in pnl_values if value > 0]
     losses = [value for value in pnl_values if value < 0]
     total_cost = sum(float(item["cost"]) for item in trades)
+    r_values = [float(item["r_multiple"]) for item in trades if item.get("r_multiple") is not None]
     return {
         "count": count,
         "net_pnl": round(sum(pnl_values), 2),
@@ -3225,9 +3557,14 @@ def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "avg_gain": round(sum(gains) / len(gains), 2) if gains else None,
         "avg_loss": round(sum(losses) / len(losses), 2) if losses else None,
         "profit_loss_ratio": round((sum(gains) / len(gains)) / abs(sum(losses) / len(losses)), 2)
-        if gains and losses else None,
+        if gains and losses
+        else None,
         "expectancy": round(sum(pnl_values) / count, 2) if count else None,
-        "avg_holding_days": round(sum(int(item["holding_days"]) for item in trades) / count, 1) if count else None,
+        "gross_avg_r": round(sum(r_values) / len(r_values), 4) if r_values else None,
+        "r_count": len(r_values),
+        "avg_holding_days": round(sum(int(item["holding_days"]) for item in trades) / count, 1)
+        if count
+        else None,
     }
 
 
@@ -3242,9 +3579,7 @@ def _chart_event_label(method: str, state: str) -> str:
     return f"{prefix}{suffix}"
 
 
-def _chart_event_summary(
-    method: str, state: str, profile: Mapping[str, Any]
-) -> str:
+def _chart_event_summary(method: str, state: str, profile: Mapping[str, Any]) -> str:
     if state == "DATA_GAP":
         return (
             "周线历史不足，暂不能判断阶段"

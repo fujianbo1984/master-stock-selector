@@ -28,6 +28,15 @@
   </article>
 </section>
 
+{% if review.by_plan_setup %}
+<section class="section panel review-panel">
+  <div class="section-heading"><div><p class="eyebrow">版本化评估</p><h2>按评估周期与形态</h2></div><span class="muted">轻微版本连续累计；每组 30 笔完整交易才达到初步评价门槛</span></div>
+  <div class="table-wrap review-table"><table><thead><tr><th>涉及版本</th><th>形态</th><th>已完成</th><th>毛平均R</th><th>净收益</th><th>胜率</th><th>样本状态</th></tr></thead><tbody>
+  {% for item in review.by_plan_setup.values() %}<tr><td>{{ item.plan_versions|join('、') if item.plan_versions else '未绑定' }}</td><td>{{ item.setup_code }}</td><td>{{ item.summary.count }}</td><td>{{ item.summary.gross_avg_r if item.summary.gross_avg_r is not none else '—' }}</td><td>{{ item.summary.net_pnl }} 元</td><td>{{ item.summary.win_rate_pct if item.summary.win_rate_pct is not none else '—' }}{% if item.summary.win_rate_pct is not none %}%{% endif %}</td><td>{{ item.sample_state }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
 <section class="section panel review-panel">
   <div class="section-heading"><div><p class="eyebrow">已完成交易</p><h2>已完成交易</h2></div><span class="muted">卖出按先进先出与历史买入配对</span></div>
   {% if review.closed %}<div class="table-wrap review-table"><table data-sortable="true"><thead><tr><th>股票</th><th>方法</th><th>买入</th><th>卖出</th><th>数量</th><th>净收益</th><th>收益率</th><th>计划盈亏比</th><th>实际盈亏比</th><th>持仓日</th><th>卖出原因</th></tr></thead><tbody>{% for item in review.closed %}<tr><td><a class="stock-link" href="/a/stocks/{{ item.symbol }}">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td><td>{{ item.setup_label }}</td><td>{{ item.buy_date }}</td><td>{{ item.sell_date }}</td><td>{{ item.quantity }}</td><td data-sort="{{ item.pnl }}">{{ item.pnl }} 元</td><td data-sort="{{ item.return_pct }}">{{ item.return_pct }}%</td><td data-sort="{{ item.planned_r_multiple if item.planned_r_multiple is not none else '' }}">{% if item.planned_r_multiple is not none %}{{ item.planned_r_multiple }}{% else %}—{% endif %}</td><td data-sort="{{ item.actual_r_multiple if item.actual_r_multiple is not none else '' }}" title="按买入日至卖出日的日线最低价计算；未跌破买入价不计算">{% if item.actual_r_multiple is not none %}{{ item.actual_r_multiple }}{% else %}—{% endif %}</td><td>{{ item.holding_days }}</td><td>{{ item.exit_reason or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">尚无已完成交易；请先在个股页记录实际买入和卖出。</div>{% endif %}

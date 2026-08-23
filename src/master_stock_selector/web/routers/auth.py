@@ -144,7 +144,13 @@ def build_auth_router(
             expires_days = int(str((values.get("expires_days") or ["30"])[0]))
             scopes = [
                 scope
-                for scope in ("trades:read", "trades:write")
+                for scope in (
+                    "trades:read",
+                    "trades:write",
+                    "plans:read",
+                    "plans:write",
+                    "plans:publish",
+                )
                 if scope in values
             ]
             raw_token, _ = users.create_api_token(

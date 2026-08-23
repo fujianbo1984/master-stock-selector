@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from ...watchlist.repository import WatchlistRepository
+from ..trading_plans import PlanConflict
 from ..users import (
     ApiTokenPrincipal,
     TradeBatchValidationError,
@@ -17,13 +18,11 @@ from ..users import (
 )
 
 
-def build_agent_api_router(
-    *, repository: WatchlistRepository, users: UserRepository
-) -> APIRouter:
+def build_agent_api_router(*, repository: WatchlistRepository, users: UserRepository) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["agent-api"])
     recent_requests: dict[str, list[float]] = {}
 
-    def require_token(request: Request, scope: str) -> ApiTokenPrincipal:
+    def require_token(request: Request, scope: str | None = None) -> ApiTokenPrincipal:
         authorization = request.headers.get("Authorization", "")
         scheme, _, raw_token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not raw_token.strip():
@@ -39,10 +38,12 @@ def build_agent_api_router(
                 detail="Token 无效、已过期或已撤销",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        if scope not in principal.scopes:
+        if scope is not None and scope not in principal.scopes:
             raise HTTPException(status_code=403, detail=f"Token 缺少权限：{scope}")
         now = monotonic()
-        recent = [value for value in recent_requests.get(principal.token_id, []) if now - value < 60]
+        recent = [
+            value for value in recent_requests.get(principal.token_id, []) if now - value < 60
+        ]
         if len(recent) >= 120:
             raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
         recent.append(now)
@@ -79,9 +80,7 @@ def build_agent_api_router(
             symbol = str(trade.get("symbol") or "").upper().strip()
             traded_on = str(trade.get("traded_on") or "")
             if symbol and traded_on:
-                trade["observation_snapshot"] = repository.observation_snapshot(
-                    symbol, traded_on
-                )
+                trade["observation_snapshot"] = repository.observation_snapshot(symbol, traded_on)
             result.append(trade)
         return result
 
@@ -98,9 +97,7 @@ def build_agent_api_router(
                 item["stock_name"] = names.get(symbol, "名称待补")
         return report
 
-    def batch_response(
-        response: dict[str, Any], principal: ApiTokenPrincipal
-    ) -> dict[str, Any]:
+    def batch_response(response: dict[str, Any], principal: ApiTokenPrincipal) -> dict[str, Any]:
         if "trades:read" in principal.scopes:
             return enrich_results(response)
         return {
@@ -124,14 +121,10 @@ def build_agent_api_router(
             ]
         }
 
-    def validation_response(
-        report: dict[str, Any], principal: ApiTokenPrincipal
-    ) -> dict[str, Any]:
+    def validation_response(report: dict[str, Any], principal: ApiTokenPrincipal) -> dict[str, Any]:
         if "trades:read" in principal.scopes:
             return enrich_results(report)
-        return {
-            key: report[key] for key in ("status", "ready", "duplicates", "rejected")
-        } | {
+        return {key: report[key] for key in ("status", "ready", "duplicates", "rejected")} | {
             "results": [
                 {
                     key: item[key]
@@ -151,7 +144,7 @@ def build_agent_api_router(
 
     @router.get("/me")
     def me(request: Request) -> dict[str, Any]:
-        principal = require_token(request, "trades:read")
+        principal = require_token(request)
         return {
             "user_id": principal.user_id,
             "username": principal.username,
@@ -268,9 +261,7 @@ def build_agent_api_router(
         return JSONResponse(content={"request_id": rid, **batch_response(response, principal)})
 
     @router.patch("/trades/{execution_id}/stop")
-    async def update_stop(
-        request: Request, execution_id: str
-    ) -> dict[str, Any]:
+    async def update_stop(request: Request, execution_id: str) -> dict[str, Any]:
         principal = require_token(request, "trades:write")
         rid = request_id(request)
         payload = await json_object(request)
@@ -315,5 +306,111 @@ def build_agent_api_router(
         if "trades:read" in principal.scopes:
             receipt["trade"] = trade
         return receipt
+
+    @router.get("/plans/current")
+    def current_plan(request: Request) -> dict[str, Any]:
+        principal = require_token(request, "plans:read")
+        return {"plan": users.trading_plans.current(principal.user_id)}
+
+    @router.get("/plans/versions")
+    def plan_versions(request: Request) -> dict[str, Any]:
+        principal = require_token(request, "plans:read")
+        return {"versions": users.trading_plans.versions(principal.user_id)}
+
+    @router.get("/plans/versions/{version_id}")
+    def plan_version(request: Request, version_id: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:read")
+        plan = users.trading_plans.show(principal.user_id, version_id)
+        if plan is None:
+            raise HTTPException(status_code=404, detail="计划版本不存在")
+        return {"plan": plan}
+
+    @router.get("/plans/diff")
+    def plan_diff(request: Request, old: str, new: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:read")
+        try:
+            return users.trading_plans.diff(principal.user_id, old, new)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/plans/grill/sessions")
+    async def start_grill(request: Request) -> dict[str, Any]:
+        principal = require_token(request, "plans:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        try:
+            result = users.trading_plans.start(
+                principal.user_id,
+                template=str(payload.get("template") or "blank"),
+                from_version=str(payload.get("from_version") or ""),
+                change_goal=str(payload.get("change_goal") or ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal, action="plans.grill.start", request_id=rid, outcome="CREATED"
+        )
+        return {"request_id": rid, **result}
+
+    @router.get("/plans/grill/sessions/{session_id}")
+    def grill_status(request: Request, session_id: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:read")
+        result = users.trading_plans.status(principal.user_id, session_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Grill 会话不存在")
+        return result
+
+    @router.get("/plans/grill/sessions/{session_id}/next")
+    def grill_next(request: Request, session_id: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:read")
+        try:
+            return users.trading_plans.next(principal.user_id, session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/plans/grill/sessions/{session_id}/answers")
+    async def grill_answer(request: Request, session_id: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        try:
+            result = users.trading_plans.answer(principal.user_id, session_id, payload)
+        except PlanConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal, action="plans.grill.answer", request_id=rid, outcome="UPDATED"
+        )
+        return {"request_id": rid, **result}
+
+    @router.post("/plans/grill/sessions/{session_id}/validate")
+    def grill_validate(request: Request, session_id: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:read")
+        try:
+            return users.trading_plans.validate(principal.user_id, session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/plans/grill/sessions/{session_id}/publish")
+    async def grill_publish(request: Request, session_id: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:publish")
+        rid = request_id(request)
+        payload = await json_object(request)
+        expected_revision = payload.get("expected_revision")
+        if not isinstance(expected_revision, int):
+            raise HTTPException(status_code=422, detail="expected_revision 必须是整数")
+        try:
+            result = users.trading_plans.publish(
+                principal.user_id, session_id, expected_revision
+            )
+        except PlanConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal, action="plans.grill.publish", request_id=rid, outcome="PUBLISHED"
+        )
+        return {"request_id": rid, **result}
 
     return router

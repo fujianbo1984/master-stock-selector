@@ -39,6 +39,8 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
             "expires_days": "90",
             "trades:read": "on",
             "trades:write": "on",
+            "plans:read": "on",
+            "plans:write": "on",
         },
     )
 
@@ -49,6 +51,12 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
     tokens = users.list_api_tokens(user.user_id)
     assert len(tokens) == 1
     assert tokens[0]["active"] is True
+    assert tokens[0]["scopes"] == [
+        "plans:read",
+        "plans:write",
+        "trades:read",
+        "trades:write",
+    ]
     with users.connect() as connection:
         stored = connection.execute(
             "SELECT token_hash FROM user_api_token WHERE token_id=?",
@@ -139,9 +147,12 @@ def test_agent_api_preflight_atomic_commit_idempotency_and_stop_update(tmp_path)
         json={"stop_price": 8.5, "expected_revision": buy["revision"]},
     )
     assert stale.status_code == 409
-    assert client.get(
-        f"/api/v1/trades/{buy['execution_id']}", headers=headers
-    ).json()["trade"]["stop_price"] == 9.0
+    assert (
+        client.get(f"/api/v1/trades/{buy['execution_id']}", headers=headers).json()["trade"][
+            "stop_price"
+        ]
+        == 9.0
+    )
     rejected_sell = client.patch(
         f"/api/v1/trades/{sell['execution_id']}/stop",
         headers=headers,
@@ -176,14 +187,16 @@ def test_agent_api_preflight_atomic_commit_idempotency_and_stop_update(tmp_path)
         "/api/v1/trades/batch",
         headers=_token_headers(token, key="same-price-later-time"),
         json={
-            "trades": [{
-                "symbol": "000001.SZ",
-                "traded_on": "2026-08-01",
-                "traded_at": "10:00:00",
-                "side": "BUY",
-                "quantity": 100,
-                "price": 10.0,
-            }]
+            "trades": [
+                {
+                    "symbol": "000001.SZ",
+                    "traded_on": "2026-08-01",
+                    "traded_at": "10:00:00",
+                    "side": "BUY",
+                    "quantity": 100,
+                    "price": 10.0,
+                }
+            ]
         },
     )
     assert committed_later.status_code == 200
@@ -196,9 +209,7 @@ def test_agent_api_rejects_oversell_atomically_and_enforces_scopes(tmp_path) -> 
     write_token, write_metadata = users.create_api_token(
         user.user_id, "writer", scopes=("trades:write",)
     )
-    read_token, _ = users.create_api_token(
-        user.user_id, "reader", scopes=("trades:read",)
-    )
+    read_token, _ = users.create_api_token(user.user_id, "reader", scopes=("trades:read",))
     payload = {
         "trades": [
             {
@@ -229,9 +240,7 @@ def test_agent_api_rejects_oversell_atomically_and_enforces_scopes(tmp_path) -> 
     )
     assert rejected.status_code == 422
     assert rejected.json()["rejected"] == 1
-    assert client.get(
-        "/api/v1/trades", headers=_token_headers(write_token)
-    ).status_code == 403
+    assert client.get("/api/v1/trades", headers=_token_headers(write_token)).status_code == 403
     with users.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_trade_execution").fetchone()[0] == 0
 
@@ -337,9 +346,7 @@ def test_source_ref_deduplicates_exact_execution_and_rejects_conflicting_reuse(t
 def test_write_only_token_receives_minimal_receipts_and_audit_failure_rolls_back(tmp_path) -> None:
     client = _client(tmp_path)
     users, user = _principal(client)
-    token, metadata = users.create_api_token(
-        user.user_id, "writer-only", scopes=("trades:write",)
-    )
+    token, metadata = users.create_api_token(user.user_id, "writer-only", scopes=("trades:write",))
     payload = {
         "trades": [
             {
@@ -352,9 +359,7 @@ def test_write_only_token_receives_minimal_receipts_and_audit_failure_rolls_back
             }
         ]
     }
-    validated = client.post(
-        "/api/v1/trades/validate", headers=_token_headers(token), json=payload
-    )
+    validated = client.post("/api/v1/trades/validate", headers=_token_headers(token), json=payload)
     assert validated.status_code == 200
     assert "symbol" not in validated.json()["results"][0]
     assert "price" not in validated.json()["results"][0]
@@ -410,13 +415,19 @@ def test_write_only_token_receives_minimal_receipts_and_audit_failure_rolls_back
             (execution_id,),
         ).fetchone()
         assert tuple(stored_stop) == (9.0, 2)
-        assert connection.execute(
-            "SELECT COUNT(*) FROM user_api_audit WHERE token_id=?",
-            (str(metadata["token_id"]),),
-        ).fetchone()[0] == 3
-        assert connection.execute(
-            "SELECT COUNT(*) FROM user_api_audit WHERE request_id LIKE '%audit-failure%'"
-        ).fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM user_api_audit WHERE token_id=?",
+                (str(metadata["token_id"]),),
+            ).fetchone()[0]
+            == 3
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM user_api_audit WHERE request_id LIKE '%audit-failure%'"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 @pytest.mark.parametrize("invalid_quantity", ["NaN", "Infinity", "1.5", "0", "-1", "true"])
