@@ -247,3 +247,24 @@ def test_candidate_schema_check_uses_the_packaged_schema_version(tmp_path: Path)
 
     assert "USER_SCHEMA_VERSION, UserRepository" in script
     assert '== USER_SCHEMA_VERSION' in script
+
+
+def test_apply_backup_schema_check_uses_the_packaged_schema_version(tmp_path: Path) -> None:
+    config = release_ecs.parse_args(["--apply", "--confirm-commit", "a" * 40])
+    context = release_ecs.ReleaseContext(
+        config=config,
+        commit="a" * 40,
+        short_commit="aaaaaaa",
+        release_id="aaaaaaa-20260823t000000z",
+        archive=tmp_path / "archive.tar.gz",
+        archive_sha256="b" * 64,
+        css_sha256="c" * 64,
+        candidate_dir="/opt/masterstock.rehearsal-aaaaaaa",
+        staging_dir="/tmp/masterstock-release-aaaaaaa-20260823t000000z",
+        unit_name="masterstock-candidate-aaaaaaa-20260823t000000z",
+    )
+
+    script = release_ecs.apply_script(context)
+
+    assert "from master_stock_selector.web.users import USER_SCHEMA_VERSION" in script
+    assert '== USER_SCHEMA_VERSION' in script

@@ -720,13 +720,14 @@ test ! -e "$backup"
 sudo -u masterstock env MASTERSTOCK_USER_DATABASE=/var/lib/masterstock/users.sqlite3 "$candidate/scripts/manage_users.sh" schema-check >/dev/null
 "$candidate/.venv/bin/python" - "$backup" <<'PY'
 import sqlite3, sys
+from master_stock_selector.web.users import USER_SCHEMA_VERSION
 source = sqlite3.connect("file:/var/lib/masterstock/users.sqlite3?mode=ro", uri=True)
 target = sqlite3.connect(sys.argv[1])
 try:
     assert source.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     source.backup(target)
     assert target.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-    assert target.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert target.execute("PRAGMA user_version").fetchone()[0] == USER_SCHEMA_VERSION
 finally:
     target.close()
     source.close()
