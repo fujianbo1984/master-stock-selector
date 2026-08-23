@@ -49,18 +49,22 @@ HTTPS 模板对动态请求设置了按来源 IP 的限速和并发上限，静�
   HTTPS 登录后改为 `1`。Agent CLI 使用 Bearer Token，通过 SSH 隧道访问回环 HTTP
   不依赖会话 Cookie，仍可继续使用。
 
-访问日志使用用户库 schema v4。上线前先停止 Web，用
+访问日志匿名汇总与保留期使用用户库 schema v7。上线前先停止 Web，用
 `scripts/manage_users.sh schema-migrate --apply --backup <未存在的备份路径>` 在 ECS
 权威用户库上显式迁移，不得上传本地数据库覆盖。需要归属地时，将合法获取并
 定期更新的 `GeoLite2-City.mmdb` 放在 `/var/lib/masterstock/`，并设置
 `MASTERSTOCK_GEOIP_DATABASE=/var/lib/masterstock/GeoLite2-City.mmdb`。Nginx 必须覆写
 `X-Real-IP` 与 `X-Forwarded-For`，`MASTERSTOCK_TRUSTED_PROXIES` 只列出 Nginx 到应用的
 实际来源网段。该表包含个人信息，运维时应限制数据库访问权限并按实际合规
-与分析需求设定保留期。
+与分析需求设定保留期。默认保留 90 天原始明细；过期数据只保留不含 IP、用户和城市的
+匿名日汇总。可通过 `MASTERSTOCK_ACCESS_LOG_RETENTION_DAYS` 调整，但不得低于实际合规
+和安全调查所需期限。
 
 安装 Nginx 后，把 HTTPS 模板复制到 `/etc/nginx/sites-available/masterstock-https` 并启用。
 确认未启用 `masterstock-public-readonly`，且没有服务监听 8888。把 systemd Web 模板安装到
-`/etc/systemd/system/masterstock-web.service`。
+`/etc/systemd/system/masterstock-web.service`，并把访问日志维护的 service/timer 模板安装到
+`/etc/systemd/system/`。维护任务默认 04:15 执行，排在 03:30 用户库备份之后；首次启用前
+先手动运行一次不带 `--apply` 的 `scripts/manage_users.sh access-log-maintain` 核对待清理数量。
 先运行 `nginx -t`，再执行 `systemctl daemon-reload` 并重启 Web 与 Nginx。切换后必须确认：
 
 - `ss` 显示 FastAPI 仅监听 `127.0.0.1:8000`，Nginx 监听公网 `80` 和 `443`，且没有
@@ -68,7 +72,8 @@ HTTPS 模板对动态请求设置了按来源 IP 的限速和并发上限，静�
 - 公网 HTTPS 首页、行情、公开图表、登录、个人空间和 Agent API 正常；
 - `http://真实域名` 跳转到 HTTPS，`https://真实域名/login` 和 `/api/v1/` 只经 443；
 - `certbot renew --dry-run` 通过，证书续期定时器为 active；
-- `masterstock-daily.timer` 和 `masterstock-backup.timer` 仍为 active。
+- `masterstock-daily.timer`、`masterstock-backup.timer` 和
+  `masterstock-access-log-maintenance.timer` 均为 active。
 
 Certbot 使用 Webroot 续期时，把 `deploy/certbot/reload-nginx` 安装到
 `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx` 并设为 `0755`。这样证书文件更新后

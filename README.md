@@ -112,6 +112,15 @@ scripts/run_master_watchlist.sh
 robots.txt。`MASTERSTOCK_TRUSTED_PROXIES` 只配置受信任的反向代理 CIDR；归属地使用
 `MASTERSTOCK_GEOIP_DATABASE` 指向的本地 GeoLite2 City `.mmdb` 离线解析，未配置时仍记录
 IP 并将归属地标为不可用。可用 `MASTERSTOCK_ACCESS_LOGGING=0` 整体关闭。
+原始访问明细默认保留 90 天；过期明细按 UTC 日期原子汇总到
+`user_access_daily_summary` 后删除。长期汇总只保留国家/地区、脱敏路径类别、方法、
+状态码类别、访问量和当日独立 IP 数量，不保留 IP、用户、城市或跨日标识。
+维护命令默认只预览，增加 `--apply` 才会写入：
+
+```bash
+scripts/manage_users.sh access-log-maintain
+scripts/manage_users.sh access-log-maintain --apply
+```
 
 Agent Token 由用户在“账户设置”中创建，建议一台设备或一个 Agent 一枚。Token 只显示一次，服务端仅保存摘要；`trades:read` 用于查询，`trades:write` 用于预检、批量录入成交和更新既有 BUY 止损。
 

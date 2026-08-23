@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily MasterStock access log rollup and retention
+
+[Timer]
+OnCalendar=*-*-* 04:15:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=10m
+Unit=masterstock-access-log-maintenance.service
+
+[Install]
+WantedBy=timers.target

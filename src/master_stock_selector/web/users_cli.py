@@ -5,11 +5,12 @@ import getpass
 import json
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from ..watchlist.repository import TRADE_SETUP_ALIASES
-from .users import UserRepository
+from .users import DEFAULT_ACCESS_LOG_RETENTION_DAYS, UserRepository
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +31,19 @@ def build_parser() -> argparse.ArgumentParser:
     schema_migrate = subparsers.add_parser("schema-migrate")
     schema_migrate.add_argument("--apply", action="store_true")
     schema_migrate.add_argument("--backup", default="")
+    access_log = subparsers.add_parser("access-log-maintain")
+    access_log.add_argument(
+        "--retention-days",
+        type=int,
+        default=int(
+            os.environ.get(
+                "MASTERSTOCK_ACCESS_LOG_RETENTION_DAYS",
+                str(DEFAULT_ACCESS_LOG_RETENTION_DAYS),
+            )
+        ),
+    )
+    access_log.add_argument("--as-of", type=date.fromisoformat)
+    access_log.add_argument("--apply", action="store_true")
     migrate = subparsers.add_parser("migrate-legacy")
     migrate.add_argument("--source", required=True)
     migrate.add_argument("--username", required=True)
@@ -53,6 +67,20 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     repository.require_schema()
+    if args.action == "access-log-maintain":
+        result = (
+            repository.maintain_access_log(
+                retention_days=args.retention_days,
+                as_of=args.as_of,
+            )
+            if args.apply
+            else repository.access_log_maintenance_status(
+                retention_days=args.retention_days,
+                as_of=args.as_of,
+            )
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     if args.action == "create":
         password = _confirmed_password()
         user_id = repository.create_user(args.username, password, args.display_name)

@@ -2,7 +2,8 @@
   const root = document.querySelector("[data-breadth-lab]");
   if (!root || !window.LightweightCharts) return;
 
-  const history = JSON.parse(document.getElementById("breadth-history-data")?.textContent || "[]");
+  const weinsteinHistory = JSON.parse(document.getElementById("weinstein-breadth-data")?.textContent || "[]");
+  const minerviniHistory = JSON.parse(document.getElementById("minervini-breadth-data")?.textContent || "[]");
   const proxy = JSON.parse(document.getElementById("breadth-proxy-data")?.textContent || "[]");
   const chartNode = root.querySelector("[data-overlay-chart]");
   if (!chartNode) return;
@@ -36,6 +37,8 @@
     color: "#2457a7",
     lineWidth: 2,
     lineStyle: LightweightCharts.LineStyle.Dotted,
+    pointMarkersVisible: true,
+    pointMarkersRadius: 3,
     priceLineVisible: false,
     lastValueVisible: true,
     priceFormat: percentFormat,
@@ -61,12 +64,12 @@
     priceFormat: { type: "price", precision: 1, minMove: 0.1 },
   });
 
-  weinsteinSeries.setData(history
-    .filter(item => item.weinstein_pass_rate !== null)
-    .map(item => ({ time: item.as_of_date, value: item.weinstein_pass_rate })));
-  minerviniSeries.setData(history
-    .filter(item => item.minervini_pass_rate !== null)
-    .map(item => ({ time: item.as_of_date, value: item.minervini_pass_rate })));
+  weinsteinSeries.setData(weinsteinHistory
+    .filter(item => item.pass_rate !== null)
+    .map(item => ({ time: item.as_of_date, value: item.pass_rate })));
+  minerviniSeries.setData(minerviniHistory
+    .filter(item => item.pass_rate !== null)
+    .map(item => ({ time: item.as_of_date, value: item.pass_rate })));
   proxySeries.setData(proxy.map(item => ({ time: item.trade_date, value: item.close })));
 
   const readout = root.querySelector("[data-breadth-readout]");
@@ -75,13 +78,29 @@
     const item = param.seriesData.get(series);
     return item && typeof item.value === "number" ? item.value : null;
   };
+  const dateKey = (value) => {
+    if (typeof value === "string") return value;
+    if (value && typeof value.year === "number") {
+      return `${value.year}-${String(value.month).padStart(2, "0")}-${String(value.day).padStart(2, "0")}`;
+    }
+    return "";
+  };
+  const latestWeinsteinAt = (tradeDate) => {
+    let latest = null;
+    for (const item of weinsteinHistory) {
+      if (item.pass_rate !== null && item.as_of_date <= tradeDate) latest = item;
+      if (item.as_of_date > tradeDate) break;
+    }
+    return latest;
+  };
   chart.subscribeCrosshairMove((param) => {
-    const weinstein = valueAt(param, weinsteinSeries);
+    const tradeDate = dateKey(param.time);
+    const weinstein = latestWeinsteinAt(tradeDate);
     const minervini = valueAt(param, minerviniSeries);
     const indexValue = valueAt(param, proxySeries);
     readout.textContent = param.time
-      ? `${param.time} · W ${weinstein === null ? "—" : `${weinstein.toFixed(2)}%`} · M ${minervini === null ? "—" : `${minervini.toFixed(2)}%`} · ${benchmarkName} ${indexValue === null ? "—" : indexValue.toFixed(1)}`
-      : `左轴：通过率 · 右轴：${proxy.length ? "窗口起点1000" : "指数数据不足"}`;
+      ? `${tradeDate} · W ${weinstein === null ? "—" : `${weinstein.pass_rate.toFixed(2)}% (完整周截至${weinstein.as_of_date})`} · M ${minervini === null ? "—" : `${minervini.toFixed(2)}%`} · ${benchmarkName} ${indexValue === null ? "—" : indexValue.toFixed(1)}`
+      : `左轴：W完整周 / M日线通过率 · 右轴：${proxy.length ? "窗口起点1000" : "指数数据不足"}`;
   });
 
   chart.timeScale().fitContent();

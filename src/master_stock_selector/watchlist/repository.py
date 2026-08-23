@@ -2265,6 +2265,201 @@ class WatchlistRepository:
             result.append(item)
         return result
 
+    def minervini_breadth_history(
+        self,
+        end_date: str,
+        *,
+        limit: int = 260,
+    ) -> list[dict[str, Any]]:
+        """Aggregate daily Minervini breadth within the latest policy version."""
+
+        return self._single_method_breadth_history(
+            end_date,
+            method="minervini",
+            limit=limit,
+            formal_weinstein_only=False,
+        )
+
+    def weinstein_weekly_breadth_history(
+        self,
+        end_date: str,
+        *,
+        limit: int = 52,
+    ) -> list[dict[str, Any]]:
+        """Aggregate only formal completed-week Weinstein facts.
+
+        A daily-retained Weinstein row is a formal weekly observation only when
+        its availability date equals the profile's completed effective week end.
+        Intraweek projections live in a separate table and are never read here.
+        """
+
+        return self._single_method_breadth_history(
+            end_date,
+            method="weinstein",
+            limit=limit,
+            formal_weinstein_only=True,
+        )
+
+    def _single_method_breadth_history(
+        self,
+        end_date: str,
+        *,
+        method: str,
+        limit: int,
+        formal_weinstein_only: bool,
+    ) -> list[dict[str, Any]]:
+        self.initialize()
+        if not end_date or limit < 2:
+            return []
+        with self.connect() as connection:
+            representative_symbol = ""
+            if formal_weinstein_only:
+                representative = connection.execute(
+                    """
+                    SELECT symbol
+                    FROM stock_method_daily_fact AS f
+                    WHERE method='weinstein' AND as_of_date <= ?
+                      AND json_extract(
+                          f.evidence_json,
+                          '$.profile.effective_week_end'
+                      ) = f.as_of_date
+                    ORDER BY as_of_date DESC, symbol ASC
+                    LIMIT 1
+                    """,
+                    (end_date,),
+                ).fetchone()
+                if representative is None:
+                    return []
+                representative_symbol = str(representative[0])
+                formal_dates = [
+                    str(row[0])
+                    for row in connection.execute(
+                        """
+                        SELECT as_of_date
+                        FROM stock_method_daily_fact AS f
+                        WHERE method='weinstein' AND symbol=? AND as_of_date <= ?
+                          AND json_extract(
+                              f.evidence_json,
+                              '$.profile.effective_week_end'
+                          ) = f.as_of_date
+                        ORDER BY as_of_date DESC
+                        LIMIT ?
+                        """,
+                        (representative_symbol, end_date, limit),
+                    ).fetchall()
+                ]
+                if not formal_dates:
+                    return []
+                placeholders = ",".join("?" for _ in formal_dates)
+                rows = connection.execute(
+                    f"""
+                    SELECT as_of_date,
+                           SUM(result='PASS') AS pass_count,
+                           SUM(result IN ('PASS','FAIL')) AS evaluable_count,
+                           COUNT(*) AS method_total
+                    FROM stock_method_daily_fact
+                    WHERE method='weinstein'
+                      AND as_of_date IN ({placeholders})
+                    GROUP BY as_of_date
+                    ORDER BY as_of_date DESC
+                    """,
+                    formal_dates,
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT as_of_date,
+                           SUM(result='PASS') AS pass_count,
+                           SUM(result IN ('PASS','FAIL')) AS evaluable_count,
+                           COUNT(*) AS method_total
+                    FROM stock_method_daily_fact
+                    WHERE method=? AND as_of_date <= ?
+                    GROUP BY as_of_date
+                    ORDER BY as_of_date DESC
+                    LIMIT ?
+                    """,
+                    (method, end_date, limit),
+                ).fetchall()
+                representative = connection.execute(
+                    """
+                    SELECT symbol
+                    FROM stock_method_daily_fact
+                    WHERE method=? AND as_of_date <= ?
+                    ORDER BY as_of_date DESC, symbol ASC
+                    LIMIT 1
+                    """,
+                    (method, end_date),
+                ).fetchone()
+                if representative is not None:
+                    representative_symbol = str(representative[0])
+            dates = [str(row["as_of_date"]) for row in rows]
+            metadata: dict[str, tuple[str, str]] = {}
+            if dates:
+                placeholders = ",".join("?" for _ in dates)
+                if representative_symbol:
+                    fact_metadata_rows = connection.execute(
+                        f"""
+                        SELECT as_of_date, policy_version, origin
+                        FROM stock_method_daily_fact
+                        WHERE symbol=? AND method=?
+                          AND as_of_date IN ({placeholders})
+                        """,
+                        (representative_symbol, method, *dates),
+                    ).fetchall()
+                    for row in fact_metadata_rows:
+                        metadata[str(row["as_of_date"])] = (
+                            str(row["policy_version"] or ""),
+                            str(row["origin"] or ""),
+                        )
+                policy_column = (
+                    "weinstein_policy_version"
+                    if method == "weinstein"
+                    else "minervini_policy_version"
+                )
+                receipt_rows = connection.execute(
+                    f"""
+                    SELECT as_of_date, origin, {policy_column}, created_at
+                    FROM watchlist_run_receipt
+                    WHERE status='SUCCESS' AND as_of_date IN ({placeholders})
+                    ORDER BY created_at
+                    """,
+                    dates,
+                ).fetchall()
+                for row in receipt_rows:
+                    metadata[str(row["as_of_date"])] = (
+                        str(row[policy_column] or ""),
+                        str(row["origin"] or ""),
+                    )
+        ordered_rows = list(reversed(rows))
+        latest_policy = ""
+        for row in reversed(ordered_rows):
+            latest_policy = metadata.get(str(row["as_of_date"]), ("", ""))[0]
+            if latest_policy:
+                break
+        result: list[dict[str, Any]] = []
+        for row in ordered_rows:
+            policy_version, origin = metadata.get(
+                str(row["as_of_date"]), ("", "")
+            )
+            if latest_policy and policy_version != latest_policy:
+                continue
+            passed = int(row["pass_count"] or 0)
+            evaluable = int(row["evaluable_count"] or 0)
+            result.append(
+                {
+                    "as_of_date": str(row["as_of_date"]),
+                    "pass_count": passed,
+                    "evaluable_count": evaluable,
+                    "method_total": int(row["method_total"] or 0),
+                    "pass_rate": (
+                        round(passed * 100 / evaluable, 2) if evaluable else None
+                    ),
+                    "policy_version": policy_version,
+                    "origin": origin,
+                }
+            )
+        return result
+
     def stock_method_chart_events(
         self,
         symbol: str,

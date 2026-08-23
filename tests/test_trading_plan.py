@@ -135,7 +135,7 @@ def test_only_site_owner_can_share_plan_and_viewers_see_sanitized_page(
     assert 'data-plan-share-statement' in share_dialog.text
     assert 'data-plan-share-count>0 / 300' in share_dialog.text
     assert 'data-plan-share-submit disabled' in share_dialog.text
-    assert 'app.css?v=20260823-plan-share-v51' in share_dialog.text
+    assert 'app.css?v=20260823-weekly-risk-context-v53' in share_dialog.text
 
     assert (
         viewer.post(

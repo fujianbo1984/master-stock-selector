@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -65,6 +66,71 @@ def test_repository_returns_independent_daily_breadth_rates(tmp_path):
     assert rows[0]["minervini_pass_rate"] == 100.0
     assert rows[1]["weinstein_pass_rate"] == 100.0
     assert rows[1]["minervini_pass_rate"] == 50.0
+
+
+def test_repository_weinstein_breadth_uses_only_formal_completed_weeks(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    repository.initialize()
+    week_ends = (
+        "2026-06-05",
+        "2026-06-12",
+        "2026-06-19",
+        "2026-06-26",
+        "2026-07-03",
+    )
+    rows = []
+    for index, week_end in enumerate(week_ends):
+        for symbol, result in (
+            ("000001.SZ", "PASS"),
+            ("000002.SZ", "PASS" if index >= 3 else "FAIL"),
+        ):
+            evidence = json.dumps(
+                {"profile": {"effective_week_end": week_end}},
+                ensure_ascii=False,
+            )
+            rows.append(
+                (
+                    week_end,
+                    symbol,
+                    "weinstein",
+                    result,
+                    WEINSTEIN_POLICY_VERSION,
+                    evidence,
+                    "formal-week",
+                    "OBSERVED",
+                )
+            )
+    rows.append(
+        (
+            "2026-07-06",
+            "000001.SZ",
+            "weinstein",
+            "FAIL",
+            WEINSTEIN_POLICY_VERSION,
+            json.dumps({"profile": {"effective_week_end": "2026-07-03"}}),
+            "daily-repeat",
+            "OBSERVED",
+        )
+    )
+    with sqlite3.connect(repository.path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date,symbol,method,result,policy_version,evidence_json,
+                source_digest,origin
+            ) VALUES (?,?,?,?,?,?,?,?)
+            """,
+            rows,
+        )
+
+    history = repository.weinstein_weekly_breadth_history(
+        "2026-07-06", limit=20
+    )
+
+    assert [row["as_of_date"] for row in history] == list(week_ends)
+    assert history[0]["pass_rate"] == 50.0
+    assert history[-1]["pass_rate"] == 100.0
+    assert history[-1]["pass_count"] == 2
 
 
 def test_repository_derives_enter_continue_exit_and_reentry(tmp_path):

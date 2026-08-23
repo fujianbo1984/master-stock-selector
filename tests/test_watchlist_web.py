@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 from typing import Any
 
 import pytest
@@ -16,8 +17,13 @@ from master_stock_selector.watchlist.repository import WatchlistRepository
 from master_stock_selector.web.app import PROJECT_ROOT, _resolve_database_path
 from master_stock_selector.web.app import create_app as _production_create_app
 from master_stock_selector.web.routers.watchlist import (
+    _breadth_method_summary,
     _chart_moving_averages,
     _industry_navigation,
+    _market_price_summary,
+    _market_risk_context,
+    _relative_strength_series,
+    _relative_strength_summary,
     _web_exit_reason,
 )
 from master_stock_selector.web.users import SESSION_COOKIE, UserRepository
@@ -553,6 +559,40 @@ def _seed_chart_market(path) -> None:
         )
 
 
+def _seed_style_index_market(path) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE market_index_daily_bars (
+                market TEXT NOT NULL, index_symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
+                open REAL, high REAL, low REAL, close REAL, volume REAL,
+                PRIMARY KEY (market, index_symbol, trade_date)
+            )
+            """
+        )
+        start = date(2026, 5, 23)
+        rows = []
+        for offset in range(70):
+            trade_date = (start + timedelta(days=offset)).isoformat()
+            closes = {
+                "000300.SH": 100.0 + offset,
+                "000852.SH": 80.0 + offset * 1.4,
+                "399006.SZ": 70.0 + offset * 0.55,
+                "000688.SH": 50.0 + offset * 0.9,
+                "000985.CSI": 120.0 + offset,
+            }
+            rows.extend(
+                (
+                    "ashare", symbol, trade_date, close, close, close, close, 1000.0
+                )
+                for symbol, close in closes.items()
+            )
+        connection.executemany(
+            "INSERT INTO market_index_daily_bars VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+
+
 def _seed_chart_method_events(path) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute(
@@ -1063,10 +1103,10 @@ def test_logged_in_user_can_open_experimental_market_breadth_page(tmp_path):
     assert "登录用户·实验性功能" in response.text
     assert "对照指数" in response.text
     assert "中证全指·20日" in response.text
-    assert "Weinstein 通过率" in response.text
-    assert "Minervini 通过率" in response.text
-    assert "同图叠加" in response.text
-    assert "左轴为通过率，右轴为指数归一化路径" in response.text
+    assert "Weinstein·完整周广度" in response.text
+    assert "Minervini·日线广度" in response.text
+    assert "价格路径与日 / 周趋势广度" in response.text
+    assert "Weinstein 只绘制正式完整周点" in response.text
     assert "中证全指" in response.text
     assert "上证综指" in response.text
     assert 'data-overlay-chart' in response.text
@@ -1074,10 +1114,154 @@ def test_logged_in_user_can_open_experimental_market_breadth_page(tmp_path):
     assert 'data-rate-chart' not in response.text
     assert 'onchange="this.form.requestSubmit()"' in response.text
     assert '>切换</button>' not in response.text
-    assert "两种方法独立展示，不合成总分" in response.text
-    assert 'id="breadth-history-data"' in response.text
+    assert "不合成市场总分" in response.text
+    assert 'id="weinstein-breadth-data"' in response.text
+    assert 'id="minervini-breadth-data"' in response.text
     assert "breadth-chart.js" in response.text
     assert 'aria-current="page" href="/a/breadth?date=2026-07-31"' in response.text
+
+
+def test_market_risk_context_combines_weekly_daily_and_price_without_score():
+    def history(length: int, *, start: float, step: float, prefix: str):
+        return [
+            {
+                "as_of_date": f"{prefix}-{index + 1:02d}",
+                "pass_count": 10 + index,
+                "evaluable_count": 100,
+                "pass_rate": start + index * step,
+                "policy_version": "policy-v1",
+                "origin": "OBSERVED",
+            }
+            for index in range(length)
+        ]
+
+    summaries = {
+        "weinstein": _breadth_method_summary(
+            history(5, start=10.0, step=1.0, prefix="2026-W"),
+            method="weinstein",
+            period=4,
+            period_label="4周",
+        ),
+        "minervini": _breadth_method_summary(
+            history(21, start=8.0, step=0.1, prefix="2026-D"),
+            method="minervini",
+            period=20,
+            period_label="20日",
+        ),
+    }
+    prices = [
+        {"trade_date": f"2026-P-{index + 1:02d}", "close": 1000.0 + index}
+        for index in range(21)
+    ]
+    price_summary = _market_price_summary(prices)
+
+    context = _market_risk_context(summaries, price_summary)
+
+    assert summaries["weinstein"]["delta"] == 4.0
+    assert summaries["weinstein"]["direction_label"] == "4周扩张"
+    assert summaries["minervini"]["delta"] == 2.0
+    assert price_summary["direction"] == "UP"
+    assert context["state"] == "PARTICIPATION_IMPROVING_CONFIRMED"
+    assert context["label"] == "参与面改善并获价格确认"
+    assert context["risk_tendency"] == "风险偏好改善倾向"
+
+
+def test_market_risk_context_requires_full_native_frequency_windows():
+    short_weekly = [
+        {
+            "as_of_date": "2026-07-31",
+            "pass_count": 1,
+            "evaluable_count": 2,
+            "pass_rate": 50.0,
+            "policy_version": "policy-v1",
+            "origin": "RECONSTRUCTED",
+        }
+    ]
+    summary = _breadth_method_summary(
+        short_weekly,
+        method="weinstein",
+        period=4,
+        period_label="4周",
+    )
+    price = _market_price_summary(
+        [{"trade_date": "2026-07-31", "close": 1000.0}]
+    )
+    context = _market_risk_context(
+        {
+            "weinstein": summary,
+            "minervini": {**summary, "method": "minervini"},
+        },
+        price,
+    )
+
+    assert summary["delta"] is None
+    assert summary["direction"] == "UNKNOWN"
+    assert price["return_20d_pct"] is None
+    assert context["state"] == "DATA_INSUFFICIENT"
+    assert context["reconstructed"] is True
+
+
+def test_relative_strength_aligns_dates_and_reports_20d_and_60d_windows():
+    left = [
+        {"trade_date": "2026-01-01", "close": 100.0},
+        {"trade_date": "2026-01-02", "close": 200.0},
+        {"trade_date": "2026-01-03", "close": 120.0},
+    ]
+    right = [
+        {"trade_date": "2026-01-01", "close": 50.0},
+        {"trade_date": "2026-01-03", "close": 50.0},
+    ]
+
+    aligned = _relative_strength_series(left, right)
+
+    assert aligned == [
+        {"trade_date": "2026-01-01", "value": 1000.0},
+        {"trade_date": "2026-01-03", "value": 1200.0},
+    ]
+    synthetic = [
+        {"trade_date": f"2026-{index + 1:03d}", "value": 1000.0 + index}
+        for index in range(61)
+    ]
+    summary = _relative_strength_summary(synthetic)
+    assert summary["return_20d_pct"] == 1.92
+    assert summary["return_60d_pct"] == 6.0
+    assert summary["state"] == "OUTPERFORMING"
+    assert summary["state_label"] == "短中期相对占优"
+
+
+def test_market_breadth_shows_three_independent_style_relative_pairs(tmp_path):
+    market_path = tmp_path / "market.sqlite3"
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_style_index_market(market_path)
+    _seed_watchlist(watchlist_path)
+    client = _authenticated_client(
+        create_app(
+            market_database=market_path,
+            watchlist_database=watchlist_path,
+            secure_cookies=False,
+        )
+    )
+
+    response = client.get("/a/breadth?date=2026-07-31")
+    switched = client.get(
+        "/a/breadth?date=2026-07-31&benchmark=000300.SH"
+    )
+
+    assert response.status_code == 200
+    assert "风格相对强弱" in response.text
+    assert "小盘 / 大盘" in response.text
+    assert "创业成长 / 大盘" in response.text
+    assert "科创成长 / 大盘" in response.text
+    assert "20日" in response.text
+    assert "60日" in response.text
+    assert "共同数据截止 2026-07-31" in response.text
+    assert 'id="style-relative-data"' in response.text
+    assert "breadth-style-chart.js?v=20260823-style-relative-v1" in response.text
+    assert "只描述风格，不改变个股入选" in response.text
+    assert "不合成市场总分" in response.text
+    assert 'value="000300.SH" selected' in switched.text
+    assert "中证全指·20日" in switched.text
+    assert "+11.83%" in switched.text
 
 
 def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
@@ -1694,12 +1878,19 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260823-method-workbench-v8" in page.text
+    assert "stock-chart.js?v=20260823-text-annotations-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert 'data-chart-ohlcv' in page.text
     assert 'data-chart-state-overlay' in page.text
     assert 'data-chart-retry hidden' in page.text
+    assert 'data-draw-tool="trendline" aria-label="趋势线"' in page.text
+    assert 'data-draw-tool="horizontal" aria-label="水平线"' in page.text
+    assert 'data-draw-tool="text" aria-label="文字标记"' in page.text
+    assert "lucide-trending-up.svg" in page.text
+    assert "lucide-minus.svg" in page.text
+    assert "lucide-type.svg" in page.text
+    assert "data-drawing-text-editor hidden" in page.text
     assert "当日观察池" in page.text
     assert "当日涨跌幅" in page.text
     assert 'data-kc-source' in page.text
@@ -1745,6 +1936,8 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'const periodUnit = interval === "week" ? "周" : "日";' in controller
     assert "setChartState(" in controller
     assert "compactVolume" in controller
+    assert "renderTextDrawings();" in controller
+    assert 'interval_scope: interval' in controller
     assert chart.status_code == 200
     payload = chart.json()
     assert payload["status"] == "OK"
@@ -1819,6 +2012,40 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
         "?date=2026-06-30&price_scale_id=qfq-scale-v1"
     ).json()["drawings"]
     assert drawings[0]["anchors"][1]["logical_from_end"] == 5.5
+    text_saved = client.post(
+        "/api/me/stocks/000001.SZ/chart/drawings",
+        headers={"X-CSRF-Token": _csrf(client)},
+        json={
+            "drawing_id": "text-1",
+            "price_scale_id": "qfq-scale-v1",
+            "tool": "text",
+            "anchors": [{"date": "2026-06-10", "price": 11.5}],
+            "content_text": "突破后首次缩量回踩",
+            "interval_scope": "day",
+        },
+    )
+    assert text_saved.status_code == 200
+    assert text_saved.json()["content_text"] == "突破后首次缩量回踩"
+    day_drawings = client.get(
+        "/api/me/stocks/000001.SZ/overlay"
+        "?date=2026-06-30&price_scale_id=qfq-scale-v1&interval=day"
+    ).json()["drawings"]
+    week_drawings = client.get(
+        "/api/me/stocks/000001.SZ/overlay"
+        "?date=2026-06-30&price_scale_id=qfq-scale-v1&interval=week"
+    ).json()["drawings"]
+    assert {item["drawing_id"] for item in day_drawings} == {"line-1", "text-1"}
+    assert {item["drawing_id"] for item in week_drawings} == {"line-1"}
+    invalid_text = client.post(
+        "/api/me/stocks/000001.SZ/chart/drawings",
+        headers={"X-CSRF-Token": _csrf(client)},
+        json={
+            "price_scale_id": "qfq-scale-v1", "tool": "text",
+            "anchors": [{"date": "2026-06-10", "price": 11.5}],
+            "content_text": "", "interval_scope": "day",
+        },
+    )
+    assert invalid_text.status_code == 400
     deleted = client.delete(
         "/api/me/stocks/000001.SZ/chart/drawings/line-1?price_scale_id=qfq-scale-v1",
         headers={"X-CSRF-Token": _csrf(client)},

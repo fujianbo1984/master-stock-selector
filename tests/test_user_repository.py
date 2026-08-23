@@ -4,6 +4,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -102,11 +103,11 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
     assert user_id
 
 
-def test_frozen_full_v4_schema_migrates_to_v6_without_data_loss(tmp_path: Path) -> None:
+def test_frozen_full_v4_schema_migrates_to_v8_without_data_loss(tmp_path: Path) -> None:
     path = tmp_path / "users-v4.sqlite3"
     connection = sqlite3.connect(path)
     connection.executescript(
@@ -193,6 +194,132 @@ def test_frozen_full_v4_schema_migrates_to_v6_without_data_loss(tmp_path: Path) 
         }
         assert "idx_user_plan_share_plan_status" in share_indexes
         assert "idx_user_plan_share_active" in share_indexes
+        access_indexes = {
+            str(row[1])
+            for row in migrated_connection.execute("PRAGMA index_list(user_access_log)")
+        }
+        assert "idx_user_access_occurred" in access_indexes
+        assert "idx_user_access_user_occurred" not in access_indexes
+        assert "idx_user_access_path_occurred" not in access_indexes
+        assert migrated_connection.execute(
+            "SELECT COUNT(*) FROM user_access_daily_summary"
+        ).fetchone()[0] == 0
+        drawing = migrated_connection.execute(
+            "SELECT tool, content_text, interval_scope FROM user_chart_drawing WHERE drawing_id='d1'"
+        ).fetchone()
+        assert tuple(drawing) == ("horizontal", "", "both")
+
+
+def test_access_log_maintenance_rolls_up_expired_days_atomically_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    with repository.connect() as connection:
+        connection.executemany(
+            """INSERT INTO user_access_log(
+                access_id, occurred_at, client_ip, country_code, region_name,
+                city_name, location_source, method, path, status_code
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    "old-1", "2026-05-01 01:00:00", "1.1.1.1", "CN", "北京市",
+                    "北京市", "TEST", "GET", "/stock/000001.SZ", 200,
+                ),
+                (
+                    "old-2", "2026-05-01 02:00:00", "2.2.2.2", "CN", "北京市",
+                    "北京市", "TEST", "GET", "/stock/000002.SZ", 200,
+                ),
+                (
+                    "old-3", "2026-05-01 03:00:00", "1.1.1.1", "US", "",
+                    "", "TEST", "POST", "/api/v1/private/value", 404,
+                ),
+                (
+                    "keep-1", "2026-05-25 01:00:00", "3.3.3.3", "CN", "上海市",
+                    "上海市", "TEST", "GET", "/a/daily", 200,
+                ),
+            ],
+        )
+
+    preview = repository.access_log_maintenance_status(
+        retention_days=90, as_of=date(2026, 8, 23)
+    )
+    assert preview["eligible_rows"] == 3
+    assert preview["eligible_dates"] == 1
+    with repository.connect(read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 4
+
+    result = repository.maintain_access_log(
+        retention_days=90, as_of=date(2026, 8, 23)
+    )
+    assert result["processed_dates"] == ["2026-05-01"]
+    assert result["rows_deleted"] == 3
+    assert result["summary_rows"] == 2
+    assert result["quick_check"] == "ok"
+    with repository.connect(read_only=True) as connection:
+        assert connection.execute("SELECT access_id FROM user_access_log").fetchone()[0] == "keep-1"
+        rows = connection.execute(
+            """SELECT country_code, region_name, path_group, method, status_class,
+                      request_count, unique_ip_count
+               FROM user_access_daily_summary ORDER BY country_code"""
+        ).fetchall()
+        assert [tuple(row) for row in rows] == [
+            ("CN", "北京市", "/stock/*", "GET", 200, 2, 2),
+            ("US", "", "/api/v1/*", "POST", 400, 1, 1),
+        ]
+        summary_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(user_access_daily_summary)")
+        }
+        assert {"client_ip", "user_id", "city_name"}.isdisjoint(summary_columns)
+
+    repeated = repository.maintain_access_log(
+        retention_days=90, as_of=date(2026, 8, 23)
+    )
+    assert repeated["processed_dates"] == []
+    assert repeated["rows_deleted"] == 0
+    with repository.connect(read_only=True) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM user_access_daily_summary"
+        ).fetchone()[0] == 2
+
+
+def test_access_log_maintenance_cli_is_dry_run_unless_apply_is_explicit(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "users.sqlite3"
+    repository = UserRepository(path)
+    repository.initialize()
+    with repository.connect() as connection:
+        connection.execute(
+            """INSERT INTO user_access_log(
+                access_id, occurred_at, client_ip, location_source, method, path, status_code
+            ) VALUES ('old', '2026-01-01 00:00:00', '1.1.1.1', 'TEST', 'GET', '/', 200)"""
+        )
+    base_command = [
+        sys.executable,
+        "-m",
+        "master_stock_selector.web.users_cli",
+        "--database",
+        str(path),
+        "access-log-maintain",
+        "--retention-days",
+        "90",
+        "--as-of",
+        "2026-08-23",
+    ]
+
+    preview = subprocess.run(base_command, check=True, capture_output=True, text=True)
+    assert json.loads(preview.stdout)["status"] == "dry-run"
+    with repository.connect(read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 1
+
+    applied = subprocess.run(
+        [*base_command, "--apply"], check=True, capture_output=True, text=True
+    )
+    assert json.loads(applied.stdout)["rows_deleted"] == 1
+    with repository.connect(read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
 
 
 def test_explicit_user_schema_migration_backs_up_and_preserves_rows(tmp_path):
@@ -385,6 +512,51 @@ def test_private_rows_are_scoped_by_user_id(tmp_path):
             fee=1.0,
             method="MANUAL",
             stop_price=9.0,
+        )
+
+
+def test_chart_text_drawings_are_validated_editable_and_scoped_by_interval(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+
+    saved = repository.save_chart_drawing(
+        user_id,
+        "text-1",
+        "000001.SZ",
+        "qfq-scale-v1",
+        "text",
+        [{"date": "2026-08-01", "price": 10.5}],
+        "  突破后首次缩量回踩  ",
+        "day",
+    )
+    assert saved["content_text"] == "突破后首次缩量回踩"
+    assert saved["interval_scope"] == "day"
+    assert repository.chart_drawings(user_id, "000001.SZ", "qfq-scale-v1", "week") == []
+    assert repository.chart_drawings(user_id, "000001.SZ", "qfq-scale-v1", "day")[0][
+        "content_text"
+    ] == "突破后首次缩量回踩"
+
+    edited = repository.save_chart_drawing(
+        user_id,
+        "text-1",
+        "000001.SZ",
+        "qfq-scale-v1",
+        "text",
+        [{"date": "2026-08-01", "price": 10.5}],
+        "前高转为支撑",
+        "day",
+    )
+    assert edited["content_text"] == "前高转为支撑"
+    with pytest.raises(ValueError, match="不能为空"):
+        repository.save_chart_drawing(
+            user_id, "empty", "000001.SZ", "qfq-scale-v1", "text",
+            [{"date": "2026-08-01", "price": 10.5}], "", "day",
+        )
+    with pytest.raises(ValueError, match="200"):
+        repository.save_chart_drawing(
+            user_id, "long", "000001.SZ", "qfq-scale-v1", "text",
+            [{"date": "2026-08-01", "price": 10.5}], "过" * 201, "day",
         )
 
 

@@ -70,6 +70,35 @@ BREADTH_BENCHMARKS = {
     "399006.SZ": "创业板指",
     "000688.SH": "科创50",
 }
+STYLE_RELATIVE_PAIRS = (
+    {
+        "key": "small_cap",
+        "label": "小盘 / 大盘",
+        "left_symbol": "000852.SH",
+        "left_name": "中证1000",
+        "right_symbol": "000300.SH",
+        "right_name": "沪深300",
+        "color": "#2457a7",
+    },
+    {
+        "key": "growth",
+        "label": "创业成长 / 大盘",
+        "left_symbol": "399006.SZ",
+        "left_name": "创业板指",
+        "right_symbol": "000300.SH",
+        "right_name": "沪深300",
+        "color": "#d28b18",
+    },
+    {
+        "key": "star",
+        "label": "科创成长 / 大盘",
+        "left_symbol": "000688.SH",
+        "left_name": "科创50",
+        "right_symbol": "000300.SH",
+        "right_name": "沪深300",
+        "color": "#7656a5",
+    },
+)
 MINERVINI_CHECKS = (
     "close_above_sma50",
     "close_above_sma150",
@@ -912,15 +941,36 @@ def build_watchlist_router(
         benchmark_symbol = (
             benchmark.upper() if benchmark.upper() in BREADTH_BENCHMARKS else "000985.CSI"
         )
-        history = repository.breadth_history(query_date, limit=260)
+        weinstein_history = repository.weinstein_weekly_breadth_history(
+            query_date, limit=52
+        )
+        minervini_history = repository.minervini_breadth_history(
+            query_date, limit=260
+        )
         benchmark_series = _normalized_index_series(
             market_reader.safe_index_bars(benchmark_symbol, query_date)[-260:]
         )
+        canonical_price_series = _normalized_index_series(
+            market_reader.safe_index_bars("000985.CSI", query_date)[-260:]
+        )
         method_summaries = {
-            method: _breadth_method_summary(history, method)
-            for method in ("weinstein", "minervini")
+            "weinstein": _breadth_method_summary(
+                weinstein_history,
+                method="weinstein",
+                period=4,
+                period_label="4周",
+            ),
+            "minervini": _breadth_method_summary(
+                minervini_history,
+                method="minervini",
+                period=20,
+                period_label="20日",
+            ),
         }
-        regime = _breadth_regime(method_summaries)
+        canonical_price_summary = _market_price_summary(canonical_price_series)
+        risk_context = _market_risk_context(
+            method_summaries, canonical_price_summary
+        )
         benchmark_summary = _proxy_summary(benchmark_series)
         benchmark_summary.update(
             {
@@ -928,6 +978,31 @@ def build_watchlist_router(
                 "name": BREADTH_BENCHMARKS[benchmark_symbol],
             }
         )
+        style_symbols = {
+            str(item["left_symbol"])
+            for item in STYLE_RELATIVE_PAIRS
+        } | {
+            str(item["right_symbol"])
+            for item in STYLE_RELATIVE_PAIRS
+        }
+        style_bars = {
+            symbol: market_reader.safe_index_bars(symbol, query_date)
+            for symbol in style_symbols
+        }
+        style_relative = []
+        for pair in STYLE_RELATIVE_PAIRS:
+            series = _relative_strength_series(
+                style_bars[str(pair["left_symbol"])],
+                style_bars[str(pair["right_symbol"])],
+                limit=260,
+            )
+            style_relative.append(
+                {
+                    **pair,
+                    "series": series,
+                    "summary": _relative_strength_summary(series),
+                }
+            )
         return render(
             request,
             "ashare/market_breadth.html",
@@ -935,12 +1010,21 @@ def build_watchlist_router(
                 "active": "市场广度",
                 "query_date": query_date,
                 "latest_date": repository.latest_fact_date(),
-                "history": history,
+                "weinstein_history": weinstein_history,
+                "minervini_history": minervini_history,
+                "breadth_history_available": bool(
+                    weinstein_history or minervini_history
+                ),
                 "proxy": benchmark_series,
                 "method_summaries": method_summaries,
-                "regime": regime,
+                "risk_context": risk_context,
+                "canonical_price_summary": canonical_price_summary,
                 "proxy_summary": benchmark_summary,
                 "benchmarks": BREADTH_BENCHMARKS,
+                "style_relative": style_relative,
+                "style_relative_available": any(
+                    item["series"] for item in style_relative
+                ),
                 "indices": [
                     _decorate_index(row) for row in repository.index_facts(query_date)
                 ],
@@ -1521,7 +1605,9 @@ def build_watchlist_router(
                     _week_key(str(execution["traded_on"])), str(execution["traded_on"])
                 )
         return {
-            "drawings": users.chart_drawings(user.user_id, symbol, price_scale_id),
+            "drawings": users.chart_drawings(
+                user.user_id, symbol, price_scale_id, interval
+            ),
             "trade_overlay": overlay,
         }
 
@@ -1538,6 +1624,8 @@ def build_watchlist_router(
                 str(values.get("price_scale_id") or ""),
                 str(values.get("tool") or ""),
                 values.get("anchors") or [],
+                values.get("content_text") or "",
+                values.get("interval_scope") or "both",
             )
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2689,13 +2777,12 @@ def _stock_navigation(
 
 def _breadth_method_summary(
     history: list[dict[str, Any]],
+    *,
     method: str,
+    period: int,
+    period_label: str,
 ) -> dict[str, Any]:
-    points = [
-        row
-        for row in history
-        if row.get(f"{method}_pass_rate") is not None
-    ]
+    points = [row for row in history if row.get("pass_rate") is not None]
     if not points:
         return {
             "method": method,
@@ -2703,73 +2790,154 @@ def _breadth_method_summary(
             "pass_count": 0,
             "evaluable_count": 0,
             "pass_rate": None,
-            "delta_20d": None,
+            "delta": None,
+            "period_label": period_label,
             "direction": "UNKNOWN",
             "direction_label": "数据不足",
+            "policy_version": "",
+            "origin": "",
         }
     latest = points[-1]
-    baseline = points[-21] if len(points) >= 21 else points[0]
-    latest_rate = float(latest[f"{method}_pass_rate"])
-    baseline_rate = float(baseline[f"{method}_pass_rate"])
-    delta = round(latest_rate - baseline_rate, 2) if len(points) > 1 else None
+    baseline = points[-(period + 1)] if len(points) >= period + 1 else None
+    latest_rate = float(latest["pass_rate"])
+    baseline_rate = float(baseline["pass_rate"]) if baseline is not None else None
+    delta = (
+        round(latest_rate - baseline_rate, 2)
+        if baseline_rate is not None
+        else None
+    )
     if delta is None:
         direction = "UNKNOWN"
         direction_label = "数据不足"
     elif delta >= 1.0:
         direction = "EXPANDING"
-        direction_label = "20日扩张"
+        direction_label = f"{period_label}扩张"
     elif delta <= -1.0:
         direction = "CONTRACTING"
-        direction_label = "20日收缩"
+        direction_label = f"{period_label}收缩"
     else:
         direction = "FLAT"
-        direction_label = "20日持平"
+        direction_label = f"{period_label}持平"
     return {
         "method": method,
         "as_of_date": str(latest["as_of_date"]),
-        "pass_count": int(latest[f"{method}_pass"] or 0),
-        "evaluable_count": int(latest[f"{method}_evaluable"] or 0),
+        "pass_count": int(latest["pass_count"] or 0),
+        "evaluable_count": int(latest["evaluable_count"] or 0),
         "pass_rate": latest_rate,
-        "delta_20d": delta,
+        "delta": delta,
+        "period_label": period_label,
         "direction": direction,
         "direction_label": direction_label,
+        "policy_version": str(latest.get("policy_version") or ""),
+        "origin": str(latest.get("origin") or ""),
     }
 
 
-def _breadth_regime(summaries: dict[str, dict[str, Any]]) -> dict[str, str]:
+def _market_risk_context(
+    summaries: dict[str, dict[str, Any]],
+    price: dict[str, Any],
+) -> dict[str, Any]:
     weinstein = str(summaries["weinstein"].get("direction") or "UNKNOWN")
     minervini = str(summaries["minervini"].get("direction") or "UNKNOWN")
-    regimes = {
-        ("EXPANDING", "EXPANDING"): (
-            "同步扩张",
-            "长期上升阶段与强趋势股同时增多，市场参与面正在改善。",
-            "positive",
-        ),
-        ("CONTRACTING", "CONTRACTING"): (
-            "同步收缩",
-            "长期阶段广度与强趋势质量同时回落，宜降低对普涨环境的预期。",
-            "negative",
-        ),
-        ("EXPANDING", "CONTRACTING"): (
-            "广度扩张、强度转弱",
-            "Stage 2 股票增多，但通过严格趋势模板的股票减少，需要留意趋势质量。",
-            "mixed",
-        ),
-        ("CONTRACTING", "EXPANDING"): (
-            "广度收缩、强者集中",
-            "整体上升阶段股票减少，但强趋势核心增多，可能是结构性行情。",
-            "mixed",
-        ),
-    }
-    label, explanation, tone = regimes.get(
-        (weinstein, minervini),
-        (
-            "分化待确认",
-            "至少一种方法的20日变化不足1个百分点，暂不解读为明确市场状态。",
+    price_direction = str(price.get("direction") or "UNKNOWN")
+    if "UNKNOWN" in {weinstein, minervini}:
+        state = (
+            "DATA_INSUFFICIENT",
+            "数据不足",
+            "风险偏好未知",
+            "完整周或日线广度历史不足，暂不判断市场风险背景。",
             "neutral",
-        ),
+        )
+    elif weinstein == "EXPANDING" and minervini == "EXPANDING":
+        if price_direction == "UP":
+            state = (
+                "PARTICIPATION_IMPROVING_CONFIRMED",
+                "参与面改善并获价格确认",
+                "风险偏好改善倾向",
+                "完整周 Stage 2 广度与近期强趋势质量同时扩张，中证全指20日上涨。",
+                "positive",
+            )
+        elif price_direction == "DOWN":
+            state = (
+                "INTERNAL_REPAIR",
+                "内部修复",
+                "风险偏好修复待确认",
+                "两种趋势广度正在扩张，但中证全指20日价格尚未确认。",
+                "mixed",
+            )
+        else:
+            state = (
+                "PARTICIPATION_IMPROVING_UNCONFIRMED",
+                "参与面改善，价格待确认",
+                "风险偏好改善倾向",
+                "两种广度同时扩张，但中证全指20日价格数据不足或持平。",
+                "neutral",
+            )
+    elif weinstein == "CONTRACTING" and minervini == "CONTRACTING":
+        if price_direction == "DOWN":
+            state = (
+                "PARTICIPATION_WEAKENING_CONFIRMED",
+                "参与面转弱并获价格确认",
+                "风险偏好减弱倾向",
+                "完整周 Stage 2 广度与近期强趋势质量同时收缩，中证全指20日下跌。",
+                "negative",
+            )
+        elif price_direction == "UP":
+            state = (
+                "PRICE_STRONG_BREADTH_CONTRACTING",
+                "价格强、参与面收缩",
+                "风险偏好分化",
+                "中证全指上涨，但完整周与日线广度同时收缩，上涨可能较为集中。",
+                "mixed",
+            )
+        else:
+            state = (
+                "PARTICIPATION_WEAKENING_UNCONFIRMED",
+                "参与面转弱，价格待确认",
+                "风险偏好减弱倾向",
+                "两种广度同时收缩，但中证全指20日价格数据不足或持平。",
+                "neutral",
+            )
+    elif weinstein == "EXPANDING" and minervini == "CONTRACTING":
+        state = (
+            "MEDIUM_EXPANDING_RECENT_COOLING",
+            "中期扩张、近期降温",
+            "风险偏好分化",
+            "完整周 Stage 2 基础仍在扩展，但近期严格趋势模板通过率收缩。",
+            "mixed",
+        )
+    elif weinstein == "CONTRACTING" and minervini == "EXPANDING":
+        state = (
+            "RECENT_REPAIR_MEDIUM_WEAK",
+            "近期修复、中期仍弱",
+            "风险偏好分化",
+            "近期强趋势股票增加，但完整周 Stage 2 广度仍在收缩。",
+            "mixed",
+        )
+    else:
+        state = (
+            "DIRECTION_PENDING",
+            "方向待确认",
+            "风险偏好未确认",
+            "至少一种方法的约一个月变化不足1个百分点，暂不解读为明确状态。",
+            "neutral",
+        )
+    code, label, tendency, explanation, tone = state
+    reconstructed = any(
+        str(summaries[key].get("origin") or "") == "RECONSTRUCTED"
+        for key in ("weinstein", "minervini")
     )
-    return {"label": label, "explanation": explanation, "tone": tone}
+    return {
+        "state": code,
+        "label": label,
+        "risk_tendency": tendency,
+        "explanation": explanation,
+        "tone": tone,
+        "weinstein_as_of": str(summaries["weinstein"].get("as_of_date") or ""),
+        "minervini_as_of": str(summaries["minervini"].get("as_of_date") or ""),
+        "price_as_of": str(price.get("as_of_date") or ""),
+        "reconstructed": reconstructed,
+    }
 
 
 def _chart_moving_averages(
@@ -2830,4 +2998,131 @@ def _proxy_summary(proxy: list[dict[str, Any]]) -> dict[str, Any]:
             if baseline_close > 0 and len(proxy) > 1
             else None
         ),
+    }
+
+
+def _market_price_summary(series: list[dict[str, Any]]) -> dict[str, Any]:
+    if not series:
+        return {
+            "as_of_date": "",
+            "return_20d_pct": None,
+            "direction": "UNKNOWN",
+            "direction_label": "数据不足",
+        }
+    latest = series[-1]
+    if len(series) < 21:
+        return {
+            "as_of_date": str(latest.get("trade_date") or ""),
+            "return_20d_pct": None,
+            "direction": "UNKNOWN",
+            "direction_label": "数据不足",
+        }
+    baseline = float(series[-21].get("close") or 0)
+    latest_close = float(latest.get("close") or 0)
+    if baseline <= 0:
+        change = None
+    else:
+        change = round((latest_close / baseline - 1) * 100, 2)
+    if change is None:
+        direction, label = "UNKNOWN", "数据不足"
+    elif change > 0:
+        direction, label = "UP", "20日上涨"
+    elif change < 0:
+        direction, label = "DOWN", "20日下跌"
+    else:
+        direction, label = "FLAT", "20日持平"
+    return {
+        "as_of_date": str(latest.get("trade_date") or ""),
+        "return_20d_pct": change,
+        "direction": direction,
+        "direction_label": label,
+    }
+
+
+def _relative_strength_series(
+    left_bars: list[dict[str, Any]],
+    right_bars: list[dict[str, Any]],
+    *,
+    limit: int = 260,
+) -> list[dict[str, Any]]:
+    """Return an aligned index ratio path normalized to 1000 at the window start."""
+
+    def valid_closes(bars: list[dict[str, Any]]) -> dict[str, float]:
+        values: dict[str, float] = {}
+        for row in bars:
+            trade_date = str(row.get("trade_date") or "")
+            try:
+                close = float(row.get("close") or 0)
+            except (TypeError, ValueError):
+                continue
+            if trade_date and close > 0:
+                values[trade_date] = close
+        return values
+
+    left = valid_closes(left_bars)
+    right = valid_closes(right_bars)
+    dates = sorted(set(left) & set(right))
+    if limit > 0:
+        dates = dates[-limit:]
+    if not dates:
+        return []
+    ratios = [(trade_date, left[trade_date] / right[trade_date]) for trade_date in dates]
+    baseline = ratios[0][1]
+    if baseline <= 0:
+        return []
+    return [
+        {
+            "trade_date": trade_date,
+            "value": round(ratio / baseline * 1000, 4),
+        }
+        for trade_date, ratio in ratios
+    ]
+
+
+def _relative_strength_summary(series: list[dict[str, Any]]) -> dict[str, Any]:
+    if not series:
+        return {
+            "as_of_date": "",
+            "return_20d_pct": None,
+            "return_60d_pct": None,
+            "state": "UNKNOWN",
+            "state_label": "数据不足",
+        }
+
+    def period_return(period: int) -> float | None:
+        if len(series) < period + 1:
+            return None
+        baseline = float(series[-(period + 1)].get("value") or 0)
+        latest = float(series[-1].get("value") or 0)
+        if baseline <= 0:
+            return None
+        return round((latest / baseline - 1) * 100, 2)
+
+    return_20d = period_return(20)
+    return_60d = period_return(60)
+    if return_20d is None:
+        state, label = "UNKNOWN", "数据不足"
+    elif return_60d is None:
+        if return_20d > 0:
+            state, label = "SHORT_OUTPERFORMING", "近20日相对占优"
+        elif return_20d < 0:
+            state, label = "SHORT_UNDERPERFORMING", "近20日相对落后"
+        else:
+            state, label = "FLAT", "近20日基本持平"
+    elif return_20d > 0 and return_60d > 0:
+        state, label = "OUTPERFORMING", "短中期相对占优"
+    elif return_20d < 0 and return_60d < 0:
+        state, label = "UNDERPERFORMING", "短中期相对落后"
+    elif return_20d > 0 and return_60d < 0:
+        state, label = "RECOVERING", "短期修复，中期仍弱"
+    elif return_20d < 0 and return_60d > 0:
+        state, label = "WEAKENING", "短期转弱，中期仍强"
+    else:
+        state, label = "FLAT", "相对基本持平"
+    return {
+        "as_of_date": str(series[-1].get("trade_date") or ""),
+        "return_20d_pct": return_20d,
+        "return_60d_pct": return_60d,
+        "state": state,
+        "state_label": label,
     }

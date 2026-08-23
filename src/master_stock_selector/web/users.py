@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, Any
@@ -42,7 +42,8 @@ PLAN_SETUP_BY_TRADE_SETUP = {
     "PULLBACK_SUPPORT": "B1",
     "COMPLEX_PULLBACK": "B2",
 }
-USER_SCHEMA_VERSION = 6
+USER_SCHEMA_VERSION = 8
+DEFAULT_ACCESS_LOG_RETENTION_DAYS = 90
 USER_REQUIRED_TABLES = frozenset(
     {
         "user_account",
@@ -54,6 +55,7 @@ USER_REQUIRED_TABLES = frozenset(
         "user_trade_execution",
         "user_chart_drawing",
         "user_access_log",
+        "user_access_daily_summary",
         "user_trading_plan",
         "user_trading_plan_version",
         "user_plan_grill_session",
@@ -65,8 +67,6 @@ USER_REQUIRED_INDEXES = frozenset(
     {
         "idx_user_trade_source_ref",
         "idx_user_access_occurred",
-        "idx_user_access_user_occurred",
-        "idx_user_access_path_occurred",
         "idx_user_plan_version_plan",
         "idx_user_plan_session_user_updated",
         "idx_user_plan_event_session_revision",
@@ -240,8 +240,11 @@ CREATE TABLE IF NOT EXISTS user_chart_drawing (
     user_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
     price_scale_id TEXT NOT NULL,
-    tool TEXT NOT NULL CHECK (tool IN ('trendline', 'horizontal')),
+    tool TEXT NOT NULL CHECK (tool IN ('trendline', 'horizontal', 'text')),
     anchors_json TEXT NOT NULL,
+    content_text TEXT NOT NULL DEFAULT '',
+    interval_scope TEXT NOT NULL DEFAULT 'both'
+        CHECK (interval_scope IN ('day', 'week', 'both')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
@@ -265,10 +268,20 @@ CREATE TABLE IF NOT EXISTS user_access_log (
 );
 CREATE INDEX IF NOT EXISTS idx_user_access_occurred
 ON user_access_log(occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_user_access_user_occurred
-ON user_access_log(user_id, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_user_access_path_occurred
-ON user_access_log(path, occurred_at DESC);
+CREATE TABLE IF NOT EXISTS user_access_daily_summary (
+    summary_date TEXT NOT NULL,
+    country_code TEXT NOT NULL DEFAULT '',
+    region_name TEXT NOT NULL DEFAULT '',
+    path_group TEXT NOT NULL,
+    method TEXT NOT NULL,
+    status_class INTEGER NOT NULL,
+    request_count INTEGER NOT NULL CHECK (request_count >= 0),
+    unique_ip_count INTEGER NOT NULL CHECK (unique_ip_count >= 0),
+    summarized_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (
+        summary_date, country_code, region_name, path_group, method, status_class
+    )
+);
 """
 
 
@@ -347,6 +360,8 @@ class UserRepository:
                     "user_trade_execution.evaluation_cycle_id",
                     "user_trade_execution.setup_code",
                     "user_trade_execution.initial_stop_price",
+                    "user_chart_drawing.content_text",
+                    "user_chart_drawing.interval_scope",
                     "user_plan_grill_session.published_version_id",
                     "user_plan_grill_session.head_version_id_at_start",
                 ],
@@ -369,6 +384,10 @@ class UserRepository:
                     str(row[1])
                     for row in connection.execute("PRAGMA table_info(user_plan_grill_session)")
                 }
+                drawing_columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(user_chart_drawing)")
+                }
                 indexes = {
                     str(row[0])
                     for row in connection.execute(
@@ -384,6 +403,11 @@ class UserRepository:
                     "WHERE type='table' AND name='user_trade_execution'"
                 ).fetchone()
                 trade_table_sql = str(trade_row[0] if trade_row is not None else "")
+                drawing_row = connection.execute(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name='user_chart_drawing'"
+                ).fetchone()
+                drawing_table_sql = str(drawing_row[0] if drawing_row is not None else "")
                 schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         except sqlite3.Error as exc:
             return {
@@ -410,11 +434,14 @@ class UserRepository:
             missing_columns.append("user_plan_grill_session.published_version_id")
         if "head_version_id_at_start" not in grill_columns:
             missing_columns.append("user_plan_grill_session.head_version_id_at_start")
+        for column in {"content_text", "interval_scope"} - drawing_columns:
+            missing_columns.append(f"user_chart_drawing.{column}")
         missing_indexes = sorted(USER_REQUIRED_INDEXES - indexes)
         legacy_observation_states = (
             "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql
         )
         legacy_trade_setups = bool(trade_table_sql) and "'FAILED_TEST'" not in trade_table_sql
+        legacy_chart_drawings = bool(drawing_table_sql) and "'text'" not in drawing_table_sql
         compatible = (
             quick_check == "ok"
             and not missing_tables
@@ -422,6 +449,7 @@ class UserRepository:
             and not missing_indexes
             and not legacy_observation_states
             and not legacy_trade_setups
+            and not legacy_chart_drawings
             and schema_version == USER_SCHEMA_VERSION
         )
         return {
@@ -435,6 +463,7 @@ class UserRepository:
             "missing_indexes": missing_indexes,
             "legacy_observation_states": legacy_observation_states,
             "legacy_trade_setups": legacy_trade_setups,
+            "legacy_chart_drawings": legacy_chart_drawings,
         }
 
     def require_schema(self) -> None:
@@ -469,6 +498,11 @@ class UserRepository:
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
             ).fetchone()
             review_table_sql = str(review_row[0] if review_row is not None else "")
+            drawing_row = connection.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type='table' AND name='user_chart_drawing'"
+            ).fetchone()
+            drawing_table_sql = str(drawing_row[0] if drawing_row is not None else "")
             migration_statements: list[str] = []
             if trade_table_exists and "source_ref" not in trade_columns:
                 migration_statements.append(
@@ -506,6 +540,38 @@ class UserRepository:
             if session_columns and "head_version_id_at_start" not in session_columns:
                 migration_statements.append(
                     "ALTER TABLE user_plan_grill_session ADD COLUMN head_version_id_at_start TEXT;"
+                )
+            if drawing_table_sql and "'text'" not in drawing_table_sql:
+                migration_statements.extend(
+                    [
+                        "DROP INDEX IF EXISTS idx_user_chart_symbol;",
+                        "ALTER TABLE user_chart_drawing RENAME TO user_chart_drawing_legacy;",
+                        """CREATE TABLE user_chart_drawing (
+                            drawing_id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            symbol TEXT NOT NULL,
+                            price_scale_id TEXT NOT NULL,
+                            tool TEXT NOT NULL CHECK (
+                                tool IN ('trendline', 'horizontal', 'text')
+                            ),
+                            anchors_json TEXT NOT NULL,
+                            content_text TEXT NOT NULL DEFAULT '',
+                            interval_scope TEXT NOT NULL DEFAULT 'both'
+                                CHECK (interval_scope IN ('day', 'week', 'both')),
+                            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id) REFERENCES user_account(user_id)
+                                ON DELETE CASCADE
+                        );""",
+                        """INSERT INTO user_chart_drawing(
+                            drawing_id, user_id, symbol, price_scale_id, tool,
+                            anchors_json, content_text, interval_scope, created_at, updated_at
+                        )
+                        SELECT drawing_id, user_id, symbol, price_scale_id, tool,
+                               anchors_json, '', 'both', created_at, updated_at
+                        FROM user_chart_drawing_legacy;""",
+                        "DROP TABLE user_chart_drawing_legacy;",
+                    ]
                 )
             if "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql:
                 migration_statements.extend(
@@ -609,6 +675,8 @@ class UserRepository:
                     USER_SCHEMA_SQL,
                     *migration_statements,
                     USER_SCHEMA_SQL,
+                    "DROP INDEX IF EXISTS idx_user_access_user_occurred;",
+                    "DROP INDEX IF EXISTS idx_user_access_path_occurred;",
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_trade_source_ref "
                     "ON user_trade_execution(user_id, source_ref) "
                     "WHERE source_ref IS NOT NULL AND source_ref <> '';",
@@ -751,6 +819,106 @@ class UserRepository:
                 ),
             )
         return access_id
+
+    def access_log_maintenance_status(
+        self,
+        *,
+        retention_days: int = DEFAULT_ACCESS_LOG_RETENTION_DAYS,
+        as_of: date | None = None,
+    ) -> dict[str, Any]:
+        """Preview raw access rows eligible for anonymous rollup and deletion."""
+        cutoff = _access_log_cutoff(retention_days, as_of)
+        with self.connect(read_only=True) as connection:
+            row = connection.execute(
+                """SELECT COUNT(*), COUNT(DISTINCT substr(occurred_at, 1, 10))
+                FROM user_access_log
+                WHERE occurred_at < ?""",
+                (cutoff,),
+            ).fetchone()
+        return {
+            "status": "dry-run",
+            "retention_days": retention_days,
+            "cutoff_date": cutoff,
+            "eligible_rows": int(row[0]),
+            "eligible_dates": int(row[1]),
+        }
+
+    def maintain_access_log(
+        self,
+        *,
+        retention_days: int = DEFAULT_ACCESS_LOG_RETENTION_DAYS,
+        as_of: date | None = None,
+    ) -> dict[str, Any]:
+        """Roll up and delete expired raw access rows, one UTC date per transaction."""
+        cutoff = _access_log_cutoff(retention_days, as_of)
+        rows_deleted = 0
+        summary_rows = 0
+        processed_dates: list[str] = []
+        with self.connect() as connection:
+            connection.execute("PRAGMA secure_delete=ON")
+            connection.create_function(
+                "access_path_group", 1, _access_path_group, deterministic=True
+            )
+            dates = [
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT DISTINCT substr(occurred_at, 1, 10)
+                    FROM user_access_log
+                    WHERE occurred_at < ?
+                    ORDER BY 1""",
+                    (cutoff,),
+                )
+            ]
+            for summary_date in dates:
+                next_date = (date.fromisoformat(summary_date) + timedelta(days=1)).isoformat()
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    connection.execute(
+                        "DELETE FROM user_access_daily_summary WHERE summary_date=?",
+                        (summary_date,),
+                    )
+                    connection.execute(
+                        """INSERT INTO user_access_daily_summary(
+                            summary_date, country_code, region_name, path_group,
+                            method, status_class, request_count, unique_ip_count,
+                            summarized_at
+                        )
+                        SELECT substr(occurred_at, 1, 10), country_code, region_name,
+                               access_path_group(path), method,
+                               CAST(status_code / 100 AS INTEGER) * 100,
+                               COUNT(*), COUNT(DISTINCT client_ip), CURRENT_TIMESTAMP
+                        FROM user_access_log
+                        WHERE occurred_at >= ? AND occurred_at < ?
+                        GROUP BY 1, 2, 3, 4, 5, 6""",
+                        (summary_date, next_date),
+                    )
+                    summary_rows += int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM user_access_daily_summary WHERE summary_date=?",
+                            (summary_date,),
+                        ).fetchone()[0]
+                    )
+                    cursor = connection.execute(
+                        "DELETE FROM user_access_log WHERE occurred_at >= ? AND occurred_at < ?",
+                        (summary_date, next_date),
+                    )
+                    rows_deleted += int(cursor.rowcount)
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+                processed_dates.append(summary_date)
+            connection.execute("PRAGMA optimize")
+            quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
+        return {
+            "status": "maintained",
+            "retention_days": retention_days,
+            "cutoff_date": cutoff,
+            "processed_dates": processed_dates,
+            "rows_deleted": rows_deleted,
+            "summary_rows": summary_rows,
+            "quick_check": quick_check,
+        }
 
     def set_user_status(self, username: str, status: str) -> None:
         normalized_status = status.upper()
@@ -1935,18 +2103,22 @@ class UserRepository:
         }
 
     def chart_drawings(
-        self, user_id: str, symbol: str, price_scale_id: str
+        self, user_id: str, symbol: str, price_scale_id: str, interval: str = "day"
     ) -> list[dict[str, Any]]:
+        if interval not in {"day", "week"}:
+            raise ValueError("unsupported chart interval")
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT drawing_id, tool, anchors_json, created_at, updated_at
+                SELECT drawing_id, tool, anchors_json, content_text, interval_scope,
+                       created_at, updated_at
                 FROM user_chart_drawing
                 WHERE user_id=? AND symbol=? AND price_scale_id=?
-                  AND tool IN ('trendline', 'horizontal')
+                  AND tool IN ('trendline', 'horizontal', 'text')
+                  AND interval_scope IN ('both', ?)
                 ORDER BY created_at, drawing_id
                 """,
-                (user_id, symbol.upper(), price_scale_id),
+                (user_id, symbol.upper(), price_scale_id, interval),
             ).fetchall()
         return [{**dict(row), "anchors": json.loads(str(row["anchors_json"]))} for row in rows]
 
@@ -1958,22 +2130,36 @@ class UserRepository:
         price_scale_id: str,
         tool: str,
         anchors: Sequence[Mapping[str, Any]],
+        content_text: str = "",
+        interval_scope: str = "both",
     ) -> dict[str, Any]:
-        normalized = _normalize_drawing(tool, price_scale_id, anchors)
+        normalized, normalized_content, normalized_interval = _normalize_drawing(
+            tool, price_scale_id, anchors, content_text, interval_scope
+        )
         with self.connect() as connection:
             existing = connection.execute(
-                "SELECT user_id FROM user_chart_drawing WHERE drawing_id=?",
+                """SELECT user_id, symbol, price_scale_id, tool
+                FROM user_chart_drawing WHERE drawing_id=?""",
                 (drawing_id,),
             ).fetchone()
             if existing is not None and str(existing["user_id"]) != user_id:
                 raise ValueError("画线记录不属于当前用户")
+            if existing is not None and (
+                str(existing["symbol"]) != symbol.upper()
+                or str(existing["price_scale_id"]) != price_scale_id
+                or str(existing["tool"]) != tool
+            ):
+                raise ValueError("画线记录与当前图表不匹配")
             connection.execute(
                 """
                 INSERT INTO user_chart_drawing(
-                    drawing_id, user_id, symbol, price_scale_id, tool, anchors_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    drawing_id, user_id, symbol, price_scale_id, tool, anchors_json,
+                    content_text, interval_scope
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(drawing_id) DO UPDATE SET
                     anchors_json=excluded.anchors_json,
+                    content_text=excluded.content_text,
+                    interval_scope=excluded.interval_scope,
                     updated_at=CURRENT_TIMESTAMP
                 """,
                 (
@@ -1983,9 +2169,17 @@ class UserRepository:
                     price_scale_id,
                     tool,
                     json.dumps(normalized, ensure_ascii=False, separators=(",", ":")),
+                    normalized_content,
+                    normalized_interval,
                 ),
             )
-        return {"drawing_id": drawing_id, "tool": tool, "anchors": normalized}
+        return {
+            "drawing_id": drawing_id,
+            "tool": tool,
+            "anchors": normalized,
+            "content_text": normalized_content,
+            "interval_scope": normalized_interval,
+        }
 
     def delete_chart_drawing(
         self, user_id: str, drawing_id: str, symbol: str, price_scale_id: str
@@ -2170,6 +2364,31 @@ def _normalize_username(username: str) -> str:
     return normalized
 
 
+def _access_log_cutoff(retention_days: int, as_of: date | None) -> str:
+    if retention_days < 1:
+        raise ValueError("访问日志保留天数必须大于 0")
+    effective_date = as_of or datetime.now(timezone.utc).date()
+    return (effective_date - timedelta(days=retention_days)).isoformat()
+
+
+def _access_path_group(path: str | None) -> str:
+    normalized = str(path or "")
+    if normalized in {"/login", "/logout"}:
+        return normalized
+    for root, group in (
+        ("/api/v1/trades", "/api/v1/trades"),
+        ("/api/v1/plans", "/api/v1/plans"),
+        ("/api/v1", "/api/v1/*"),
+        ("/account", "/account/*"),
+        ("/a", "/a/*"),
+        ("/stock", "/stock/*"),
+        ("/reading", "/reading/*"),
+    ):
+        if normalized == root or normalized.startswith(f"{root}/"):
+            return group
+    return "OTHER"
+
+
 def _validate_password(password: str) -> None:
     if len(password) < 10 or len(password) > 256:
         raise ValueError("密码长度必须为 10 至 256 个字符")
@@ -2239,14 +2458,30 @@ def _normalize_drawing(
     tool: str,
     price_scale_id: str,
     anchors: Sequence[Mapping[str, Any]],
-) -> list[dict[str, float | str]]:
-    if tool not in {"trendline", "horizontal"}:
+    content_text: str = "",
+    interval_scope: str = "both",
+) -> tuple[list[dict[str, float | str]], str, str]:
+    if tool not in {"trendline", "horizontal", "text"}:
         raise ValueError("unsupported drawing tool")
     if not price_scale_id:
         raise ValueError("missing price scale identifier")
     expected_count = 2 if tool == "trendline" else 1
     if len(anchors) != expected_count:
         raise ValueError(f"{tool} requires {expected_count} anchors")
+    if not isinstance(content_text, str):
+        raise ValueError("文字标记内容必须是文本")
+    normalized_content = content_text.strip()
+    if tool == "text" and not normalized_content:
+        raise ValueError("文字标记内容不能为空")
+    if len(normalized_content) > 200:
+        raise ValueError("文字标记内容不能超过 200 个字符")
+    if tool != "text" and normalized_content:
+        raise ValueError("画线不支持文字内容")
+    normalized_interval = str(interval_scope or "both").strip().lower()
+    if normalized_interval not in {"day", "week", "both"}:
+        raise ValueError("图表周期范围不受支持")
+    if tool == "text" and normalized_interval == "both":
+        raise ValueError("文字标记必须属于日线或周线")
     normalized: list[dict[str, float | str]] = []
     for anchor in anchors:
         anchor_date = str(anchor.get("date") or "")
@@ -2278,6 +2513,6 @@ def _normalize_drawing(
             )
         else:
             raise ValueError("invalid drawing anchor")
-    return normalized
+    return normalized, normalized_content, normalized_interval
 if TYPE_CHECKING:
     from .trading_plans import TradingPlanService

@@ -4,6 +4,12 @@
   const chartNode = root.querySelector("[data-chart-canvas]");
   const overlay = root.querySelector("[data-drawing-overlay]");
   const context = overlay.getContext("2d");
+  const textLayer = root.querySelector("[data-drawing-text-layer]");
+  const textEditor = root.querySelector("[data-drawing-text-editor]");
+  const textInput = root.querySelector("[data-drawing-text-input]");
+  const textCount = root.querySelector("[data-drawing-text-count]");
+  const textSaveButton = root.querySelector("[data-drawing-text-save]");
+  const textCancelButton = root.querySelector("[data-drawing-text-cancel]");
   const volumeInput = root.querySelector("[data-volume]");
   const keltnerInput = root.querySelector("[data-keltner]");
   const kcSummary = root.querySelector("[data-kc-summary]");
@@ -13,6 +19,7 @@
   const drawingActions = root.querySelector("[data-drawing-actions]");
   const drawingHint = root.querySelector("[data-drawing-hint]");
   const deleteSelectedButton = root.querySelector("[data-delete-selected]");
+  const editSelectedButton = root.querySelector("[data-edit-selected]");
   const methodEventDetail = root.querySelector("[data-method-event-detail]");
   const frameworkPanel = root.querySelector("[data-chart-framework-panel]");
   const timelineList = root.querySelector("[data-chart-method-timeline-list]");
@@ -39,6 +46,8 @@
   let pendingAnchor = null;
   let previewAnchor = null;
   let selectedDrawingId = null;
+  let editorAnchor = null;
+  let editingDrawingId = null;
   let requestVersion = 0;
   let requestController = null;
   let methodEventsById = new Map();
@@ -253,6 +262,7 @@
   const updateDrawingActions = () => {
     drawingActions.hidden = drawings.length === 0;
     deleteSelectedButton.disabled = !selectedDrawing();
+    editSelectedButton.hidden = selectedDrawing()?.tool !== "text";
   };
   const setActiveTool = (tool) => {
     activeTool = tool;
@@ -261,7 +271,7 @@
     overlay.style.pointerEvents = activeTool === "browse" ? "none" : "auto";
     overlay.style.cursor = activeTool === "browse" ? "default" : "crosshair";
     root.querySelectorAll("[data-draw-tool]").forEach(item => item.setAttribute("aria-pressed", String(item.dataset.drawTool === activeTool)));
-    drawingHint.textContent = ({ browse: "拖拽缩放或查看价格", select: "点击画线选中；按删除键、退格键或右键删除", trendline: "点击起点，再点击终点", horizontal: "点击图表设置水平线" })[activeTool] || "选择工具后在图上点击";
+    drawingHint.textContent = ({ browse: "拖拽缩放或查看价格", select: "点击标记选中；按删除键、退格键或右键删除", trendline: "点击起点，再点击终点", horizontal: "点击图表设置水平线", text: "点击 K 线或形态附近添加文字" })[activeTool] || "选择工具后在图上点击";
     renderDrawings();
   };
   const syncVolumePane = () => {
@@ -279,6 +289,7 @@
     const ratio = window.devicePixelRatio || 1;
     overlay.width = Math.floor(rect.width * ratio); overlay.height = Math.floor(drawingHeight * ratio);
     overlay.style.width = `${rect.width}px`; overlay.style.height = `${drawingHeight}px`;
+    if (textLayer) { textLayer.style.width = `${rect.width}px`; textLayer.style.height = `${drawingHeight}px`; }
     context.setTransform(ratio, 0, 0, ratio, 0, 0); renderDrawings();
   };
   const fitBarsToViewport = () => {
@@ -316,6 +327,7 @@
     return { ...drawing, anchors };
   };
   const drawOne = (drawing, highlight = false) => {
+    if (drawing.tool === "text") return;
     const anchors = drawing.anchors.map(coord);
     if (anchors.some(point => point.x === null || point.y === null)) return;
     const stroke = () => {
@@ -339,6 +351,8 @@
     context.clearRect(0, 0, overlay.clientWidth, overlay.clientHeight);
     drawings.forEach(drawing => drawOne(drawing, drawing.drawing_id === selectedDrawingId));
     if (pendingAnchor && previewAnchor) drawOne({ tool: "trendline", anchors: [pendingAnchor, previewAnchor] }, true);
+    renderTextDrawings();
+    positionTextEditor();
   };
   const chartRequest = (targetSymbol, targetDate, targetSettings) => {
     const query = new URLSearchParams({ date: targetDate, ...targetSettings });
@@ -520,7 +534,9 @@
     if (!response.ok) throw new Error("保存画线失败");
     const saved = await response.json();
     canonicalDrawingAnchors.set(saved.drawing_id, saved.anchors);
-    drawings.push(saved);
+    const existingIndex = drawings.findIndex(item => item.drawing_id === saved.drawing_id);
+    if (existingIndex === -1) drawings.push(saved);
+    else drawings.splice(existingIndex, 1, saved);
     selectedDrawingId = saved.drawing_id;
     updateDrawingActions(); renderDrawings();
   };
@@ -535,7 +551,7 @@
   };
   const nearestDrawing = (event) => {
     const rect = overlay.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top;
-    return drawings.find((drawing) => { const points = drawing.anchors.map(coord); if (points.some(point => point.x === null || point.y === null)) return false; if (drawing.tool !== "trendline") return Math.abs(y - points[0].y) < 8; const [a, b] = points; const distance = Math.abs((b.y - a.y) * x - (b.x - a.x) * y + b.x * a.y - b.y * a.x) / Math.hypot(b.y - a.y, b.x - a.x); return distance < 8; });
+    return drawings.find((drawing) => { if (drawing.tool === "text") return false; const points = drawing.anchors.map(coord); if (points.some(point => point.x === null || point.y === null)) return false; if (drawing.tool === "horizontal") return Math.abs(y - points[0].y) < 8; const [a, b] = points; const distance = Math.abs((b.y - a.y) * x - (b.x - a.x) * y + b.x * a.y - b.y * a.x) / Math.hypot(b.y - a.y, b.x - a.x); return distance < 8; });
   };
   const selectDrawingAt = (event) => {
     const drawing = nearestDrawing(event);
@@ -543,6 +559,85 @@
     updateDrawingActions(); renderDrawings();
     drawingHint.textContent = drawing ? "已选中；按删除键、退格键或右键删除" : "未选中画线";
     return drawing;
+  };
+  function positionTextEditor() {
+    if (!textEditor || textEditor.hidden || !editorAnchor) return;
+    const point = coord(editorAnchor);
+    if (point.x === null || point.y === null) { textEditor.hidden = true; return; }
+    const width = textEditor.offsetWidth || 310;
+    const height = textEditor.offsetHeight || 170;
+    const maxLeft = Math.max(8, overlay.clientWidth - width - 8);
+    const maxTop = Math.max(8, overlay.clientHeight - height - 8);
+    textEditor.style.left = `${Math.min(Math.max(8, point.x + 12), maxLeft)}px`;
+    textEditor.style.top = `${Math.min(Math.max(8, point.y + 10), maxTop)}px`;
+  }
+  function closeTextEditor() {
+    if (!textEditor) return;
+    textEditor.hidden = true;
+    editorAnchor = null;
+    editingDrawingId = null;
+    textInput.value = "";
+    textCount.textContent = "0";
+  }
+  function openTextEditor(anchor, drawing = null) {
+    if (!textEditor) return;
+    editorAnchor = anchor;
+    editingDrawingId = drawing?.drawing_id || null;
+    textInput.value = drawing?.content_text || "";
+    textCount.textContent = String(textInput.value.length);
+    textEditor.hidden = false;
+    positionTextEditor();
+    window.requestAnimationFrame(() => { textInput.focus(); textInput.setSelectionRange(textInput.value.length, textInput.value.length); });
+  }
+  function renderTextDrawings() {
+    if (!textLayer) return;
+    const fragment = document.createDocumentFragment();
+    drawings.filter(drawing => drawing.tool === "text").forEach((drawing) => {
+      const point = coord(drawing.anchors[0]);
+      if (point.x === null || point.y === null) return;
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = `drawing-text-label${drawing.drawing_id === selectedDrawingId ? " is-selected" : ""}`;
+      label.dataset.drawingId = drawing.drawing_id;
+      label.textContent = drawing.content_text;
+      label.title = drawing.content_text;
+      label.setAttribute("aria-label", `文字标记：${drawing.content_text}`);
+      label.style.left = `${Math.min(Math.max(8, point.x + 10), Math.max(8, overlay.clientWidth - 228))}px`;
+      label.style.top = `${Math.max(8, point.y - 10)}px`;
+      label.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectedDrawingId = drawing.drawing_id;
+        updateDrawingActions(); renderDrawings();
+      });
+      label.addEventListener("dblclick", (event) => {
+        event.preventDefault(); event.stopPropagation();
+        selectedDrawingId = drawing.drawing_id;
+        updateDrawingActions(); openTextEditor(drawing.anchors[0], drawing);
+      });
+      label.addEventListener("contextmenu", async (event) => {
+        event.preventDefault(); event.stopPropagation();
+        try { await removeDrawing(drawing); drawingHint.textContent = "已删除文字标记"; }
+        catch (_) { drawingHint.textContent = "删除失败，请重试"; }
+      });
+      fragment.append(label);
+    });
+    textLayer.replaceChildren(fragment);
+    textLayer.querySelectorAll(".drawing-text-label").forEach((label) => {
+      const top = Number.parseFloat(label.style.top);
+      if (top + label.offsetHeight > overlay.clientHeight - 8) label.style.top = `${Math.max(8, overlay.clientHeight - label.offsetHeight - 8)}px`;
+    });
+  }
+  const persistTextEditor = async () => {
+    if (!editorAnchor || !textInput) return;
+    const content = textInput.value.trim();
+    if (!content) { textInput.setCustomValidity("请输入文字标记"); textInput.reportValidity(); return; }
+    textInput.setCustomValidity("");
+    textSaveButton.disabled = true;
+    try {
+      await saveDrawing({ drawing_id: editingDrawingId || undefined, tool: "text", anchors: [editorAnchor], content_text: content, interval_scope: interval });
+      closeTextEditor(); setActiveTool("select"); drawingHint.textContent = "文字标记已保存，已切换至选择";
+    } catch (_) { drawingHint.textContent = "文字标记保存失败，请重试"; }
+    finally { textSaveButton.disabled = false; }
   };
   overlay.addEventListener("pointermove", (event) => {
     if (!pendingAnchor || activeTool !== "trendline") return;
@@ -555,6 +650,7 @@
     const point = pointFromEvent(event); if (!point) return;
     try {
       if (activeTool === "horizontal") { await saveDrawing({ tool: activeTool, anchors: [point] }); setActiveTool("select"); drawingHint.textContent = "水平线已保存，已切换至选择"; return; }
+      if (activeTool === "text") { openTextEditor(point); return; }
       if (!pendingAnchor) { pendingAnchor = point; previewAnchor = point; drawingHint.textContent = "已选起点，移动鼠标预览，点击终点"; renderDrawings(); }
       else { const first = pendingAnchor; pendingAnchor = null; previewAnchor = null; await saveDrawing({ tool: "trendline", anchors: [first, point] }); setActiveTool("select"); drawingHint.textContent = "趋势线已保存，已切换至选择"; }
     } catch (_) { drawingHint.textContent = "保存失败，请重试"; }
@@ -571,7 +667,15 @@
     event.preventDefault();
     try { await removeDrawing(selectedDrawing()); drawingHint.textContent = "已删除选中画线"; } catch (_) { drawingHint.textContent = "删除失败，请重试"; }
   });
-  root.querySelectorAll("[data-draw-tool]").forEach(button => button.addEventListener("click", () => setActiveTool(button.dataset.drawTool)));
+  root.querySelectorAll("[data-draw-tool]").forEach(button => button.addEventListener("click", () => { if (!textEditor?.hidden) closeTextEditor(); setActiveTool(button.dataset.drawTool); }));
+  editSelectedButton.addEventListener("click", () => { const drawing = selectedDrawing(); if (drawing?.tool === "text") openTextEditor(drawing.anchors[0], drawing); });
+  textInput?.addEventListener("input", () => { textInput.setCustomValidity(""); textCount.textContent = String(textInput.value.length); });
+  textInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeTextEditor(); return; }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); persistTextEditor(); }
+  });
+  textSaveButton?.addEventListener("click", persistTextEditor);
+  textCancelButton?.addEventListener("click", closeTextEditor);
   volumeInput.addEventListener("change", () => {
     storeLayerSettings();
     syncVolumePane();
@@ -598,7 +702,7 @@
     updateChangeReadout(payload.bars.find(row => row.trade_date === selectedDate) || payload.bars[payload.bars.length - 1]);
   });
   deleteSelectedButton.addEventListener("click", async () => { const drawing = selectedDrawing(); if (!drawing) return; try { await removeDrawing(drawing); drawingHint.textContent = "已删除选中画线"; } catch (_) { drawingHint.textContent = "删除失败，请重试"; } });
-  root.querySelector("[data-clear-drawings]").addEventListener("click", async () => { if (!payload || !drawings.length || !window.confirm("清空当前复权尺度下的全部个人画线？")) return; for (const drawing of [...drawings]) await removeDrawing(drawing); });
+  root.querySelector("[data-clear-drawings]").addEventListener("click", async () => { if (!payload || !drawings.length || !window.confirm("清空当前周期下显示的全部个人标记？")) return; for (const drawing of [...drawings]) await removeDrawing(drawing); });
   const chartReviewForm = document.querySelector(".chart-review-control");
   document.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
@@ -610,7 +714,7 @@
     window.location.assign(target.href);
   });
   root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); syncChartViewControls(); storeChartView(); request(); }));
-  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { interval = button.dataset.chartInterval; syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
+  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
   chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); request();
   if ("requestIdleCallback" in window) window.requestIdleCallback(prefetchAdjacentCharts, { timeout: 1200 });
