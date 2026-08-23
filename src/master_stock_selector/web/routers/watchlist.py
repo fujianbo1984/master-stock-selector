@@ -387,6 +387,8 @@ def build_watchlist_router(
         positions: list[dict[str, Any]] = []
         executions: list[dict[str, Any]] = []
         focus_items: list[dict[str, Any]] = []
+        shared_plans: list[dict[str, Any]] = []
+        current_shared_plan: dict[str, Any] | None = None
         reading_notes = sorted(
             OWNER_READING_NOTES,
             key=lambda article: str(article.get("updated_on") or ""),
@@ -395,6 +397,19 @@ def build_watchlist_router(
         latest_updated_at = ""
         if owner is not None:
             owner_id = str(owner["user_id"])
+            shared_plans = users.trading_plans.shared_versions(owner_id)
+            current_shared_plan = next(
+                (
+                    plan
+                    for plan in shared_plans
+                    if str(plan.get("share_status") or "") == "ACTIVE"
+                ),
+                None,
+            )
+            for shared_plan in shared_plans:
+                latest_updated_at = max(
+                    latest_updated_at, str(shared_plan.get("published_at") or "")
+                )
             symbols = users.trade_symbols(owner_id)
             names = repository.stock_names(symbols)
             review = users.trade_review(owner_id, names)
@@ -444,6 +459,7 @@ def build_watchlist_router(
             positions=positions,
             focus_items=focus_items,
             reading_notes=reading_notes,
+            shared_plans=shared_plans,
         )
         latest_updated_at = max(
             [latest_updated_at, *(str(article.get("updated_on") or "") for article in reading_notes)]
@@ -462,6 +478,8 @@ def build_watchlist_router(
                 "focus_items": focus_items,
                 "executions": executions,
                 "reading_notes": reading_notes,
+                "shared_plans": shared_plans,
+                "current_shared_plan": current_shared_plan,
                 "activity_items": activity_items,
                 "latest_updated_at": latest_updated_at,
                 "suppress_research_date_note": True,

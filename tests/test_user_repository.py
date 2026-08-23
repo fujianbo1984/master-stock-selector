@@ -102,11 +102,11 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
     assert user_id
 
 
-def test_frozen_full_v4_schema_migrates_to_v5_without_data_loss(tmp_path: Path) -> None:
+def test_frozen_full_v4_schema_migrates_to_v6_without_data_loss(tmp_path: Path) -> None:
     path = tmp_path / "users-v4.sqlite3"
     connection = sqlite3.connect(path)
     connection.executescript(
@@ -182,6 +182,17 @@ def test_frozen_full_v4_schema_migrates_to_v5_without_data_loss(tmp_path: Path) 
             for row in migrated_connection.execute("PRAGMA index_list(user_plan_grill_event)")
         }
         assert unique_indexes["idx_user_plan_event_session_revision"] is True
+        assert migrated_connection.execute(
+            "SELECT COUNT(*) FROM user_trading_plan_share"
+        ).fetchone()[0] == 0
+        share_indexes = {
+            str(row[1])
+            for row in migrated_connection.execute(
+                "PRAGMA index_list(user_trading_plan_share)"
+            )
+        }
+        assert "idx_user_plan_share_plan_status" in share_indexes
+        assert "idx_user_plan_share_active" in share_indexes
 
 
 def test_explicit_user_schema_migration_backs_up_and_preserves_rows(tmp_path):

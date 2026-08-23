@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -14,6 +15,23 @@ if TYPE_CHECKING:
 GRILL_VERSION = "trading-plan-grill/1"
 SCHEMA_VERSION = "trading-plan/1"
 ANSWER_STATES = {"CONFIRMED", "PROPOSED", "DEFERRED", "NOT_APPLICABLE"}
+
+ANSWER_VALUE_LABELS = {
+    "FULL_R": "每笔使用完整 1R",
+    "ALLOW_REDUCED": "允许资金不足时缩小仓位",
+    "SKIP": "资金不足时放弃交易",
+    "REDUCE": "资金不足时缩小仓位",
+    "MARGIN": "现金不足时使用融资，额度仍不足则放弃",
+    "DISTINCT_SYMBOL": "按不同股票计数（同一股票双仓仍计 1 只）",
+    "POSITION": "按独立仓位计数",
+    "RISK_UNIT": "按风险单位计数",
+}
+
+PLAN_SECTIONS = (
+    ("operations", "第一层", "交易运营计划"),
+    ("risk", "第二层", "类别、风险与目标"),
+    ("setups", "第三层", "入场形态表"),
+)
 
 
 def _question(
@@ -87,31 +105,31 @@ QUESTIONS = tuple(
 )
 
 DEMO_ANSWERS = {
-    "scope.market": "沪深主板、科创板、创业板；只做多，日线分析与触发。",
-    "scope.universe": "排除北交所、ST、*ST及前一交易日总市值低于50亿元的股票；不设流动性过滤。",
-    "trend.background": "必须符合Minervini趋势模板或Weinstein第二阶段；黄金白银板块可主观参考COMEX多头背景。",
-    "workflow.daily": "收盘后扫描、人工判断形态、计算触发止损与仓位，设置仅下一交易日有效的条件单；盘中不增加计划外交易。",
-    "review.recording": "每笔保存入场前截图、形态及版本、计划与实际成交、止损、股数、名义1R、实际风险、R倍数、遵守度和主观依据；每周按形态复盘。",
-    "event.filter": "均不设事件过滤，形态合格即交易；公司行动与条件单调整按东方财富规则。",
-    "risk.risk_percent": "1R=账户净权益×2%，计算结果按千元四舍五入。",
+    "scope.market": "沪深主板、科创板、创业板；只做多；日线分析、日线触发；平均持仓约20个交易日，但不设时间退出。",
+    "scope.universe": "排除北交所、ST、*ST及以前一交易日收盘总市值计算低于50亿元的股票；不设置流动性过滤。",
+    "trend.background": "全部形态必须经软件筛选确认符合Minervini趋势模板或处于Weinstein第二阶段。黄金、白银板块个股仍须符合A股基础股票池规则，但不要求满足上述趋势模板，可由交易者主观参考COMEX黄金或白银日线多头背景。",
+    "workflow.daily": "每个交易日收盘后扫描全部A股；软件完成趋势模板筛选；人工判断A1、A3、B1、B2；计算触发价、止损、仓位和第一目标；设置仅下一交易日有效的条件单；周五工作可延迟至周日晚；盘中不临时增加候选或计划外交易；收盘后重新评估未触发候选并更新全部持仓止损。",
+    "review.recording": "每笔记录入场前截图、形态类别及版本、计划触发价和实际成交价、初始止损和股数、名义1R和成交后实际风险、盈亏R倍数、是否遵守计划及主观判断依据；每周按A1、A3、B1、B2分别复盘。每类至少30笔已平仓交易后，以毛平均R大于0作初步评价；不扣佣金、融资利息和滑点。实质修改入场、止损、仓位或退出规则后建立新版本并重新累计30笔，不因灾难性风险提前暂停。",
+    "event.filter": "不设置财报、业绩预告、解禁、除权、复牌等事件过滤；公司行动和条件单价格调整按东方财富规则处理。",
+    "risk.risk_percent": "重设时1R=账户净权益×2%，计算结果按千元四舍五入；接受实际风险比例约1%—4%漂移。",
     "risk.position_sizing": "FULL_R",
-    "risk.equity_base": "账户净权益=现金+证券市值-融资负债及应计利息。",
+    "risk.equity_base": "账户净权益=现金＋证券市值－融资负债及应计利息。",
     "risk.reset": "只有权益达到上次基准的200%或50%时才重设1R。",
-    "risk.rounding": "计划股数向下取整至100股；部分止盈由交易软件按可成交规则取最接近一半。",
-    "risk.slippage": "高开和滑点后不缩减计划股数；统计R时使用实际成交后风险。",
+    "risk.rounding": "计划股数=1R÷（计划触发价－初始止损价），买入股数向下取整至100股；第一目标按可成交数量卖出最接近一半。",
+    "risk.slippage": "股数根据计划触发价计算；实际成交价因高开或滑点上升时不缩减仓位，仍使用计划股数；接受实际初始风险超过名义1R；实际R倍数=交易毛盈亏÷［（实际成交价－初始止损价）×实际股数］。",
     "portfolio.industry_count_unit": "DISTINCT_SYMBOL",
     "portfolio.cash_shortage": "MARGIN",
-    "portfolio.total_r": "不设最大持股数、组合总R上限、个人融资上限或回撤暂停线。",
-    "portfolio.industry_scheme": "申万2021版三级行业，每个行业最多同时持有2只不同股票。",
+    "portfolio.total_r": "不设最大持股数量、组合总风险R上限、个人融资上限、单日亏损停止线、连续亏损暂停线、账户回撤降风险、市场转弱停止开仓、强制清仓或交易笔数和利润目标；不因灾难性风险提前暂停；信号按触发先后顺序执行；没有合格信号就不交易。",
+    "portfolio.industry_scheme": "申万2021版三级行业；同一行业最多持有2只股票。",
     "portfolio.related_groups": "黄金和白银合并为同一相关风险组，合计最多2只股票。",
-    "execution.entry": "触发价=前一交易日最高价+0.01元；按即时卖一买入；高开不设追价上限；条件单当日有效；涨停未成交次日不自动追入。",
-    "execution.exit": "成交后建立初始止损；按即时买一卖出；T+1、跳空和跌停按实际可成交规则处理；第一目标卖出最接近一半，剩余仓位移动止损只能提高。",
-    "A1.rules": "Adam式压力积累、VCP或VCP Cheat；止损=整理结构最低点-0.01元；第一目标=实际成交价+实际初始每股风险。",
-    "A3.rules": "成功突破重要阻力后的第一次受控回调；收盘跌回突破位下方则成交前失效；止损=回调低点-入场前一日ATR(14)；第一目标为实际1R。",
-    "B1.rules": "既有上升趋势中的受控简单回调；止损=回调低点-入场前一日ATR(14)；第一目标为实际1R。",
-    "B2.rules": "两段清晰逆势运动，高2、楔形或显性/隐藏ABCD；到前高空间不少于计划1R；止损=第二腿低点-0.01元；第一目标为前一摆动高点。",
-    "setup.reentry": "同一形态止损后重新合格可以完整1R重入；A1持仓后可另建A3；B1未止损但演化成B2时不叠加。",
-    "setup.enabled": "A1,A3,B1,B2",
+    "execution.entry": "所有形态触发价=前一交易日最高价+0.01元；触发后按即时卖一价买入；高开不设追价上限；使用计划股数，不因实际成交价上升而减仓；涨停触发但未成交不在次日自动追入；条件单当日有效，未触发则收盘后重新评估。",
+    "execution.exit": "成交后立即建立初始止损条件单；因A股T+1，当日买入后即使跌破止损也无法卖出；止损触发按即时买一价卖出；次日跳空低于止损开盘立即卖出；跌停未成交则后续继续卖至成交。第一目标按即时买一价卖出最接近一半；第一目标前初始止损不变，之后剩余仓位按结构低点－0.01元移动止损；尚无结构低点或怀疑高潮时用前一交易日低点－0.01元；移动止损只能提高。",
+    "A1.rules": "Adam式阻力下方压力积累、VCP或VCP Cheat；允许主观裁量，但必须在入场前截图并记录依据。初始止损=整理结构最低点－0.01元；第一目标=实际成交价＋实际初始每股风险，达到1R后卖出一半，剩余仓位按公共移动止损规则处理。",
+    "A3.rules": "已经成功突破重要阻力，突破后有良好参与意愿和上行动量，首次上冲结束后出现第一次受控回调，按简单回调处理。成交前日线收盘重新跌回原突破位下方则取消；成交后不再以突破位得失退出。初始止损=回调最低点－入场前一交易日TradingView ATR(14)；第一目标为实际1R并卖出一半。",
+    "B1.rules": "既有上升趋势中的一段受控逆势回调，没有明显强劲下行动量，以高1等简单回调转强；不要求前高至少提供1R空间。初始止损=回调最低点－入场前一交易日TradingView ATR(14)；第一目标为实际1R并卖出一半。",
+    "B2.rules": "两段清晰逆势运动的高2、楔形或显性/隐藏ABCD复杂回调；计划触发价至前高空间至少为计划1R；初始止损=第二腿最低点－0.01元；第一目标=前一摆动高点并卖出一半。高开后即使到前高不足1R仍交易并以前高为目标；若成交价已超前高，T+1次日仍在前高上方立即卖一半，否则等待重回前高。",
+    "setup.reentry": "同一形态止损后，重新评估合格可完整1R重入并独立统计；持有A1后形成A3可再加完整1R并分别管理统计；B1止损后形成B2可重新完整1R入场；B1未止损但演化B2则不增加B2仓位。同一股票A1和A3双仓，行业集中度仍按1只股票计算。",
+    "setup.enabled": "A1、A3、B1、B2；A2（突破当下入场）暂不交易。",
 }
 
 
@@ -140,6 +158,122 @@ class TradingPlanService:
                 (user_id,),
             ).fetchall()
         return [self._version(row) for row in rows]
+
+    def current_share(self, user_id: str) -> dict[str, Any] | None:
+        with self.users.connect(read_only=True) as c:
+            row = c.execute(
+                """SELECT s.share_id, s.statement, s.status AS share_status,
+                          s.published_at, s.revoked_at AS share_revoked_at, v.*
+                   FROM user_trading_plan_share s
+                   JOIN user_trading_plan p ON p.plan_id=s.plan_id
+                   JOIN user_trading_plan_version v ON v.version_id=s.version_id
+                   WHERE p.user_id=? AND s.status='ACTIVE'
+                   ORDER BY s.published_at DESC, s.share_id DESC LIMIT 1""",
+                (user_id,),
+            ).fetchone()
+        return self._shared_version(row) if row else None
+
+    def latest_share(self, user_id: str) -> dict[str, Any] | None:
+        with self.users.connect(read_only=True) as c:
+            row = c.execute(
+                """SELECT s.share_id, s.statement, s.status AS share_status,
+                          s.published_at, s.revoked_at AS share_revoked_at, v.*
+                   FROM user_trading_plan_share s
+                   JOIN user_trading_plan p ON p.plan_id=s.plan_id
+                   JOIN user_trading_plan_version v ON v.version_id=s.version_id
+                   WHERE p.user_id=?
+                   ORDER BY s.published_at DESC, s.share_id DESC LIMIT 1""",
+                (user_id,),
+            ).fetchone()
+        return self._shared_version(row) if row else None
+
+    def shared_versions(self, user_id: str) -> list[dict[str, Any]]:
+        with self.users.connect(read_only=True) as c:
+            rows = c.execute(
+                """SELECT s.share_id, s.statement, s.status AS share_status,
+                          s.published_at, s.revoked_at AS share_revoked_at, v.*
+                   FROM user_trading_plan_share s
+                   JOIN user_trading_plan p ON p.plan_id=s.plan_id
+                   JOIN user_trading_plan_version v ON v.version_id=s.version_id
+                   WHERE p.user_id=? AND s.status IN ('ACTIVE','SUPERSEDED')
+                   ORDER BY CASE s.status WHEN 'ACTIVE' THEN 0 ELSE 1 END,
+                            s.published_at DESC, s.share_id DESC""",
+                (user_id,),
+            ).fetchall()
+        return [self._shared_version(row) for row in rows]
+
+    def shared_by_id(self, user_id: str, share_id: str) -> dict[str, Any] | None:
+        with self.users.connect(read_only=True) as c:
+            row = c.execute(
+                """SELECT s.share_id, s.statement, s.status AS share_status,
+                          s.published_at, s.revoked_at AS share_revoked_at, v.*
+                   FROM user_trading_plan_share s
+                   JOIN user_trading_plan p ON p.plan_id=s.plan_id
+                   JOIN user_trading_plan_version v ON v.version_id=s.version_id
+                   WHERE p.user_id=? AND s.share_id=?
+                         AND s.status IN ('ACTIVE','SUPERSEDED')""",
+                (user_id, share_id),
+            ).fetchone()
+        return self._shared_version(row) if row else None
+
+    def share_current(self, user_id: str, statement: str = "") -> dict[str, Any]:
+        normalized_statement = statement.strip()
+        if len(normalized_statement) > 300:
+            raise ValueError("共享说明不能超过300字")
+        with self.users.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            version = c.execute(
+                """SELECT v.* FROM user_trading_plan p
+                   JOIN user_trading_plan_version v ON v.version_id=p.current_version_id
+                   WHERE p.user_id=?""",
+                (user_id,),
+            ).fetchone()
+            if version is None:
+                raise ValueError("尚未发布可共享的交易计划")
+            plan_id = str(version["plan_id"])
+            version_id = str(version["version_id"])
+            active = c.execute(
+                """SELECT share_id, version_id FROM user_trading_plan_share
+                   WHERE plan_id=? AND status='ACTIVE'
+                   ORDER BY published_at DESC, share_id DESC LIMIT 1""",
+                (plan_id,),
+            ).fetchone()
+            if active is not None and str(active["version_id"]) == version_id:
+                share_id = str(active["share_id"])
+            else:
+                c.execute(
+                    """UPDATE user_trading_plan_share SET status='SUPERSEDED'
+                       WHERE plan_id=? AND status='ACTIVE'""",
+                    (plan_id,),
+                )
+                share_id = uuid4().hex
+                c.execute(
+                    """INSERT INTO user_trading_plan_share(
+                           share_id, plan_id, version_id, statement, status
+                       ) VALUES(?,?,?,?, 'ACTIVE')""",
+                    (share_id, plan_id, version_id, normalized_statement),
+                )
+            row = c.execute(
+                """SELECT s.share_id, s.statement, s.status AS share_status,
+                          s.published_at, s.revoked_at AS share_revoked_at, v.*
+                   FROM user_trading_plan_share s
+                   JOIN user_trading_plan_version v ON v.version_id=s.version_id
+                   WHERE s.share_id=?""",
+                (share_id,),
+            ).fetchone()
+        return self._shared_version(row)
+
+    def revoke_shares(self, user_id: str) -> int:
+        with self.users.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            cursor = c.execute(
+                """UPDATE user_trading_plan_share
+                   SET status='REVOKED', revoked_at=CURRENT_TIMESTAMP
+                   WHERE plan_id=(SELECT plan_id FROM user_trading_plan WHERE user_id=?)
+                         AND status IN ('ACTIVE','SUPERSEDED')""",
+                (user_id,),
+            )
+        return int(cursor.rowcount)
 
     def show(self, user_id: str, version_id: str) -> dict[str, Any] | None:
         with self.users.connect(read_only=True) as c:
@@ -511,7 +645,10 @@ class TradingPlanService:
         layers: dict[str, dict[str, Any]] = {"operations": {}, "risk": {}, "setups": {}}
         for question in QUESTIONS:
             layer = "operations" if question["section"] == "execution" else question["section"]
-            layers[layer][question["id"].split(".", 1)[-1]] = answers.get(question["id"], {})
+            # Keep the complete identifier.  A1.rules/A3.rules/B1.rules/B2.rules
+            # previously collapsed to the same ``rules`` key and silently hid
+            # three confirmed setup decisions in the rendered layer.
+            layers[layer][question["id"]] = answers.get(question["id"], {})
         return {
             "schema_version": SCHEMA_VERSION,
             "answers": answers,
@@ -520,29 +657,79 @@ class TradingPlanService:
         }
 
     @staticmethod
-    def _warnings(answers: Mapping[str, Any]) -> list[dict[str, str]]:
-        warnings: list[dict[str, str]] = []
-        if answers.get("portfolio.cash_shortage", {}).get("value") == "MARGIN":
-            warnings.append(
-                {"code": "MARGIN_ENABLED", "message": "计划允许融资，实际风险可能放大。"}
+    def _warnings(answers: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Derive accepted risk boundaries from confirmed rules, without mutating a version."""
+
+        def confirmed(identifier: str) -> str:
+            decision = answers.get(identifier, {})
+            if not isinstance(decision, Mapping) or decision.get("state") != "CONFIRMED":
+                return ""
+            return str(decision.get("value") or "").strip()
+
+        def negative(value: str) -> bool:
+            compact = value.replace(" ", "")
+            return any(
+                marker in compact
+                for marker in ("不设", "不设置", "不限制", "不回避", "均不", "无上限", "无限制")
             )
-        if "2%" in str(answers.get("risk.risk_percent", {}).get("value") or ""):
+
+        warnings: list[dict[str, Any]] = []
+
+        def add(code: str, message: str, *sources: str) -> None:
             warnings.append(
-                {"code": "RISK_2_PERCENT", "message": "单笔名义风险为账户净权益的 2%。"}
+                {"code": code, "message": message, "source_question_ids": list(sources)}
             )
-        if "不设" in str(answers.get("portfolio.total_r", {}).get("value") or ""):
-            warnings.append(
-                {
-                    "code": "UNBOUNDED_PORTFOLIO_RISK",
-                    "message": "计划不设组合总R或账户回撤上限。",
-                }
+
+        cash_shortage = confirmed("portfolio.cash_shortage")
+        risk_percent = confirmed("risk.risk_percent")
+        total_r = confirmed("portfolio.total_r")
+        event_filter = confirmed("event.filter")
+        universe = confirmed("scope.universe")
+        exit_rule = confirmed("execution.exit")
+        slippage = confirmed("risk.slippage")
+        recording = confirmed("review.recording")
+
+        if cash_shortage == "MARGIN" or "融资" in cash_shortage:
+            add("MARGIN_ENABLED", "计划允许融资，实际风险可能放大。", "portfolio.cash_shortage")
+        if re.search(r"(?:^|\D)2(?:\.0+)?\s*%|百分之二", risk_percent):
+            add("RISK_2_PERCENT", "单笔名义风险为账户净权益的 2%。", "risk.risk_percent")
+        if negative(total_r):
+            add(
+                "UNBOUNDED_PORTFOLIO_RISK",
+                "计划不设组合总R或最大持股数量上限。",
+                "portfolio.total_r",
             )
-        if "不设事件过滤" in str(answers.get("event.filter", {}).get("value") or ""):
-            warnings.append(
-                {
-                    "code": "NO_EVENT_FILTER",
-                    "message": "计划不回避财报、解禁、复牌等已知事件风险。",
-                }
+        if "回撤" in total_r and negative(total_r):
+            add("NO_DRAWDOWN_GUARD", "计划不设置账户回撤降风险或暂停线。", "portfolio.total_r")
+        if any(word in total_r for word in ("暂停", "停止线", "连续亏损", "灾难性")) and negative(
+            total_r
+        ):
+            add("NO_PAUSE_GUARD", "计划不设置连续亏损或灾难性风险暂停机制。", "portfolio.total_r")
+        if event_filter and negative(event_filter):
+            add(
+                "NO_EVENT_FILTER",
+                "计划不回避财报、解禁、除权、复牌等已知事件风险。",
+                "event.filter",
+            )
+        if "流动性" in universe and negative(universe):
+            add("NO_LIQUIDITY_FILTER", "股票池不设置流动性过滤。", "scope.universe")
+        normalized_exit = exit_rule.upper().replace("＋", "+").replace(" ", "")
+        if "T+1" in normalized_exit or "当日无法卖" in exit_rule:
+            add("T1_STOP_GAP", "A股T+1使买入当日止损无法执行。", "execution.exit")
+        if any(word in slippage for word in ("不缩减", "不减仓", "不减少")):
+            add(
+                "FULL_R_SLIPPAGE",
+                "高开或滑点时不减仓，实际单笔风险可能超过名义1R。",
+                "risk.slippage",
+            )
+        compact_recording = recording.replace(" ", "")
+        if "毛" in recording and any(
+            word in compact_recording for word in ("不扣", "未扣", "不计交易成本")
+        ):
+            add(
+                "GROSS_EXPECTANCY_ONLY",
+                "期望评价使用未扣佣金、融资利息和滑点的毛R。",
+                "review.recording",
             )
         return warnings
 
@@ -566,4 +753,45 @@ class TradingPlanService:
     def _version(self, row: Any) -> dict[str, Any]:
         value = dict(row)
         value["content"] = json.loads(str(value.pop("content_json")))
+        answers = value["content"].get("answers", {})
+        value["risk_profile"] = self._warnings(answers)
+        value["display_sections"] = self._display_sections(answers)
+        value["confirmed_rule_count"] = sum(
+            1
+            for decision in answers.values()
+            if isinstance(decision, Mapping) and decision.get("state") == "CONFIRMED"
+        )
         return value
+
+    def _shared_version(self, row: Any) -> dict[str, Any]:
+        value = self._version(row)
+        value["share_href"] = f"/a/owner/plans/{value['share_id']}"
+        return value
+
+    @staticmethod
+    def _display_sections(answers: Mapping[str, Any]) -> list[dict[str, Any]]:
+        sections: list[dict[str, Any]] = []
+        for section_key, eyebrow, title in PLAN_SECTIONS:
+            rules = []
+            for question in QUESTIONS:
+                layer = "operations" if question["section"] == "execution" else question["section"]
+                if layer != section_key:
+                    continue
+                decision = answers.get(question["id"], {})
+                raw_value = decision.get("value") if isinstance(decision, Mapping) else ""
+                rules.append(
+                    {
+                        "id": question["id"],
+                        "title": question["title"],
+                        "value": ANSWER_VALUE_LABELS.get(str(raw_value), raw_value),
+                    }
+                )
+            sections.append(
+                {
+                    "key": section_key,
+                    "eyebrow": eyebrow,
+                    "title": title,
+                    "rules": rules,
+                }
+            )
+        return sections

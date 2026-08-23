@@ -1,0 +1,62 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block title %}站长交易计划 {{ plan.version_number }} · 龙场悟道{% endblock %}
+{% block heading %}站长交易计划{% endblock %}
+{% block subtitle %}已共享的冻结执行合同{% endblock %}
+{% block content %}
+<section class="section panel review-hero plan-hero shared-plan-hero">
+  <div>
+    <p class="eyebrow">站内共享 · {{ owner.display_name or owner.username }}</p>
+    <h1>站长交易计划</h1>
+    <p class="plan-version-line">
+      <span class="plan-active-mark">{{ '当前共享' if plan.share_status == 'ACTIVE' else '历史共享' }}</span>
+      <strong>{{ plan.version_number }}</strong>
+      <span>生效于 {{ plan.activated_at }}</span>
+      <span>共享于 {{ plan.published_at }}</span>
+    </p>
+  </div>
+  <div class="review-hero-note"><strong>研究记录，不是买卖信号</strong><span>不构成投资建议、收益承诺或自动交易指令</span></div>
+</section>
+
+<section class="section panel shared-plan-statement">
+  <div><p class="eyebrow">本次计划说明</p><h2>{{ plan.statement or '站长共享的当前交易执行合同。' }}</h2></div>
+  <a class="button button-secondary" href="/a/owner">返回站长动态</a>
+</section>
+
+<section class="section plan-contract-layout shared-plan-contract">
+  <aside class="panel plan-contract-index" aria-label="站长交易计划目录">
+    <p class="eyebrow">共享合同</p>
+    <h2>{{ plan.version_number }}</h2>
+    <div class="plan-contract-stats"><span><strong>{{ plan.confirmed_rule_count }}</strong> 条已确认规则</span><span><strong>{{ plan.display_sections|length }}</strong> 层执行合同</span></div>
+    <nav>
+      {% for section in plan.display_sections %}<a href="#shared-plan-{{ section.key }}"><span>{{ section.eyebrow }}</span><strong>{{ section.title }}</strong><small>{{ section.rules|length }} 条</small></a>{% endfor %}
+      {% if plan.risk_profile %}<a href="#shared-plan-risk-profile"><span>边界</span><strong>风险画像</strong><small>{{ plan.risk_profile|length }} 项</small></a>{% endif %}
+    </nav>
+    <p class="plan-contract-note">页面只展示站长明确共享的冻结版本，不包含草稿、Grill 过程或内部识别信息。</p>
+  </aside>
+  <div class="plan-contract-content">
+    {% for section in plan.display_sections %}
+    <article id="shared-plan-{{ section.key }}" class="panel plan-layer">
+      <header><div><p class="eyebrow">{{ section.eyebrow }}</p><h2>{{ section.title }}</h2></div><span>{{ section.rules|length }} 条规则</span></header>
+      <dl class="plan-rule-list">{% for rule in section.rules %}<div><dt><span>{{ '%02d'|format(loop.index) }}</span>{{ rule.title }}</dt><dd>{{ rule.value }}</dd></div>{% endfor %}</dl>
+    </article>
+    {% endfor %}
+    {% if plan.risk_profile %}
+    <article id="shared-plan-risk-profile" class="panel plan-risk-profile">
+      <header><div><p class="eyebrow">已确认边界</p><h2>风险画像</h2></div><span class="tag tag-caution">个人合同</span></header>
+      <p class="reading-note">由共享版本中已确认规则确定性派生，不代表系统认可或推荐。</p>
+      <ul class="plan-risk-list">{% for warning in plan.risk_profile %}<li>{{ warning.message }}</li>{% endfor %}</ul>
+    </article>
+    {% endif %}
+  </div>
+</section>
+
+{% if shared_versions|length > 1 %}
+<section class="section panel shared-plan-history">
+  <div class="section-heading"><div><p class="eyebrow">已共享历史</p><h2>站长交易计划版本</h2></div><span class="muted">{{ shared_versions|length }} 个可见版本</span></div>
+  <div class="shared-plan-history-list">
+    {% for version in shared_versions %}<a class="{% if version.share_id == plan.share_id %}active{% endif %}" href="{{ version.share_href }}"><span>{{ '当前' if version.share_status == 'ACTIVE' else '历史' }}</span><strong>{{ version.version_number }}</strong><small>{{ version.published_at }}</small></a>{% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

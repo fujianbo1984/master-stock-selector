@@ -229,7 +229,13 @@ def create_app(
         )
     )
     app.include_router(build_content_router(render=render))
-    app.include_router(build_trading_plan_router(render=render, users=users))
+    app.include_router(
+        build_trading_plan_router(
+            render=render,
+            users=users,
+            site_owner_username=owner_username,
+        )
+    )
     app.include_router(build_agent_api_router(repository=repository, users=users))
 
     return app

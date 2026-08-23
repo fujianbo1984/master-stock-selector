@@ -42,7 +42,7 @@ PLAN_SETUP_BY_TRADE_SETUP = {
     "PULLBACK_SUPPORT": "B1",
     "COMPLEX_PULLBACK": "B2",
 }
-USER_SCHEMA_VERSION = 5
+USER_SCHEMA_VERSION = 6
 USER_REQUIRED_TABLES = frozenset(
     {
         "user_account",
@@ -58,6 +58,7 @@ USER_REQUIRED_TABLES = frozenset(
         "user_trading_plan_version",
         "user_plan_grill_session",
         "user_plan_grill_event",
+        "user_trading_plan_share",
     }
 )
 USER_REQUIRED_INDEXES = frozenset(
@@ -69,6 +70,8 @@ USER_REQUIRED_INDEXES = frozenset(
         "idx_user_plan_version_plan",
         "idx_user_plan_session_user_updated",
         "idx_user_plan_event_session_revision",
+        "idx_user_plan_share_plan_status",
+        "idx_user_plan_share_active",
     }
 )
 
@@ -217,6 +220,21 @@ CREATE TABLE IF NOT EXISTS user_plan_grill_event (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_plan_event_session_revision
 ON user_plan_grill_event(session_id, revision);
+CREATE TABLE IF NOT EXISTS user_trading_plan_share (
+    share_id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    statement TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK(status IN ('ACTIVE','SUPERSEDED','REVOKED')),
+    published_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TEXT,
+    FOREIGN KEY(plan_id) REFERENCES user_trading_plan(plan_id) ON DELETE CASCADE,
+    FOREIGN KEY(version_id) REFERENCES user_trading_plan_version(version_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_plan_share_plan_status
+ON user_trading_plan_share(plan_id, status, published_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_plan_share_active
+ON user_trading_plan_share(plan_id) WHERE status='ACTIVE';
 CREATE TABLE IF NOT EXISTS user_chart_drawing (
     drawing_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

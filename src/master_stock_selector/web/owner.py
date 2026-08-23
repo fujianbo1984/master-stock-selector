@@ -63,9 +63,44 @@ def build_owner_activity_feed(
     positions: Sequence[Mapping[str, Any]],
     focus_items: Sequence[Mapping[str, Any]],
     reading_notes: Sequence[Mapping[str, Any]],
+    shared_plans: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Merge sanitized owner records into a newest-first activity index."""
     items: list[dict[str, Any]] = []
+
+    for plan in shared_plans:
+        day, clock = _activity_date_time(str(plan.get("published_at") or ""), "")
+        version_number = str(plan.get("version_number") or "")
+        section_count = len(plan.get("display_sections") or ())
+        rule_count = int(plan.get("confirmed_rule_count") or 0)
+        change_label = {
+            "SUBSTANTIVE": "实质修改",
+            "MINOR": "文字澄清",
+        }.get(str(plan.get("change_class") or ""), "冻结版本")
+        items.append(
+            {
+                "kind": "plan",
+                "kind_label": "交易计划更新",
+                "side": "",
+                "day": day,
+                "clock": clock,
+                "sort_at": f"{day} {clock}",
+                "subject": f"交易计划 {version_number}",
+                "symbol": "",
+                "href": str(plan.get("share_href") or "#"),
+                "summary": f"{section_count}层 · {rule_count}条规则",
+                "facts": [
+                    {
+                        "label": "生效时间",
+                        "value": str(plan.get("activated_at") or "—")[:10],
+                        "tone": "date",
+                    },
+                    {"label": "变更类型", "value": change_label, "tone": "plan"},
+                ],
+                "detail": str(plan.get("statement") or "站长共享了当前生效的交易执行合同。"),
+                "action_label": "查看计划",
+            }
+        )
 
     for execution in executions:
         day, clock = _activity_date_time(
@@ -178,7 +213,7 @@ def build_owner_activity_feed(
     items.sort(
         key=lambda item: (
             str(item["sort_at"]),
-            {"focus": 3, "trade": 2, "position": 1, "article": 0}.get(
+            {"plan": 4, "focus": 3, "trade": 2, "position": 1, "article": 0}.get(
                 str(item["kind"]), 0
             ),
             str(item["subject"]),

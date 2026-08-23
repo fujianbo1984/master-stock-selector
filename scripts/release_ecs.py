@@ -29,6 +29,7 @@ REQUIRED_WHEEL_RESOURCES = (
     "master_stock_selector/web/static/app.css",
     "master_stock_selector/web/templates/base.html",
     "master_stock_selector/web/templates/ashare/owner_activity.html",
+    "master_stock_selector/web/templates/ashare/shared_trading_plan.html",
     "master_stock_selector/web/static/vendor/lightweight-charts-5.1.0.js",
     "master_stock_selector/web/static/vendor/lucide-chevron-left.svg",
     "master_stock_selector/web/templates/reading/archive.html",
@@ -633,6 +634,7 @@ case "$pkg" in "$candidate"/*) ;; *) exit 42;; esac
 test -f "$pkg/web/static/app.css"
 test -f "$pkg/web/templates/base.html"
 test -f "$pkg/web/templates/ashare/owner_activity.html"
+test -f "$pkg/web/templates/ashare/shared_trading_plan.html"
 test -f "$pkg/web/static/vendor/lightweight-charts-5.1.0.js"
 test -f "$pkg/web/static/vendor/lucide-chevron-left.svg"
 test -f "$pkg/web/templates/reading/archive.html"

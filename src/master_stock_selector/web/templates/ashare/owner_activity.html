@@ -22,6 +22,9 @@
     <button class="active" type="button" data-owner-view="all" aria-pressed="true">
       <span>近期动态</span><strong>{{ activity_items|length }}</strong>
     </button>
+    <button type="button" data-owner-view="plan" aria-pressed="false">
+      <span>交易计划</span><strong>{{ shared_plans|length }}</strong>
+    </button>
     <button type="button" data-owner-view="position" aria-pressed="false">
       <span>当前持仓</span><strong>{{ positions|length }}</strong>
     </button>
@@ -39,12 +42,13 @@
   <div class="owner-feed-tools" aria-label="动态筛选">
     <label class="owner-feed-search">
       <span>搜索</span>
-      <input type="search" placeholder="股票或文章关键词" autocomplete="off" data-owner-query>
+      <input type="search" placeholder="股票、计划或文章关键词" autocomplete="off" data-owner-query>
     </label>
     <label>
       <span>内容</span>
       <select data-owner-kind>
         <option value="all">全部事件类型</option>
+        <option value="plan">交易计划</option>
         <option value="trade">交易记录</option>
         <option value="position">当前持仓</option>
         <option value="focus">重点观察</option>
@@ -113,6 +117,24 @@
     </section>
 
     <aside class="owner-feed-rail" aria-label="站长动态摘要">
+      <section class="owner-rail-section owner-plan-summary">
+        <div class="owner-rail-heading">
+          <h2>当前交易计划</h2>
+          {% if current_shared_plan %}<a class="owner-rail-heading-link" href="{{ current_shared_plan.share_href }}">查看全文</a>{% endif %}
+        </div>
+        {% if current_shared_plan %}
+        <a class="owner-plan-summary-card" href="{{ current_shared_plan.share_href }}">
+          <div><span class="owner-event owner-event-plan">当前共享</span><strong>{{ current_shared_plan.version_number }}</strong></div>
+          <p>{{ current_shared_plan.statement or '站长共享的当前交易执行合同。' }}</p>
+          <dl>
+            <div><dt>已确认规则</dt><dd>{{ current_shared_plan.confirmed_rule_count }}</dd></div>
+            <div><dt>执行层级</dt><dd>{{ current_shared_plan.display_sections|length }}</dd></div>
+            <div><dt>共享时间</dt><dd>{{ current_shared_plan.published_at[:10] }}</dd></div>
+          </dl>
+        </a>
+        {% else %}<div class="owner-rail-empty">站长尚未共享交易计划。</div>{% endif %}
+      </section>
+
       <section class="owner-rail-section">
         <div class="owner-rail-heading">
           <h2>当前持仓 <span>{{ positions|length }}</span></h2>

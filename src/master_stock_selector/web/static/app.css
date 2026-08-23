@@ -1062,6 +1062,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .owner-event-buy { border-color: #d9a099; color: var(--danger); background: var(--danger-soft); }
 .owner-event-sell { border-color: #8bbda8; color: var(--success); background: var(--success-soft); }
 .owner-event-focus { border-color: #d8ba7d; color: var(--warning); background: var(--warning-soft); }
+.owner-event-plan { border-color: #91acd0; color: var(--accent); background: var(--accent-soft); }
 .owner-activity-body { min-width: 0; }
 .owner-activity-body > header { display: grid; grid-template-columns: minmax(130px, auto) minmax(130px, 1fr) auto; gap: 14px; align-items: center; }
 .owner-activity-subject { display: grid; gap: 1px; min-width: 0; justify-self: start; }
@@ -1107,6 +1108,17 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .owner-feed-rail { min-width: 0; padding: 16px; background: color-mix(in srgb, var(--panel) 70%, white); }
 .owner-rail-section { border: 1px solid var(--line); background: var(--panel-strong); }
 .owner-rail-section + .owner-rail-section { margin-top: 14px; }
+.owner-plan-summary { border-top: 3px solid var(--accent); }
+.owner-plan-summary-card { display: grid; gap: 12px; padding: 14px 13px 16px; }
+.owner-plan-summary-card:hover { background: var(--accent-soft); }
+.owner-plan-summary-card > div:first-child { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.owner-plan-summary-card > div:first-child > strong { font-family: Georgia, "Times New Roman", serif; font-size: 23px; }
+.owner-plan-summary-card > p { display: -webkit-box; overflow: hidden; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.owner-plan-summary-card > dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0; border-top: 1px solid var(--line); }
+.owner-plan-summary-card > dl div { display: grid; gap: 2px; padding: 10px 5px 0; }
+.owner-plan-summary-card > dl div + div { border-left: 1px solid var(--line); }
+.owner-plan-summary-card dt { color: var(--muted); font-size: 8px; }
+.owner-plan-summary-card dd { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 12px; }
 .owner-rail-heading { min-height: 46px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .owner-rail-heading h2 span {
   display: inline-block;
@@ -1747,30 +1759,105 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
   .token-item-meta { grid-template-columns: 1fr; }
   .workspace-empty { grid-template-columns: 1fr; gap: 8px; padding: 30px 20px; }
 }
-.plan-rule-list {
-  display: grid;
-  gap: 0;
-  margin: 0;
-}
+.plan-hero { align-items: center; min-height: 130px; }
+.plan-hero h1 { margin-bottom: 10px; }
+.plan-version-line { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 12px; }
+.plan-version-line strong { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 17px; }
+.plan-active-mark { padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--success) 38%, var(--line)); background: var(--success-soft); color: var(--success); font-size: 10px; font-weight: 700; letter-spacing: .4px; }
 
-.plan-rule-list > div {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.35fr) minmax(0, 1fr);
-  gap: 18px;
-  padding: 14px 0;
-  border-top: 1px solid var(--line, #d8d2c4);
-}
+.plan-share-panel { display: flex; justify-content: space-between; gap: 28px; align-items: center; padding: 18px 20px; border-left: 3px solid var(--accent); }
+.plan-share-copy { display: grid; gap: 4px; min-width: 0; }
+.plan-share-copy h2 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: 20px; }
+.plan-share-copy > p:last-child { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.plan-share-copy > p:last-child strong { color: var(--text); }
+.plan-share-status { padding: 3px 7px; border: 1px solid var(--line-strong); color: var(--muted); background: var(--panel-soft); font-size: 9px; font-weight: 700; }
+.plan-share-status.active { border-color: #8bbda8; color: var(--success); background: var(--success-soft); }
+.plan-share-status.stale { border-color: #d8ba7d; color: var(--warning); background: var(--warning-soft); }
+.plan-share-status.stopped { border-color: #d9a099; color: var(--danger); background: var(--danger-soft); }
+.plan-share-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+.plan-share-actions form { margin: 0; }
+.plan-share-stop { color: var(--danger); }
+.plan-share-dialog { width: min(680px, calc(100vw - 80px)); padding: 0; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); box-shadow: 0 24px 70px rgba(20, 45, 76, .24); }
+.plan-share-dialog::backdrop { background: rgba(16, 32, 52, .42); backdrop-filter: blur(2px); }
+.plan-share-dialog form { display: grid; gap: 18px; padding: 25px 27px 27px; }
+.plan-share-dialog-heading { display: flex; justify-content: space-between; gap: 24px; align-items: start; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+.plan-share-dialog-heading h2 { margin: 4px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 25px; }
+.plan-share-dialog-heading > button { border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.plan-share-preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); background: var(--panel-soft); }
+.plan-share-preview > div { display: grid; gap: 4px; padding: 13px 14px; }
+.plan-share-preview > div + div { border-left: 1px solid var(--line); }
+.plan-share-preview span { color: var(--muted); font-size: 9px; }
+.plan-share-preview strong { font-family: Georgia, "Times New Roman", serif; font-size: 16px; }
+.plan-share-dialog label { display: grid; gap: 7px; font-size: 11px; font-weight: 700; }
+.plan-share-dialog label small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.plan-share-boundary { display: grid; grid-template-columns: 78px 1fr; gap: 6px 12px; padding: 13px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); font-size: 10px; line-height: 1.6; }
+.plan-share-boundary span { color: var(--muted); }
+.plan-share-consent { grid-template-columns: 18px minmax(0, 1fr); align-items: start; }
+.plan-share-consent input { width: 16px; min-height: 16px; margin: 1px 0 0; accent-color: var(--accent); }
+.plan-share-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 3px; }
+.shared-plan-hero { border-top: 3px solid var(--accent); }
+.shared-plan-statement { display: flex; justify-content: space-between; gap: 28px; align-items: center; padding: 20px 22px; }
+.shared-plan-statement h2 { max-width: 930px; margin: 4px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 18px; line-height: 1.65; }
+.shared-plan-contract .plan-contract-index { top: 12px; }
+.shared-plan-history { padding: 20px 22px 22px; }
+.shared-plan-history-list { display: flex; gap: 8px; flex-wrap: wrap; }
+.shared-plan-history-list a { display: grid; min-width: 150px; gap: 3px; padding: 11px 13px; border: 1px solid var(--line); background: var(--panel-soft); }
+.shared-plan-history-list a.active { border-color: var(--accent); background: var(--accent-soft); }
+.shared-plan-history-list span, .shared-plan-history-list small { color: var(--muted); font-size: 8px; }
+.shared-plan-history-list strong { font-family: Georgia, "Times New Roman", serif; font-size: 16px; }
 
-.plan-rule-list dt {
-  font-weight: 700;
-}
+.plan-version-builder, .plan-version-history { padding: 0; overflow: hidden; }
+.plan-version-builder > summary, .plan-version-history > summary { display: flex; min-height: 72px; cursor: pointer; list-style: none; justify-content: space-between; gap: 20px; align-items: center; padding: 15px 20px; }
+.plan-version-builder > summary::-webkit-details-marker, .plan-version-history > summary::-webkit-details-marker { display: none; }
+.plan-version-builder > summary > span:first-child, .plan-version-history > summary > span:first-child { display: grid; gap: 2px; }
+.plan-version-builder > summary strong, .plan-version-history > summary strong { font-family: "Songti SC", "STSong", serif; font-size: 20px; }
+.plan-summary-action, .plan-version-history > summary > span:last-child { color: var(--muted); font-size: 11px; }
+.plan-version-builder[open] > summary, .plan-version-history[open] > summary { border-bottom: 1px solid var(--line); }
+.plan-version-builder-body { display: grid; grid-template-columns: 1fr 1fr; }
+.plan-version-form { display: grid; align-content: start; gap: 12px; padding: 22px; }
+.plan-version-form + .plan-version-form { border-left: 1px solid var(--line); }
+.plan-version-form-primary { background: color-mix(in srgb, var(--accent-soft) 35%, var(--panel)); }
+.plan-version-form label { font-weight: 700; }
+.plan-version-form p { margin: 0; color: var(--muted); font-size: 12px; }
+.plan-version-form .button { justify-self: start; }
 
-.plan-rule-list dd {
-  margin: 0;
-  line-height: 1.7;
-}
+.plan-grill-panel { padding: 20px; }
+.plan-progress { padding: 5px 9px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.plan-question-card { max-width: 980px; margin: 0 auto; border-left: 3px solid var(--accent); box-shadow: none; }
+.plan-ready { display: flex; justify-content: space-between; gap: 20px; align-items: center; }
+.plan-ready h3, .plan-ready p { margin: 0; }
 
-.settings-form textarea {
-  width: 100%;
-  resize: vertical;
-}
+.plan-contract-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 14px; align-items: start; }
+.plan-contract-index { position: sticky; top: 12px; padding: 18px; }
+.plan-contract-index h2 { margin: 2px 0 14px; font-family: Georgia, "Times New Roman", serif; font-size: 28px; }
+.plan-contract-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.plan-contract-stats span { display: grid; gap: 1px; padding: 9px 8px; background: var(--panel-soft); color: var(--muted); font-size: 9px; }
+.plan-contract-stats strong { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 18px; line-height: 1; }
+.plan-contract-index nav { display: grid; border-top: 1px solid var(--line); }
+.plan-contract-index nav a { display: grid; grid-template-columns: 40px 1fr auto; gap: 6px; align-items: baseline; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.plan-contract-index nav a:hover strong { color: var(--accent); }
+.plan-contract-index nav span { color: var(--accent); font-size: 9px; font-weight: 700; }
+.plan-contract-index nav strong { font-size: 12px; }
+.plan-contract-index nav small { color: var(--muted); font-size: 9px; }
+.plan-contract-note { margin: 14px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.plan-contract-content { display: grid; gap: 14px; min-width: 0; }
+
+.plan-layer, .plan-risk-profile { scroll-margin-top: 14px; padding: 0 22px; }
+.plan-layer > header, .plan-risk-profile > header { display: flex; min-height: 88px; justify-content: space-between; gap: 20px; align-items: center; border-bottom: 1px solid var(--line-strong); }
+.plan-layer > header h2, .plan-risk-profile > header h2 { margin: 2px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 24px; }
+.plan-layer > header > span { color: var(--muted); font-size: 10px; }
+.plan-rule-list { display: grid; gap: 0; margin: 0; }
+.plan-rule-list > div { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 28px; padding: 19px 0; border-top: 1px solid var(--line); }
+.plan-rule-list > div:first-child { border-top: 0; }
+.plan-rule-list dt { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; align-content: start; font-weight: 700; }
+.plan-rule-list dt span { color: var(--accent); font-family: Georgia, "Times New Roman", serif; font-size: 10px; font-variant-numeric: tabular-nums; line-height: 1.9; }
+.plan-rule-list dd { margin: 0; color: #403a35; line-height: 1.85; white-space: pre-line; }
+
+.plan-risk-profile { border-left: 3px solid var(--warning); padding-bottom: 20px; }
+.plan-risk-profile .reading-note { margin: 15px 0 8px; color: var(--muted); font-size: 11px; }
+.plan-risk-list { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; margin: 0; padding: 0; list-style: none; }
+.plan-risk-list li { position: relative; padding: 11px 0 11px 18px; border-bottom: 1px solid var(--line); line-height: 1.65; }
+.plan-risk-list li::before { position: absolute; left: 1px; color: var(--warning); content: "—"; }
+.plan-version-history .table-wrap { padding: 0 18px 18px; }
+
+.settings-form textarea { width: 100%; resize: vertical; }

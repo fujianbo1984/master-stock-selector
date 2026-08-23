@@ -1,3 +1,5 @@
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -5,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from master_stock_selector.web.trading_plans import PlanConflict
 from master_stock_selector.web.users import SESSION_COOKIE, UserRepository
-from tests.test_watchlist_web import _client, _csrf
+from tests.test_watchlist_web import _authenticated_client, _client, _csrf
 
 
 def _confirm_all(repository: UserRepository, user_id: str, session_id: str) -> int:
@@ -49,10 +51,124 @@ def test_demo_grill_publishes_frozen_private_version(tmp_path: Path) -> None:
     revision = _confirm_all(repository, alice, session["session_id"])
     published = repository.trading_plans.publish(alice, session["session_id"], revision)
     assert published["version"] == "v0.1"
+    current = repository.trading_plans.current(alice)
+    assert current is not None
+    risk_codes = {item["code"] for item in current["risk_profile"]}
+    assert {
+        "MARGIN_ENABLED",
+        "RISK_2_PERCENT",
+        "UNBOUNDED_PORTFOLIO_RISK",
+        "NO_DRAWDOWN_GUARD",
+        "NO_PAUSE_GUARD",
+        "NO_EVENT_FILTER",
+        "NO_LIQUIDITY_FILTER",
+        "T1_STOP_GAP",
+        "FULL_R_SLIPPAGE",
+        "GROSS_EXPECTANCY_ONLY",
+    } <= risk_codes
+    frozen = json.dumps(current["content"], ensure_ascii=False, sort_keys=True)
+    assert hashlib.sha256(frozen.encode()).hexdigest() == current["content_hash"]
+    setup_layer = current["content"]["layers"]["setups"]
+    assert {"A1.rules", "A3.rules", "B1.rules", "B2.rules"} <= set(setup_layer)
+    setup_section = next(
+        section for section in current["display_sections"] if section["key"] == "setups"
+    )
+    assert [rule["title"] for rule in setup_section["rules"]] == [
+        "A1 突破前入场",
+        "A3 首次回调",
+        "B1 简单回调",
+        "B2 复杂回调",
+        "重入与叠加",
+        "启用形态",
+    ]
+    risk_section = next(
+        section for section in current["display_sections"] if section["key"] == "risk"
+    )
+    position_rule = next(
+        rule for rule in risk_section["rules"] if rule["id"] == "risk.position_sizing"
+    )
+    assert position_rule["value"] == "每笔使用完整 1R"
     assert repository.trading_plans.current(bob) is None
     assert repository.trading_plans.show(bob, published["version_id"]) is None
     with pytest.raises(PlanConflict):
         repository.trading_plans.publish(alice, session["session_id"], revision)
+
+
+def test_owner_plan_sharing_versions_and_global_revoke(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    owner = repository.create_user("我不是来玩的", "Secure-password-123")
+    viewer = repository.create_user("viewer", "Secure-password-123")
+    first = _published_demo(repository, owner)
+
+    shared_first = repository.trading_plans.share_current(owner, "首次共享执行边界。")
+    assert shared_first["version_id"] == first["version_id"]
+    assert shared_first["share_status"] == "ACTIVE"
+    assert repository.trading_plans.shared_by_id(viewer, shared_first["share_id"]) is None
+
+    session = repository.trading_plans.start(owner, from_version="current")
+    revision = _confirm_all(repository, owner, session["session_id"])
+    second = repository.trading_plans.publish(owner, session["session_id"], revision)
+    shared_second = repository.trading_plans.share_current(owner, "共享新版本。")
+    visible = repository.trading_plans.shared_versions(owner)
+
+    assert shared_second["version_id"] == second["version_id"]
+    assert [item["share_status"] for item in visible] == ["ACTIVE", "SUPERSEDED"]
+    assert repository.trading_plans.shared_by_id(owner, shared_first["share_id"]) is not None
+    assert repository.trading_plans.revoke_shares(owner) == 2
+    assert repository.trading_plans.current_share(owner) is None
+    assert repository.trading_plans.shared_versions(owner) == []
+    assert repository.trading_plans.shared_by_id(owner, shared_second["share_id"]) is None
+
+
+def test_only_site_owner_can_share_plan_and_viewers_see_sanitized_page(
+    tmp_path: Path,
+) -> None:
+    viewer = _client(tmp_path)
+    users = viewer.app.state.user_repository
+    owner_id = users.create_user("我不是来玩的", "Test-password-123", "站长")
+    _published_demo(users, owner_id)
+    owner = _authenticated_client(viewer.app, "我不是来玩的")
+
+    assert (
+        viewer.post(
+            "/a/plan/share",
+            data={"csrf_token": _csrf(viewer), "statement": "读者不能代理共享"},
+        ).status_code
+        == 403
+    )
+    published = owner.post(
+        "/a/plan/share",
+        data={"csrf_token": _csrf(owner), "statement": "本次重点收紧退出边界。"},
+        follow_redirects=False,
+    )
+    assert published.status_code == 303
+    share = users.trading_plans.current_share(owner_id)
+    assert share is not None
+
+    feed = viewer.get("/a/owner")
+    assert feed.status_code == 200
+    assert 'data-owner-view="plan"' in feed.text
+    assert '交易计划 v0.1' in feed.text
+    assert '本次重点收紧退出边界' in feed.text
+    detail = viewer.get(share["share_href"])
+    assert detail.status_code == 200
+    assert detail.headers["cache-control"] == "private, no-store"
+    assert detail.headers["x-robots-tag"] == "noindex, nofollow"
+    assert "A1 突破前入场" in detail.text
+    assert "Grill 过程" in detail.text
+    assert share["version_id"] not in detail.text
+    assert share["content_hash"] not in detail.text
+    assert "evaluation_cycle_id" not in detail.text
+
+    stopped = owner.post(
+        "/a/plan/share/stop",
+        data={"csrf_token": _csrf(owner)},
+        follow_redirects=False,
+    )
+    assert stopped.status_code == 303
+    assert viewer.get(share["share_href"]).status_code == 404
+    assert '交易计划 v0.1' not in viewer.get("/a/owner").text
 
 
 def test_grill_requires_confirmed_answer_revision_and_consistent_rules(
@@ -113,6 +229,33 @@ def test_grill_requires_confirmed_answer_revision_and_consistent_rules(
         issue.get("conflict_id") == "cash.full_r_conflict"
         for issue in validation["blocking_issues"]
     )
+
+
+def test_risk_profile_uses_confirmed_rule_semantics_not_exact_phrase(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    answers = {
+        "event.filter": {
+            "state": "CONFIRMED",
+            "value": "不设置财报、业绩预告、解禁、除权、复牌等事件过滤",
+        },
+        "scope.universe": {"state": "CONFIRMED", "value": "不设置流动性过滤"},
+        "execution.exit": {"state": "CONFIRMED", "value": "A股T＋1当日无法卖出止损"},
+        "review.recording": {
+            "state": "CONFIRMED",
+            "value": "只评价未扣佣金、融资利息和滑点的毛平均R",
+        },
+        "risk.risk_percent": {"state": "PROPOSED", "value": "2%"},
+    }
+    profile = repository.trading_plans._warnings(answers)
+    codes = {item["code"] for item in profile}
+    assert codes == {
+        "NO_EVENT_FILTER",
+        "NO_LIQUIDITY_FILTER",
+        "T1_STOP_GAP",
+        "GROSS_EXPECTANCY_ONLY",
+    }
+    assert all(item["source_question_ids"] for item in profile)
 
 
 def test_minor_versions_reuse_cycle_and_trades_bind_to_active_version(
@@ -274,6 +417,13 @@ def test_plan_api_scopes_freeze_and_web_isolation(tmp_path: Path) -> None:
     page = client.get("/a/plan")
     assert page.status_code == 200
     assert "风险画像" in page.text
+    assert "A1 突破前入场" in page.text
+    assert "A3 首次回调" in page.text
+    assert "B1 简单回调" in page.text
+    assert "B2 复杂回调" in page.text
+    assert "每笔使用完整 1R" in page.text
+    assert ">FULL_R<" not in page.text
+    assert "从完整模板开始" in page.text
     assert 'href="/a/plan' in page.text
     bob = TestClient(client.app)
     assert (

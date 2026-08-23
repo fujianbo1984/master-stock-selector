@@ -4,32 +4,98 @@
 {% block heading %}交易计划{% endblock %}
 {% block subtitle %}私有、版本化的个人交易执行合同{% endblock %}
 {% block content %}
-<section class="section panel review-hero">
-  <div><p class="eyebrow">个人工作区 · {{ current_user.display_name or current_user.username }}</p><h1>我的交易计划</h1>
-  {% if plan %}<p>当前生效 <strong>{{ plan.version_number }}</strong> · {{ plan.activated_at }} · 评估周期 {{ plan.evaluation_cycle_id }}</p>{% else %}<p>尚未发布计划。Grill 每次只确认一项规则，发布后版本不可覆盖修改。</p>{% endif %}</div>
+<section class="section panel review-hero plan-hero">
+  <div>
+    <p class="eyebrow">个人工作区 · {{ current_user.display_name or current_user.username }}</p>
+    <h1>我的交易计划</h1>
+    {% if plan %}<p class="plan-version-line"><span class="plan-active-mark">当前生效</span><strong>{{ plan.version_number }}</strong><span>{{ plan.activated_at }}</span><span>评估周期 {{ plan.evaluation_cycle_id }}</span></p>{% else %}<p>尚未发布计划。规则需逐项确认，发布后版本不可覆盖修改。</p>{% endif %}
+  </div>
   <div class="review-hero-note"><strong>个人数据 · 仅你可见</strong><span>不预测收益，不生成自动买卖指令</span></div>
 </section>
 
-<section class="section panel">
-  <div class="section-heading"><div><p class="eyebrow">Grill</p><h2>{{ '建立新版本' if plan else '建立第一份计划' }}</h2></div></div>
-  <div class="review-overview-grid">
-    <form method="post" action="/a/plan/grill/start" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="template" value="personal-a-share-v1"><label>修改目标<input name="change_goal" maxlength="500" placeholder="例如：重新评估组合总风险"></label><button class="button" type="submit">用示范计划开始</button></form>
-    <form method="post" action="/a/plan/grill/start" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if plan %}<input type="hidden" name="from_version" value="current">{% endif %}<label>修改目标<input name="change_goal" maxlength="500" placeholder="{{ '只澄清文字时可填：轻微修改' if plan else '从空白逐项讨论' }}"></label><button class="button button-secondary" type="submit">{{ '复制当前版本' if plan else '从空白开始' }}</button></form>
+{% if is_site_owner and plan %}
+<section class="section panel plan-share-panel" aria-labelledby="plan-share-title">
+  <div class="plan-share-copy">
+    <p class="eyebrow">站内共享</p>
+    <h2 id="plan-share-title">站长动态中的交易计划</h2>
+    {% if owner_share and owner_share.version_id == plan.version_id %}
+    <p><span class="plan-share-status active">已共享</span><strong>{{ owner_share.version_number }}</strong> · {{ owner_share.published_at }}；登录用户可查看这个冻结版本。</p>
+    {% elif owner_share %}
+    <p><span class="plan-share-status stale">待更新</span>站长动态仍展示 <strong>{{ owner_share.version_number }}</strong>，当前生效版本为 <strong>{{ plan.version_number }}</strong>。</p>
+    {% elif latest_share and latest_share.share_status == 'REVOKED' %}
+    <p><span class="plan-share-status stopped">已停止共享</span>共享页和历史动态均已对读者隐藏。</p>
+    {% else %}
+    <p><span class="plan-share-status">未共享</span>当前计划仍只在你的个人工作区中可见。</p>
+    {% endif %}
+  </div>
+  <div class="plan-share-actions">
+    {% if owner_share %}<a class="button button-secondary" href="{{ owner_share.share_href }}">查看共享页</a>{% endif %}
+    {% if not owner_share or owner_share.version_id != plan.version_id %}<button class="button" type="button" data-plan-share-open>{{ '共享新版本' if owner_share else '共享当前版本' }}</button>{% endif %}
+    {% if owner_share %}<form method="post" action="/a/plan/share/stop" data-plan-share-stop><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary plan-share-stop" type="submit">停止共享</button></form>{% endif %}
   </div>
 </section>
 
-{% if grill %}<section class="section panel">
-  <div class="section-heading"><div><p class="eyebrow">草稿 revision {{ grill.revision }}</p><h2>Grill 讨论</h2></div><span class="muted">已确认 {{ grill.progress.confirmed }} / {{ grill.progress.total }}</span></div>
-  {% if next_question.status == 'QUESTION' %}<article class="settings-card"><p class="settings-section-index">{{ next_question.question.section }}</p><h3>{{ next_question.question.title }}</h3><p>{{ next_question.question.prompt }}</p><p class="muted">{{ next_question.question.why }}</p>
-  <form method="post" action="/a/plan/grill/{{ grill.session_id }}/answer" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="question_id" value="{{ next_question.question.question_id }}"><input type="hidden" name="revision" value="{{ grill.revision }}">
-  {% if next_question.question.choices %}<label>你的明确决定<select name="value" required>{% for choice in next_question.question.choices %}<option value="{{ choice.value }}">{{ choice.label }}</option>{% endfor %}</select></label>{% else %}<label>你的明确决定<textarea name="value" rows="5" required>{{ grill.answers.get(next_question.question.question_id, {}).get('value', '') }}</textarea></label>{% endif %}<button class="button" type="submit">确认并继续</button></form></article>
-  {% else %}<h3>规则讨论已完成</h3><p>校验：{{ validation.status }}；{{ validation.blocking_issues|length }} 个待解决项。</p>{% if validation.warnings %}<ul class="settings-checklist">{% for warning in validation.warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul>{% endif %}{% if validation.status == 'READY' %}<form method="post" action="/a/plan/grill/{{ grill.session_id }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}"><button class="button" type="submit">确认并发布冻结版本</button></form>{% endif %}{% endif %}
+{% if not owner_share or owner_share.version_id != plan.version_id %}
+<dialog class="plan-share-dialog" data-plan-share-dialog aria-labelledby="plan-share-dialog-title">
+  <form method="post" action="/a/plan/share" class="settings-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="plan-share-dialog-heading">
+      <div><p class="eyebrow">冻结版本共享</p><h2 id="plan-share-dialog-title">共享 {{ plan.version_number }} 到站长动态</h2></div>
+      <button type="button" data-plan-share-close aria-label="关闭共享对话框">关闭</button>
+    </div>
+    <div class="plan-share-preview">
+      <div><span>已确认规则</span><strong>{{ plan.confirmed_rule_count }}</strong></div>
+      <div><span>执行层级</span><strong>{{ plan.display_sections|length }}</strong></div>
+      <div><span>可见范围</span><strong>仅登录用户</strong></div>
+    </div>
+    <label>本次计划说明<textarea name="statement" maxlength="300" rows="5" placeholder="例如：本次重点收紧突破失败后的退出边界。"></textarea><small>将作为动态摘要展示，最多 300 字。</small></label>
+    <div class="plan-share-boundary"><strong>会共享</strong><span>冻结规则、风险画像、版本号和生效时间。</span><strong>不会共享</strong><span>Grill 过程、内部 ID、内容哈希或其他私有数据。</span></div>
+    <label class="plan-share-consent"><input type="checkbox" required><span>我确认这是个人执行合同，不是买卖信号或收益承诺。</span></label>
+    <div class="plan-share-dialog-actions"><button class="button button-secondary" type="button" data-plan-share-close>取消</button><button class="button" type="submit">确认共享</button></div>
+  </form>
+</dialog>
+{% endif %}
+{% endif %}
+
+<details class="section panel plan-version-builder"{% if not plan or grill %} open{% endif %}>
+  <summary><span><span class="eyebrow">版本管理</span><strong>{{ '建立新版本' if plan else '建立第一份计划' }}</strong></span><span class="plan-summary-action">{{ '展开操作' if plan and not grill else '收起操作' }}</span></summary>
+  <div class="plan-version-builder-body">
+    {% if plan %}
+    <form method="post" action="/a/plan/grill/start" class="settings-form plan-version-form plan-version-form-primary"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="from_version" value="current"><label>本次修改目标<input name="change_goal" maxlength="500" placeholder="例如：调整A3的初始止损规则"></label><p>复制当前生效版本，在保留全部规则的基础上逐项修改。</p><button class="button" type="submit">复制当前版本并开始</button></form>
+    <form method="post" action="/a/plan/grill/start" class="settings-form plan-version-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="template" value="personal-a-share-v1"><label>重建目标<input name="change_goal" maxlength="500" placeholder="例如：以完整个人A股计划重新建立"></label><p>从完整个人A股计划模板开始，不继承当前版本。</p><button class="button button-secondary" type="submit">从完整模板开始</button></form>
+    {% else %}
+    <form method="post" action="/a/plan/grill/start" class="settings-form plan-version-form plan-version-form-primary"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="template" value="personal-a-share-v1"><label>计划目标<input name="change_goal" maxlength="500" placeholder="例如：建立个人A股日线交易合同"></label><p>载入完整个人A股计划，再逐项确认。</p><button class="button" type="submit">载入完整计划</button></form>
+    <form method="post" action="/a/plan/grill/start" class="settings-form plan-version-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>计划目标<input name="change_goal" maxlength="500" placeholder="从空白逐项讨论"></label><p>不使用预设内容，从第一条规则开始填写。</p><button class="button button-secondary" type="submit">从空白开始</button></form>
+    {% endif %}
+  </div>
+</details>
+
+{% if grill %}<section class="section panel plan-grill-panel">
+  <div class="section-heading"><div><p class="eyebrow">草稿 revision {{ grill.revision }}</p><h2>逐项确认规则</h2></div><span class="plan-progress">已确认 {{ grill.progress.confirmed }} / {{ grill.progress.total }}</span></div>
+  {% if next_question.status == 'QUESTION' %}<article class="settings-card plan-question-card"><p class="settings-section-index">{{ next_question.question.section }}</p><h3>{{ next_question.question.title }}</h3><p>{{ next_question.question.prompt }}</p><p class="muted">{{ next_question.question.why }}</p><form method="post" action="/a/plan/grill/{{ grill.session_id }}/answer" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="question_id" value="{{ next_question.question.question_id }}"><input type="hidden" name="revision" value="{{ grill.revision }}">{% if next_question.question.choices %}<label>你的明确决定<select name="value" required>{% for choice in next_question.question.choices %}<option value="{{ choice.value }}">{{ choice.label }}</option>{% endfor %}</select></label>{% else %}<label>你的明确决定<textarea name="value" rows="7" required>{{ grill.answers.get(next_question.question.question_id, {}).get('value', '') }}</textarea></label>{% endif %}<button class="button" type="submit">确认并继续</button></form></article>
+  {% else %}<div class="plan-ready"><div><h3>规则讨论已完成</h3><p>校验：{{ validation.status }}；{{ validation.blocking_issues|length }} 个待解决项。</p></div>{% if validation.status == 'READY' %}<form method="post" action="/a/plan/grill/{{ grill.session_id }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}"><button class="button" type="submit">确认并发布冻结版本</button></form>{% endif %}</div>{% if validation.warnings %}<ul class="plan-risk-list">{% for warning in validation.warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul>{% endif %}{% endif %}
 </section>{% endif %}
 
-{% if plan %}<section class="section review-overview-grid">
-  {% for layer_key, layer_title in [('operations','第一层 · 交易运营计划'),('risk','第二层 · 风险与组合'),('setups','第三层 · 入场形态')] %}<article class="panel review-panel"><div class="section-heading"><div><h2>{{ layer_title }}</h2></div></div><dl class="plan-rule-list">{% for key, decision in plan.content.layers[layer_key].items() %}<div><dt>{{ key }}</dt><dd>{{ decision.value }}</dd></div>{% endfor %}</dl></article>{% endfor %}
+{% if plan %}
+<section class="section plan-contract-layout">
+  <aside class="panel plan-contract-index" aria-label="交易计划目录"><p class="eyebrow">当前合同</p><h2>{{ plan.version_number }}</h2><div class="plan-contract-stats"><span><strong>{{ plan.confirmed_rule_count }}</strong> 条已确认规则</span><span><strong>{{ plan.display_sections|length }}</strong> 层执行合同</span></div><nav>{% for section in plan.display_sections %}<a href="#plan-{{ section.key }}"><span>{{ section.eyebrow }}</span><strong>{{ section.title }}</strong><small>{{ section.rules|length }} 条</small></a>{% endfor %}<a href="#plan-risk-profile"><span>边界</span><strong>风险画像</strong><small>{{ plan.risk_profile|length }} 项</small></a></nav><p class="plan-contract-note">页面由冻结版本中的已确认答案逐条生成；标题与代码标签只改善阅读，不改写原始版本。</p></aside>
+  <div class="plan-contract-content">
+    {% for section in plan.display_sections %}<article id="plan-{{ section.key }}" class="panel plan-layer"><header><div><p class="eyebrow">{{ section.eyebrow }}</p><h2>{{ section.title }}</h2></div><span>{{ section.rules|length }} 条规则</span></header><dl class="plan-rule-list">{% for rule in section.rules %}<div id="rule-{{ rule.id|replace('.', '-') }}"><dt><span>{{ '%02d'|format(loop.index) }}</span>{{ rule.title }}</dt><dd>{{ rule.value }}</dd></div>{% endfor %}</dl></article>{% endfor %}
+    {% if plan.risk_profile %}<article id="plan-risk-profile" class="panel plan-risk-profile"><header><div><p class="eyebrow">已确认边界</p><h2>风险画像</h2></div><span class="tag tag-caution">不阻止发布</span></header><p class="reading-note">由已确认规则确定性派生，不修改冻结版本内容。</p><ul class="plan-risk-list">{% for warning in plan.risk_profile %}<li>{{ warning.message }}</li>{% endfor %}</ul></article>{% endif %}
+  </div>
 </section>
-{% if plan.content.risk_warnings %}<section class="section panel review-panel"><div class="section-heading"><div><p class="eyebrow">已确认边界</p><h2>风险画像</h2></div><span class="tag tag-caution">不阻止发布</span></div><ul class="settings-checklist">{% for warning in plan.content.risk_warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul></section>{% endif %}{% endif %}
+{% endif %}
 
-{% if versions %}<section class="section panel review-panel"><div class="section-heading"><div><p class="eyebrow">只读历史</p><h2>版本历史</h2></div><span class="muted">{{ versions|length }} 个版本</span></div><div class="table-wrap"><table><thead><tr><th>版本</th><th>状态</th><th>变更类型</th><th>评估周期</th><th>生效时间</th></tr></thead><tbody>{% for version in versions %}<tr><td>{{ version.version_number }}</td><td>{{ version.status }}</td><td>{{ version.change_class }}</td><td>{{ version.evaluation_cycle_id }}</td><td>{{ version.activated_at or '未生效' }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% if versions %}<details class="section panel plan-version-history"><summary><span><span class="eyebrow">只读历史</span><strong>版本历史</strong></span><span>{{ versions|length }} 个版本</span></summary><div class="table-wrap"><table><thead><tr><th>版本</th><th>状态</th><th>变更类型</th><th>评估周期</th><th>生效时间</th></tr></thead><tbody>{% for version in versions %}<tr><td><strong>{{ version.version_number }}</strong></td><td>{{ {'ACTIVE':'当前生效','ARCHIVED':'历史版本'}.get(version.status, version.status) }}</td><td>{{ {'SUBSTANTIVE':'实质修改','MINOR':'文字澄清'}.get(version.change_class, version.change_class) }}</td><td>{{ version.evaluation_cycle_id }}</td><td>{{ version.activated_at or '未生效' }}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const shareDialog = document.querySelector("[data-plan-share-dialog]");
+  document.querySelector("[data-plan-share-open]")?.addEventListener("click", () => shareDialog?.showModal());
+  document.querySelectorAll("[data-plan-share-close]").forEach((button) => button.addEventListener("click", () => shareDialog?.close()));
+  document.querySelector("[data-plan-share-stop]")?.addEventListener("submit", (event) => {
+    if (!window.confirm("停止共享后，当前与历史计划共享页都会立即对读者隐藏。确认继续？")) event.preventDefault();
+  });
+</script>
 {% endblock %}
