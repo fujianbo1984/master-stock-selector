@@ -36,11 +36,11 @@
 </section>
 
 {% if not owner_share or owner_share.version_id != plan.version_id %}
-<dialog class="plan-share-dialog" data-plan-share-dialog aria-labelledby="plan-share-dialog-title">
+<dialog class="plan-share-dialog" data-plan-share-dialog aria-labelledby="plan-share-dialog-title" aria-describedby="plan-share-dialog-description">
   <form method="post" action="/a/plan/share" class="settings-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="plan-share-dialog-heading">
-      <div><p class="eyebrow">冻结版本共享</p><h2 id="plan-share-dialog-title">共享 {{ plan.version_number }} 到站长动态</h2></div>
+      <div><p class="eyebrow">冻结版本共享</p><h2 id="plan-share-dialog-title" tabindex="-1">共享 {{ plan.version_number }} 到站长动态</h2><p id="plan-share-dialog-description">发布后，登录用户可在站长动态中查看这份只读版本。</p></div>
       <button type="button" data-plan-share-close aria-label="关闭共享对话框">关闭</button>
     </div>
     <div class="plan-share-preview">
@@ -48,10 +48,14 @@
       <div><span>执行层级</span><strong>{{ plan.display_sections|length }}</strong></div>
       <div><span>可见范围</span><strong>仅登录用户</strong></div>
     </div>
-    <label>本次计划说明<textarea name="statement" maxlength="300" rows="5" placeholder="例如：本次重点收紧突破失败后的退出边界。"></textarea><small>将作为动态摘要展示，最多 300 字。</small></label>
-    <div class="plan-share-boundary"><strong>会共享</strong><span>冻结规则、风险画像、版本号和生效时间。</span><strong>不会共享</strong><span>Grill 过程、内部 ID、内容哈希或其他私有数据。</span></div>
-    <label class="plan-share-consent"><input type="checkbox" required><span>我确认这是个人执行合同，不是买卖信号或收益承诺。</span></label>
-    <div class="plan-share-dialog-actions"><button class="button button-secondary" type="button" data-plan-share-close>取消</button><button class="button" type="submit">确认共享</button></div>
+    <div class="plan-share-field">
+      <label for="plan-share-statement"><span>本次计划说明</span><small>选填</small></label>
+      <textarea id="plan-share-statement" name="statement" maxlength="300" rows="4" placeholder="例如：本次重点收紧突破失败后的退出边界。" aria-describedby="plan-share-statement-hint plan-share-statement-count" data-plan-share-statement></textarea>
+      <div class="plan-share-field-meta"><small id="plan-share-statement-hint">将作为动态摘要展示。</small><span id="plan-share-statement-count" aria-live="polite" data-plan-share-count>0 / 300</span></div>
+    </div>
+    <div class="plan-share-boundary" role="note"><strong>会共享</strong><span>冻结规则、风险画像、版本号和生效时间。</span><strong>不会共享</strong><span>Grill 过程、内部 ID、内容哈希或其他私有数据。</span></div>
+    <label class="plan-share-consent"><input type="checkbox" required data-plan-share-consent><span>我确认这是个人执行合同，不是买卖信号或收益承诺。</span></label>
+    <div class="plan-share-dialog-actions"><button class="button button-secondary" type="button" data-plan-share-close>取消</button><button class="button" type="submit" data-plan-share-submit disabled>确认共享</button></div>
   </form>
 </dialog>
 {% endif %}
@@ -92,8 +96,23 @@
 {% block scripts %}
 <script>
   const shareDialog = document.querySelector("[data-plan-share-dialog]");
-  document.querySelector("[data-plan-share-open]")?.addEventListener("click", () => shareDialog?.showModal());
+  const shareStatement = shareDialog?.querySelector("[data-plan-share-statement]");
+  const shareCount = shareDialog?.querySelector("[data-plan-share-count]");
+  const shareConsent = shareDialog?.querySelector("[data-plan-share-consent]");
+  const shareSubmit = shareDialog?.querySelector("[data-plan-share-submit]");
+  const syncShareDialog = () => {
+    if (shareCount && shareStatement) shareCount.textContent = `${shareStatement.value.length} / 300`;
+    if (shareSubmit && shareConsent) shareSubmit.disabled = !shareConsent.checked;
+  };
+  document.querySelector("[data-plan-share-open]")?.addEventListener("click", () => {
+    shareDialog?.showModal();
+    syncShareDialog();
+    document.getElementById("plan-share-dialog-title")?.focus({ preventScroll: true });
+  });
   document.querySelectorAll("[data-plan-share-close]").forEach((button) => button.addEventListener("click", () => shareDialog?.close()));
+  shareStatement?.addEventListener("input", syncShareDialog);
+  shareConsent?.addEventListener("change", syncShareDialog);
+  shareDialog?.addEventListener("click", (event) => { if (event.target === shareDialog) shareDialog.close(); });
   document.querySelector("[data-plan-share-stop]")?.addEventListener("submit", (event) => {
     if (!window.confirm("停止共享后，当前与历史计划共享页都会立即对读者隐藏。确认继续？")) event.preventDefault();
   });

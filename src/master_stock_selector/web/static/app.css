@@ -1777,24 +1777,34 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .plan-share-actions { display: flex; flex: none; align-items: center; gap: 8px; }
 .plan-share-actions form { margin: 0; }
 .plan-share-stop { color: var(--danger); }
-.plan-share-dialog { width: min(680px, calc(100vw - 80px)); padding: 0; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); box-shadow: 0 24px 70px rgba(20, 45, 76, .24); }
+.plan-share-dialog { width: min(700px, calc(100vw - 80px)); max-height: calc(100vh - 64px); padding: 0; overflow: auto; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); box-shadow: 0 24px 70px rgba(20, 45, 76, .24); }
 .plan-share-dialog::backdrop { background: rgba(16, 32, 52, .42); backdrop-filter: blur(2px); }
-.plan-share-dialog form { display: grid; gap: 18px; padding: 25px 27px 27px; }
-.plan-share-dialog-heading { display: flex; justify-content: space-between; gap: 24px; align-items: start; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+.plan-share-dialog form { display: grid; gap: 18px; padding: 26px 28px 28px; }
+.plan-share-dialog-heading { display: flex; justify-content: space-between; gap: 24px; align-items: start; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .plan-share-dialog-heading h2 { margin: 4px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 25px; }
-.plan-share-dialog-heading > button { border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.plan-share-dialog-heading h2:focus { outline: 0; }
+.plan-share-dialog-heading p:last-child { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+.plan-share-dialog-heading > button { min-height: 34px; padding: 0 10px; border: 1px solid var(--line); color: var(--muted); background: var(--panel-soft); cursor: pointer; }
+.plan-share-dialog-heading > button:hover { border-color: var(--line-strong); color: var(--text); }
 .plan-share-preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); background: var(--panel-soft); }
 .plan-share-preview > div { display: grid; gap: 4px; padding: 13px 14px; }
 .plan-share-preview > div + div { border-left: 1px solid var(--line); }
 .plan-share-preview span { color: var(--muted); font-size: 9px; }
 .plan-share-preview strong { font-family: Georgia, "Times New Roman", serif; font-size: 16px; }
-.plan-share-dialog label { display: grid; gap: 7px; font-size: 11px; font-weight: 700; }
-.plan-share-dialog label small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.plan-share-dialog label { font-size: 11px; font-weight: 700; }
+.plan-share-field { display: grid; gap: 7px; }
+.plan-share-field > label { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.plan-share-field > label small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.plan-share-field textarea { min-height: 96px; line-height: 1.65; }
+.plan-share-field-meta { display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+.plan-share-field-meta small { font-size: inherit; }
 .plan-share-boundary { display: grid; grid-template-columns: 78px 1fr; gap: 6px 12px; padding: 13px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); font-size: 10px; line-height: 1.6; }
 .plan-share-boundary span { color: var(--muted); }
-.plan-share-consent { grid-template-columns: 18px minmax(0, 1fr); align-items: start; }
+.plan-share-consent { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; cursor: pointer; }
 .plan-share-consent input { width: 16px; min-height: 16px; margin: 1px 0 0; accent-color: var(--accent); }
-.plan-share-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 3px; }
+.plan-share-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.plan-share-dialog-actions .button { min-width: 84px; justify-content: center; }
+.plan-share-dialog-actions .button:disabled { cursor: not-allowed; opacity: .45; }
 .shared-plan-hero { border-top: 3px solid var(--accent); }
 .shared-plan-statement { display: flex; justify-content: space-between; gap: 28px; align-items: center; padding: 20px 22px; }
 .shared-plan-statement h2 { max-width: 930px; margin: 4px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 18px; line-height: 1.65; }

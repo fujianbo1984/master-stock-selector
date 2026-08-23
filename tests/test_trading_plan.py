@@ -130,6 +130,13 @@ def test_only_site_owner_can_share_plan_and_viewers_see_sanitized_page(
     _published_demo(users, owner_id)
     owner = _authenticated_client(viewer.app, "我不是来玩的")
 
+    share_dialog = owner.get("/a/plan")
+    assert share_dialog.status_code == 200
+    assert 'data-plan-share-statement' in share_dialog.text
+    assert 'data-plan-share-count>0 / 300' in share_dialog.text
+    assert 'data-plan-share-submit disabled' in share_dialog.text
+    assert 'app.css?v=20260823-plan-share-v51' in share_dialog.text
+
     assert (
         viewer.post(
             "/a/plan/share",
