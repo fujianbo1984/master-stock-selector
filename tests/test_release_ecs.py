@@ -223,3 +223,27 @@ def test_generated_remote_scripts_are_posix_shell_syntax(tmp_path: Path) -> None
             check=False,
         )
         assert result.returncode == 0, result.stderr
+
+
+def test_candidate_schema_check_uses_the_packaged_schema_version(tmp_path: Path) -> None:
+    config = release_ecs.parse_args([])
+    part = tmp_path / "part-000"
+    part.write_bytes(b"release")
+    context = release_ecs.ReleaseContext(
+        config=config,
+        commit="a" * 40,
+        short_commit="aaaaaaa",
+        release_id="aaaaaaa-20260823t000000z",
+        archive=tmp_path / "archive.tar.gz",
+        archive_sha256="b" * 64,
+        css_sha256="c" * 64,
+        candidate_dir="/opt/masterstock.rehearsal-aaaaaaa",
+        staging_dir="/tmp/masterstock-release-aaaaaaa-20260823t000000z",
+        unit_name="masterstock-candidate-aaaaaaa-20260823t000000z",
+        parts=[part],
+    )
+
+    script = release_ecs.candidate_script(context)
+
+    assert "USER_SCHEMA_VERSION, UserRepository" in script
+    assert '== USER_SCHEMA_VERSION' in script

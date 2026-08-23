@@ -646,10 +646,10 @@ cookies="$state/cookies.txt"
 sudo -u masterstock "$candidate/.venv/bin/python" -m master_stock_selector.web.users_cli --database "$userdb" schema-migrate --apply >/dev/null
 sudo -u masterstock "$candidate/.venv/bin/python" - <<PY
 from pathlib import Path
-from master_stock_selector.web.users import UserRepository
+from master_stock_selector.web.users import USER_SCHEMA_VERSION, UserRepository
 repo = UserRepository(Path("$userdb"))
 repo.create_user("release-check", "ReleaseCheckOnly2026", "Release Check")
-assert repo.schema_status()["schema_version"] == 4
+assert repo.schema_status()["schema_version"] == USER_SCHEMA_VERSION
 PY
 systemd-run --unit="$unit" --uid=masterstock --property=WorkingDirectory="$candidate" --setenv=MASTERSTOCK_SECURE_COOKIES=0 --setenv=MASTERSTOCK_ACCESS_LOGGING=0 "$candidate/.venv/bin/masterstock" web --host 127.0.0.1 --port 18000 --market-database /var/lib/masterstock/market.sqlite3 --watchlist-database /var/lib/masterstock/master_watchlist.sqlite3 --user-database "$userdb"
 cleanup() {{ systemctl stop "$unit.service" >/dev/null 2>&1 || true; }}
