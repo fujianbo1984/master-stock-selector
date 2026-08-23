@@ -11,6 +11,7 @@ PULLBACK_ARTICLE_PATH = "/a/reading/adam-grimes-pullback-trading"
 BROOKS_PULLBACK_ARTICLE_PATH = "/a/reading/al-brooks-pullback-trading"
 COMBINED_PULLBACK_ARTICLE_PATH = "/a/reading/adam-and-brooks-pullback-execution"
 SUPPORT_RESISTANCE_ARTICLE_PATH = "/a/reading/support-resistance-price-boundaries"
+BROOKS_BREAKOUT_ARTICLE_PATH = "/a/reading/al-brooks-breakout-trading"
 READING_ARCHIVE_PATH = "/a/reading"
 
 
@@ -51,6 +52,24 @@ def test_logged_in_user_can_read_support_resistance_article(tmp_path):
     assert "Weinstein" in article.text
     assert "支撑与阻力是在特定时间框架和市场状态下" in article.text
     assert article.text.count("<h2") == 10
+    assert article.headers["cache-control"] == "private, no-store"
+    assert article.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_logged_in_user_can_read_al_brooks_breakout_article(tmp_path):
+    client = TestClient(_app(tmp_path))
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    article = client.get(BROOKS_BREAKOUT_ARTICLE_PATH)
+    assert article.status_code == 200
+    assert "突破不是穿过一条线" in article.text
+    assert "突破可以失败；失败突破也可以失败" in article.text
+    assert "把breakout先理解成“突破尝试”" in article.text
+    assert article.text.count("<h2") == 9
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"
 
@@ -131,7 +150,8 @@ def test_reading_archive_requires_login_and_lists_all_articles(tmp_path):
     ).status_code == 303
     archive = client.get(READING_ARCHIVE_PATH)
     assert archive.status_code == 200
-    assert archive.text.count('class="reading-tags"') == 8
+    assert archive.text.count('class="reading-tags"') == 9
+    assert f'href="{BROOKS_BREAKOUT_ARTICLE_PATH}"' in archive.text
     assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in archive.text
     assert f'href="{ARTICLE_PATH}"' in archive.text
     assert archive.headers["cache-control"] == "private, no-store"
@@ -252,6 +272,10 @@ def test_article_navigation_follows_publication_dates(tmp_path):
 
     newest = client.get(SUPPORT_RESISTANCE_ARTICLE_PATH)
     assert f'href="{COMBINED_PULLBACK_ARTICLE_PATH}"' in newest.text
+    assert f'href="{BROOKS_BREAKOUT_ARTICLE_PATH}"' in newest.text
+
+    newest = client.get(BROOKS_BREAKOUT_ARTICLE_PATH)
+    assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in newest.text
     assert "已经是最新一篇" in newest.text
 
 
