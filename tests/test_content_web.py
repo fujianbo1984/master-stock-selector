@@ -12,6 +12,7 @@ BROOKS_PULLBACK_ARTICLE_PATH = "/a/reading/al-brooks-pullback-trading"
 COMBINED_PULLBACK_ARTICLE_PATH = "/a/reading/adam-and-brooks-pullback-execution"
 SUPPORT_RESISTANCE_ARTICLE_PATH = "/a/reading/support-resistance-price-boundaries"
 BROOKS_BREAKOUT_ARTICLE_PATH = "/a/reading/al-brooks-breakout-trading"
+ADAM_BREAKOUT_ARTICLE_PATH = "/a/reading/adam-grimes-breakout-trading"
 READING_ARCHIVE_PATH = "/a/reading"
 
 
@@ -150,7 +151,8 @@ def test_reading_archive_requires_login_and_lists_all_articles(tmp_path):
     ).status_code == 303
     archive = client.get(READING_ARCHIVE_PATH)
     assert archive.status_code == 200
-    assert archive.text.count('class="reading-tags"') == 9
+    assert archive.text.count('class="reading-tags"') == 10
+    assert f'href="{ADAM_BREAKOUT_ARTICLE_PATH}"' in archive.text
     assert f'href="{BROOKS_BREAKOUT_ARTICLE_PATH}"' in archive.text
     assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in archive.text
     assert f'href="{ARTICLE_PATH}"' in archive.text
@@ -276,7 +278,13 @@ def test_article_navigation_follows_publication_dates(tmp_path):
 
     newest = client.get(BROOKS_BREAKOUT_ARTICLE_PATH)
     assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in newest.text
+    assert f'href="{ADAM_BREAKOUT_ARTICLE_PATH}"' in newest.text
+
+    newest = client.get(ADAM_BREAKOUT_ARTICLE_PATH)
+    assert f'href="{BROOKS_BREAKOUT_ARTICLE_PATH}"' in newest.text
     assert "已经是最新一篇" in newest.text
+    assert "真正要交易的不是越线，而是失衡" in newest.text
+    assert f"{ADAM_BREAKOUT_ARTICLE_PATH}/assets/images/fig-5-1-drys-breakout.jpg" in newest.text
 
 
 def test_adam_grimes_pullback_article_requires_login(tmp_path):
