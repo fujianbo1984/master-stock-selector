@@ -19,7 +19,7 @@
   <article class="panel review-panel">
     <div class="section-heading"><div><p class="eyebrow">方案拆分</p><h2>复盘概览</h2></div></div>
     <div class="table-wrap review-table"><table><thead><tr><th>交易方案</th><th>已完成</th><th>净收益</th><th>胜率</th><th>盈亏比</th><th>平均持仓日</th></tr></thead><tbody>
-    {% for setup, stats in review.get('by_setup', {}).items() %}<tr><td>{{ trade_setup_labels.get(setup, setup) }}</td><td>{{ stats.count }}</td><td>{{ stats.net_pnl }} 元</td><td>{% if stats.win_rate_pct is not none %}{{ stats.win_rate_pct }}%{% else %}—{% endif %}</td><td>{{ stats.profit_loss_ratio if stats.profit_loss_ratio is not none else '—' }}</td><td>{{ stats.avg_holding_days if stats.avg_holding_days is not none else '—' }}</td></tr>{% endfor %}
+    {% for setup, stats in review.get('by_setup', {}).items() %}<tr><td>{{ setup }}</td><td>{{ stats.count }}</td><td>{{ stats.net_pnl }} 元</td><td>{% if stats.win_rate_pct is not none %}{{ stats.win_rate_pct }}%{% else %}—{% endif %}</td><td>{{ stats.profit_loss_ratio if stats.profit_loss_ratio is not none else '—' }}</td><td>{{ stats.avg_holding_days if stats.avg_holding_days is not none else '—' }}</td></tr>{% endfor %}
     </tbody></table></div>
   </article>
   <article id="current-positions" class="panel review-panel">
@@ -32,7 +32,7 @@
 <section class="section panel review-panel">
   <div class="section-heading"><div><p class="eyebrow">版本化评估</p><h2>按评估周期与形态</h2></div><span class="muted">轻微版本连续累计；每组 30 笔完整交易才达到初步评价门槛</span></div>
   <div class="table-wrap review-table"><table><thead><tr><th>涉及版本</th><th>形态</th><th>已完成</th><th>毛平均R</th><th>净收益</th><th>胜率</th><th>样本状态</th></tr></thead><tbody>
-  {% for item in review.by_plan_setup.values() %}<tr><td>{{ item.plan_versions|join('、') if item.plan_versions else '未绑定' }}</td><td>{{ item.setup_code }}</td><td>{{ item.summary.count }}</td><td>{{ item.summary.gross_avg_r if item.summary.gross_avg_r is not none else '—' }}</td><td>{{ item.summary.net_pnl }} 元</td><td>{{ item.summary.win_rate_pct if item.summary.win_rate_pct is not none else '—' }}{% if item.summary.win_rate_pct is not none %}%{% endif %}</td><td>{{ item.sample_state }}</td></tr>{% endfor %}
+  {% for item in review.by_plan_setup.values() %}<tr><td>{{ item.plan_versions|join('、') if item.plan_versions else '未绑定' }}</td><td>{{ item.setup_code }} · {{ item.setup_name }}</td><td>{{ item.summary.count }}</td><td>{{ item.summary.gross_avg_r if item.summary.gross_avg_r is not none else '—' }}</td><td>{{ item.summary.net_pnl }} 元</td><td>{{ item.summary.win_rate_pct if item.summary.win_rate_pct is not none else '—' }}{% if item.summary.win_rate_pct is not none %}%{% endif %}</td><td>{{ item.sample_state }}</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 {% endif %}

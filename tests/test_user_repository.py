@@ -103,11 +103,11 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
     assert user_id
 
 
-def test_frozen_full_v4_schema_migrates_to_v8_without_data_loss(tmp_path: Path) -> None:
+def test_frozen_full_v4_schema_migrates_to_v9_without_data_loss(tmp_path: Path) -> None:
     path = tmp_path / "users-v4.sqlite3"
     connection = sqlite3.connect(path)
     connection.executescript(
@@ -162,10 +162,13 @@ def test_frozen_full_v4_schema_migrates_to_v8_without_data_loss(tmp_path: Path) 
     with repository.connect(read_only=True) as migrated_connection:
         trade = migrated_connection.execute(
             """SELECT setup_method,plan_version_id,evaluation_cycle_id,setup_code,
-            initial_stop_price
+            initial_stop_price,setup_kind,plan_setup_id,setup_name_snapshot
             FROM user_trade_execution WHERE execution_id='e1'"""
         ).fetchone()
-        assert tuple(trade) == ("PULLBACK_SUPPORT", None, None, None, 9.0)
+        assert tuple(trade) == (
+            "PULLBACK_SUPPORT", None, None, None, 9.0,
+            "LEGACY", None, "简单回调",
+        )
         for table in (
             "user_account",
             "user_session",
@@ -433,7 +436,7 @@ def test_setup_migration_maps_legacy_breakout_and_pullback_without_losing_rows(t
     }
 
 
-def test_user_trade_journal_accepts_all_eight_setup_options(tmp_path):
+def test_legacy_setup_inputs_are_preserved_but_not_treated_as_plan_setups(tmp_path):
     repository = UserRepository(tmp_path / "users.sqlite3")
     repository.initialize()
     user_id = repository.create_user("owner", "Secure-password-123")
@@ -462,8 +465,34 @@ def test_user_trade_journal_accepts_all_eight_setup_options(tmp_path):
 
     review = repository.trade_review(user_id, {})
 
-    assert {row["setup_method"]: row["setup_label"] for row in review["executions"]} == setups
-    assert list(review["by_setup"]) == list(setups)
+    assert {
+        row["setup_method"]: row["setup_label"] for row in review["executions"]
+    } == {key: f"历史：{label}" for key, label in setups.items()}
+    assert all(row["setup_kind"] == "LEGACY" for row in review["executions"])
+    assert review["by_plan_setup"] == {}
+
+
+def test_new_trade_without_plan_defaults_to_other(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+
+    execution_id = repository.record_trade(
+        user_id,
+        traded_on="2026-08-01",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+    )
+
+    trade = repository.trade_execution(user_id, execution_id)
+    assert trade is not None
+    assert trade["setup_kind"] == "OTHER"
+    assert trade["plan_setup_id"] is None
+    assert trade["setup_label"] == "其他（未归入交易计划）"
 
 
 def test_private_rows_are_scoped_by_user_id(tmp_path):

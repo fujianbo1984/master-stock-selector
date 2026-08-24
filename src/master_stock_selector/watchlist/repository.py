@@ -3629,6 +3629,11 @@ def _match_trade_executions(
                     "plan_version_id": row.get("plan_version_id"),
                     "evaluation_cycle_id": row.get("evaluation_cycle_id"),
                     "setup_code": row.get("setup_code"),
+                    "setup_kind": row.get("setup_kind", "LEGACY"),
+                    "plan_setup_id": row.get("plan_setup_id"),
+                    "setup_code_snapshot": row.get("setup_code_snapshot", ""),
+                    "setup_name_snapshot": row.get("setup_name_snapshot", ""),
+                    "other_setup_note": row.get("other_setup_note", ""),
                 }
             )
             continue
@@ -3653,6 +3658,11 @@ def _match_trade_executions(
                     "plan_version_id": lot.get("plan_version_id"),
                     "evaluation_cycle_id": lot.get("evaluation_cycle_id"),
                     "setup_code": lot.get("setup_code"),
+                    "setup_kind": lot.get("setup_kind", "LEGACY"),
+                    "plan_setup_id": lot.get("plan_setup_id"),
+                    "setup_code_snapshot": lot.get("setup_code_snapshot", ""),
+                    "setup_name_snapshot": lot.get("setup_name_snapshot", ""),
+                    "other_setup_note": lot.get("other_setup_note", ""),
                     "buy_execution_id": str(lot["buy_execution_id"]),
                     "sell_execution_id": str(row["execution_id"]),
                     "buy_date": str(lot["buy_date"]),
@@ -3750,13 +3760,14 @@ def _aggregate_completed_trades(
 
 
 def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for lot in lots:
         key = (
             str(lot["symbol"]),
             str(lot.get("setup_method") or DEFAULT_TRADE_SETUP),
             str(lot.get("plan_version_id") or ""),
             str(lot.get("setup_code") or ""),
+            str(lot.get("plan_setup_id") or ""),
         )
         item = grouped.setdefault(
             key,
@@ -3766,6 +3777,11 @@ def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, An
                 "plan_version_id": lot.get("plan_version_id"),
                 "evaluation_cycle_id": lot.get("evaluation_cycle_id"),
                 "setup_code": lot.get("setup_code"),
+                "setup_kind": lot.get("setup_kind", "LEGACY"),
+                "plan_setup_id": lot.get("plan_setup_id"),
+                "setup_code_snapshot": lot.get("setup_code_snapshot", ""),
+                "setup_name_snapshot": lot.get("setup_name_snapshot", ""),
+                "other_setup_note": lot.get("other_setup_note", ""),
                 "quantity": 0,
                 "cost": 0.0,
             },

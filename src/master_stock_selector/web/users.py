@@ -42,7 +42,10 @@ PLAN_SETUP_BY_TRADE_SETUP = {
     "PULLBACK_SUPPORT": "B1",
     "COMPLEX_PULLBACK": "B2",
 }
-USER_SCHEMA_VERSION = 8
+TRADE_SETUP_BY_PLAN_SETUP = {value: key for key, value in PLAN_SETUP_BY_TRADE_SETUP.items()}
+OTHER_SETUP_ID = "OTHER"
+OTHER_SETUP_LABEL = "其他（未归入交易计划）"
+USER_SCHEMA_VERSION = 9
 DEFAULT_ACCESS_LOG_RETENTION_DAYS = 90
 USER_REQUIRED_TABLES = frozenset(
     {
@@ -74,6 +77,84 @@ USER_REQUIRED_INDEXES = frozenset(
         "idx_user_plan_share_active",
     }
 )
+
+
+def _setup_assignment(
+    plan: Mapping[str, Any] | None,
+    *,
+    plan_setup_id: str = OTHER_SETUP_ID,
+    setup_code: str | None = None,
+    setup_method: str = "",
+    other_setup_note: str = "",
+) -> dict[str, Any]:
+    requested = str(plan_setup_id or "").strip().upper()
+    explicit_code = str(setup_code or "").strip().upper()
+    normalized_method = str(setup_method or "").strip().upper()
+    normalized_method = TRADE_SETUP_ALIASES.get(normalized_method, normalized_method)
+    if plan is None and normalized_method:
+        return {
+            "setup_kind": "LEGACY",
+            "plan_setup_id": None,
+            "setup_code": None,
+            "setup_code_snapshot": "",
+            "setup_name_snapshot": TRADE_SETUP_LABELS.get(normalized_method, normalized_method),
+            "other_setup_note": "",
+            "setup_method": normalized_method,
+        }
+    if explicit_code:
+        requested = explicit_code
+    elif not requested and normalized_method:
+        requested = PLAN_SETUP_BY_TRADE_SETUP.get(normalized_method, "")
+    elif requested == OTHER_SETUP_ID and normalized_method:
+        # Backwards-compatible explicit callers may still submit setup_method.
+        requested = PLAN_SETUP_BY_TRADE_SETUP.get(normalized_method, requested)
+    if requested and requested != OTHER_SETUP_ID:
+        if plan is None:
+            raise ValueError("没有可绑定的交易计划版本")
+        match = next(
+            (
+                item
+                for item in plan.get("setup_catalog", [])
+                if str(item.get("setup_id") or "").upper() == requested
+                and bool(item.get("enabled"))
+            ),
+            None,
+        )
+        if match is None:
+            raise ValueError("交易方案不属于所选交易计划版本或未启用")
+        code = str(match.get("code") or requested)
+        return {
+            "setup_kind": "PLAN",
+            "plan_setup_id": str(match.get("setup_id") or requested),
+            "setup_code": code,
+            "setup_code_snapshot": code,
+            "setup_name_snapshot": str(match.get("name") or code),
+            "other_setup_note": "",
+            "setup_method": TRADE_SETUP_BY_PLAN_SETUP.get(code, DEFAULT_TRADE_SETUP),
+        }
+    return {
+        "setup_kind": "OTHER",
+        "plan_setup_id": None,
+        "setup_code": None,
+        "setup_code_snapshot": "",
+        "setup_name_snapshot": OTHER_SETUP_LABEL,
+        "other_setup_note": str(other_setup_note or "").strip()[:300],
+        # Kept only for the legacy CHECK-constrained compatibility column.
+        "setup_method": DEFAULT_TRADE_SETUP,
+    }
+
+
+def _decorate_setup(item: dict[str, Any]) -> None:
+    kind = str(item.get("setup_kind") or "LEGACY")
+    snapshot = str(item.get("setup_name_snapshot") or "").strip()
+    if kind == "OTHER":
+        item["setup_label"] = OTHER_SETUP_LABEL
+    elif snapshot:
+        prefix = "历史：" if kind == "LEGACY" else ""
+        item["setup_label"] = prefix + snapshot
+    else:
+        setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
+        item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
 
 USER_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS user_account (
@@ -176,6 +257,12 @@ CREATE TABLE IF NOT EXISTS user_trade_execution (
                             plan_version_id TEXT,
                             evaluation_cycle_id TEXT,
                             setup_code TEXT,
+                            setup_kind TEXT NOT NULL DEFAULT 'LEGACY'
+                                CHECK (setup_kind IN ('PLAN', 'OTHER', 'LEGACY')),
+                            plan_setup_id TEXT,
+                            setup_code_snapshot TEXT NOT NULL DEFAULT '',
+                            setup_name_snapshot TEXT NOT NULL DEFAULT '',
+                            other_setup_note TEXT NOT NULL DEFAULT '',
                             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
@@ -360,6 +447,11 @@ class UserRepository:
                     "user_trade_execution.evaluation_cycle_id",
                     "user_trade_execution.setup_code",
                     "user_trade_execution.initial_stop_price",
+                    "user_trade_execution.setup_kind",
+                    "user_trade_execution.plan_setup_id",
+                    "user_trade_execution.setup_code_snapshot",
+                    "user_trade_execution.setup_name_snapshot",
+                    "user_trade_execution.other_setup_note",
                     "user_chart_drawing.content_text",
                     "user_chart_drawing.interval_scope",
                     "user_plan_grill_session.published_version_id",
@@ -427,6 +519,11 @@ class UserRepository:
                 "evaluation_cycle_id",
                 "setup_code",
                 "initial_stop_price",
+                "setup_kind",
+                "plan_setup_id",
+                "setup_code_snapshot",
+                "setup_name_snapshot",
+                "other_setup_note",
             }
             - trade_columns
         )
@@ -517,11 +614,60 @@ class UserRepository:
                 ("plan_version_id", "TEXT"),
                 ("evaluation_cycle_id", "TEXT"),
                 ("setup_code", "TEXT"),
+                (
+                    "setup_kind",
+                    "TEXT NOT NULL DEFAULT 'LEGACY' "
+                    "CHECK (setup_kind IN ('PLAN', 'OTHER', 'LEGACY'))",
+                ),
+                ("plan_setup_id", "TEXT"),
+                ("setup_code_snapshot", "TEXT NOT NULL DEFAULT ''"),
+                ("setup_name_snapshot", "TEXT NOT NULL DEFAULT ''"),
+                ("other_setup_note", "TEXT NOT NULL DEFAULT ''"),
             ):
                 if trade_table_exists and column not in trade_columns:
                     migration_statements.append(
                         f"ALTER TABLE user_trade_execution ADD COLUMN {column} {definition};"
                     )
+            if trade_table_exists and "setup_kind" not in trade_columns:
+                migration_statements.extend(
+                    [
+                        """UPDATE user_trade_execution
+                        SET setup_kind=CASE
+                                WHEN side='BUY' AND plan_version_id IS NOT NULL
+                                     AND setup_code IN ('A1','A3','B1','B2') THEN 'PLAN'
+                                WHEN side='BUY' THEN 'LEGACY'
+                                ELSE 'OTHER'
+                            END,
+                            plan_setup_id=CASE
+                                WHEN side='BUY' AND plan_version_id IS NOT NULL
+                                     AND setup_code IN ('A1','A3','B1','B2') THEN setup_code
+                                ELSE NULL
+                            END,
+                            setup_code_snapshot=CASE
+                                WHEN side='BUY' THEN COALESCE(setup_code, '') ELSE '' END,
+                            setup_name_snapshot=CASE
+                                WHEN side='BUY' AND plan_version_id IS NOT NULL THEN
+                                    CASE setup_code
+                                        WHEN 'A1' THEN '突破前入场'
+                                        WHEN 'A3' THEN '首次回调'
+                                        WHEN 'B1' THEN '简单回调'
+                                        WHEN 'B2' THEN '复杂回调'
+                                        ELSE setup_method
+                                    END
+                                ELSE CASE setup_method
+                                    WHEN 'FAILED_TEST' THEN '失败测试'
+                                    WHEN 'PULLBACK_SUPPORT' THEN '简单回调'
+                                    WHEN 'LOWER_TIMEFRAME_BREAKOUT' THEN '低周期突破入场'
+                                    WHEN 'COMPLEX_PULLBACK' THEN '复杂回调'
+                                    WHEN 'ANTI' THEN 'Anti（趋势转换首次回调）'
+                                    WHEN 'PRE_BREAKOUT_BASE' THEN '突破前基底入场'
+                                    WHEN 'POST_BREAKOUT_FIRST_PULLBACK' THEN '突破后回调'
+                                    WHEN 'FAILED_BREAKOUT' THEN '失败突破'
+                                    ELSE setup_method
+                                END
+                            END;""",
+                    ]
+                )
             if trade_table_exists and "initial_stop_price" not in trade_columns:
                 migration_statements.extend(
                     [
@@ -640,6 +786,12 @@ class UserRepository:
     plan_version_id TEXT,
     evaluation_cycle_id TEXT,
     setup_code TEXT,
+    setup_kind TEXT NOT NULL DEFAULT 'LEGACY'
+        CHECK (setup_kind IN ('PLAN', 'OTHER', 'LEGACY')),
+    plan_setup_id TEXT,
+    setup_code_snapshot TEXT NOT NULL DEFAULT '',
+    setup_name_snapshot TEXT NOT NULL DEFAULT '',
+    other_setup_note TEXT NOT NULL DEFAULT '',
                             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
@@ -651,7 +803,8 @@ class UserRepository:
                             symbol, side, quantity, price, fee, method, setup_method,
                             stop_price, initial_stop_price, rationale, invalidation, exit_reason,
                             market_context, observation_snapshot_json, created_at,
-                            updated_at, revision
+                            updated_at, revision, setup_kind, plan_setup_id,
+                            setup_code_snapshot, setup_name_snapshot, other_setup_note
                         )
                         SELECT execution_id, user_id, traded_on, traded_at, source_ref,
                                symbol, side, quantity, price, fee, method,
@@ -664,7 +817,25 @@ class UserRepository:
                                CASE WHEN side='BUY' THEN stop_price ELSE NULL END,
                                rationale, invalidation, exit_reason,
                                market_context, observation_snapshot_json, created_at,
-                               updated_at, revision
+                               updated_at, revision,
+                               CASE
+                                   WHEN side='BUY' AND plan_version_id IS NOT NULL
+                                        AND setup_code IN ('A1','A3','B1','B2') THEN 'PLAN'
+                                   WHEN side='BUY' THEN 'LEGACY'
+                                   ELSE 'OTHER'
+                               END,
+                               CASE
+                                   WHEN side='BUY' AND plan_version_id IS NOT NULL
+                                        AND setup_code IN ('A1','A3','B1','B2') THEN setup_code
+                                   ELSE NULL
+                               END,
+                               CASE WHEN side='BUY' THEN COALESCE(setup_code, '') ELSE '' END,
+                               CASE setup_method
+                                   WHEN 'BREAKOUT' THEN '突破后回调'
+                                   WHEN 'PULLBACK' THEN '简单回调'
+                                   ELSE setup_method
+                               END,
+                               ''
                         FROM user_trade_execution_legacy;""",
                         "DROP TABLE user_trade_execution_legacy;",
                     ]
@@ -1377,6 +1548,26 @@ class UserRepository:
                 (user_id, symbol.upper(), state, note.strip()),
             )
 
+    def trade_setup_options(
+        self, user_id: str, *, plan_version_id: str | None = None
+    ) -> list[dict[str, str]]:
+        plan = (
+            self.trading_plans.show(user_id, plan_version_id)
+            if plan_version_id
+            else self.trading_plans.current(user_id)
+        )
+        options = [{"value": OTHER_SETUP_ID, "label": OTHER_SETUP_LABEL}]
+        if plan is not None:
+            options.extend(
+                {
+                    "value": str(item["setup_id"]),
+                    "label": f"{item['code']} · {item['name']}",
+                }
+                for item in plan.get("setup_catalog", [])
+                if item.get("enabled")
+            )
+        return options
+
     def record_trade(
         self,
         user_id: str,
@@ -1389,7 +1580,7 @@ class UserRepository:
         price: float,
         fee: float,
         method: str,
-        setup_method: str = DEFAULT_TRADE_SETUP,
+        setup_method: str = "",
         stop_price: float | None = None,
         rationale: str = "",
         invalidation: str = "",
@@ -1399,7 +1590,10 @@ class UserRepository:
         permit_unmatched_sell: bool = False,
         plan_version_id: str | None = None,
         setup_code: str | None = None,
+        plan_setup_id: str = OTHER_SETUP_ID,
+        other_setup_note: str = "",
     ) -> str:
+        compatibility_setup = setup_method or DEFAULT_TRADE_SETUP
         values = _validated_trade_values(
             traded_on=traded_on,
             traded_at=traded_at,
@@ -1408,7 +1602,7 @@ class UserRepository:
             price=price,
             fee=fee,
             method=method,
-            setup_method=setup_method,
+            setup_method=compatibility_setup,
             stop_price=stop_price,
         )
         normalized_symbol = symbol.upper().strip()
@@ -1425,9 +1619,14 @@ class UserRepository:
                 plan = None
             if plan_version_id and plan is None:
                 raise ValueError("计划版本不存在或不属于当前用户")
-            normalized_setup_code = setup_code.upper().strip() if setup_code else None
-            if normalized_setup_code and normalized_setup_code not in PLAN_SETUP_CODES:
-                raise ValueError("计划形态必须为 A1、A3、B1 或 B2")
+            assignment = _setup_assignment(
+                plan,
+                plan_setup_id=plan_setup_id,
+                setup_code=setup_code,
+                setup_method=setup_method,
+                other_setup_note=other_setup_note,
+            )
+            values["setup_method"] = assignment["setup_method"]
             existing_rows = self._trade_rows(connection, user_id, normalized_symbol)
             candidate = {
                 "execution_id": execution_id,
@@ -1457,7 +1656,9 @@ class UserRepository:
                     initial_stop_price,
                     rationale, invalidation, exit_reason, market_context,
                     observation_snapshot_json, plan_version_id, evaluation_cycle_id, setup_code
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    , setup_kind, plan_setup_id, setup_code_snapshot,
+                    setup_name_snapshot, other_setup_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     execution_id,
@@ -1480,9 +1681,12 @@ class UserRepository:
                     json.dumps(observation_snapshot or {}, ensure_ascii=False, sort_keys=True),
                     plan["version_id"] if plan else None,
                     plan["evaluation_cycle_id"] if plan else None,
-                    (normalized_setup_code or PLAN_SETUP_BY_TRADE_SETUP.get(values["setup_method"]))
-                    if plan
-                    else None,
+                    assignment["setup_code"] if values["side"] == "BUY" else None,
+                    assignment["setup_kind"] if values["side"] == "BUY" else "OTHER",
+                    assignment["plan_setup_id"] if values["side"] == "BUY" else None,
+                    assignment["setup_code_snapshot"] if values["side"] == "BUY" else "",
+                    assignment["setup_name_snapshot"] if values["side"] == "BUY" else "",
+                    assignment["other_setup_note"] if values["side"] == "BUY" else "",
                 ),
             )
         return execution_id
@@ -1511,20 +1715,22 @@ class UserRepository:
             for item in collection:
                 symbol = str(item["symbol"])
                 item["stock_name"] = names.get(symbol, "名称待补")
-                setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
-                item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
-        setups = list(TRADE_SETUP_LABELS)
+                _decorate_setup(item)
         by_plan_setup: dict[str, dict[str, Any]] = {}
         for item in completed_trades:
+            if item.get("setup_kind") != "PLAN" or not item.get("plan_setup_id"):
+                continue
             cycle_id = str(item.get("evaluation_cycle_id") or "UNBOUND")
-            setup_code = item.get("setup_code") or item.get("setup_method") or DEFAULT_TRADE_SETUP
-            key = f"{cycle_id}:{setup_code}"
+            setup_id = str(item["plan_setup_id"])
+            setup_code = item.get("setup_code_snapshot") or item.get("setup_code") or setup_id
+            key = f"{cycle_id}:{setup_id}"
             by_plan_setup.setdefault(
                 key,
                 {
                     "evaluation_cycle_id": item.get("evaluation_cycle_id"),
                     "plan_version_ids": set(),
                     "setup_code": setup_code,
+                    "setup_name": item.get("setup_name_snapshot") or setup_code,
                     "trades": [],
                 },
             )
@@ -1550,11 +1756,17 @@ class UserRepository:
             "unmatched_sells": list(reversed(unmatched_sells)),
             "summary": _trade_statistics(completed_trades),
             "by_setup": {
-                setup: _trade_statistics(
-                    [item for item in completed_trades if item["setup_method"] == setup]
+                label: _trade_statistics(
+                    [item for item in completed_trades if item["setup_label"] == label]
                 )
-                for setup in setups
+                for label in dict.fromkeys(item["setup_label"] for item in completed_trades)
             },
+            "other_count": sum(
+                1 for item in completed_trades if item.get("setup_kind") == "OTHER"
+            ),
+            "legacy_count": sum(
+                1 for item in completed_trades if item.get("setup_kind") == "LEGACY"
+            ),
             "by_plan_setup": by_plan_setup,
             "sample_state": (
                 "样本不足：少于 20 笔已完成交易，仅展示描述统计。"
@@ -1584,8 +1796,7 @@ class UserRepository:
             return None
         item = dict(row)
         item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
-        setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
-        item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
+        _decorate_setup(item)
         return item
 
     def update_trade(
@@ -1600,7 +1811,9 @@ class UserRepository:
         price: float,
         fee: float,
         method: str,
-        setup_method: str = DEFAULT_TRADE_SETUP,
+        setup_method: str = "",
+        plan_setup_id: str = OTHER_SETUP_ID,
+        other_setup_note: str = "",
         stop_price: float | None = None,
         rationale: str = "",
         invalidation: str = "",
@@ -1616,7 +1829,7 @@ class UserRepository:
             price=price,
             fee=fee,
             method=method,
-            setup_method=setup_method,
+            setup_method=setup_method or DEFAULT_TRADE_SETUP,
             stop_price=stop_price,
         )
         with self.connect() as connection:
@@ -1632,22 +1845,43 @@ class UserRepository:
             if values["side"] == "SELL":
                 plan_version_id = None
                 evaluation_cycle_id = None
-                setup_code = None
+                assignment = _setup_assignment(None)
             elif str(current["side"]) == "BUY":
                 plan_version_id = current["plan_version_id"]
                 evaluation_cycle_id = current["evaluation_cycle_id"]
-                setup_code = (
-                    PLAN_SETUP_BY_TRADE_SETUP.get(values["setup_method"])
+                plan = (
+                    self.trading_plans.show(user_id, str(plan_version_id))
                     if plan_version_id
                     else None
                 )
+                if plan_setup_id == "LEGACY" and str(current["setup_kind"]) == "LEGACY":
+                    assignment = {
+                        "setup_kind": "LEGACY",
+                        "plan_setup_id": None,
+                        "setup_code": current["setup_code"],
+                        "setup_code_snapshot": current["setup_code_snapshot"],
+                        "setup_name_snapshot": current["setup_name_snapshot"],
+                        "other_setup_note": "",
+                        "setup_method": current["setup_method"],
+                    }
+                else:
+                    assignment = _setup_assignment(
+                        plan,
+                        plan_setup_id=plan_setup_id,
+                        setup_method=setup_method,
+                        other_setup_note=other_setup_note,
+                    )
             else:
                 plan = self.trading_plans.current(user_id)
                 plan_version_id = plan["version_id"] if plan else None
                 evaluation_cycle_id = plan["evaluation_cycle_id"] if plan else None
-                setup_code = (
-                    PLAN_SETUP_BY_TRADE_SETUP.get(values["setup_method"]) if plan else None
+                assignment = _setup_assignment(
+                    plan,
+                    plan_setup_id=plan_setup_id,
+                    setup_method=setup_method,
+                    other_setup_note=other_setup_note,
                 )
+            values["setup_method"] = assignment["setup_method"]
             rows = self._trade_rows(connection, user_id)
             for row in rows:
                 if str(row["execution_id"]) == execution_id:
@@ -1664,7 +1898,12 @@ class UserRepository:
                             "stop_price": values["stop_price"],
                             "plan_version_id": plan_version_id,
                             "evaluation_cycle_id": evaluation_cycle_id,
-                            "setup_code": setup_code,
+                            "setup_code": assignment["setup_code"],
+                            "setup_kind": assignment["setup_kind"],
+                            "plan_setup_id": assignment["plan_setup_id"],
+                            "setup_code_snapshot": assignment["setup_code_snapshot"],
+                            "setup_name_snapshot": assignment["setup_name_snapshot"],
+                            "other_setup_note": assignment["other_setup_note"],
                         }
                     )
                     break
@@ -1676,6 +1915,8 @@ class UserRepository:
                     method=?, setup_method=?, stop_price=?, rationale=?, invalidation=?,
                     exit_reason=?, market_context=?, observation_snapshot_json=?,
                     plan_version_id=?, evaluation_cycle_id=?, setup_code=?,
+                    setup_kind=?, plan_setup_id=?, setup_code_snapshot=?,
+                    setup_name_snapshot=?, other_setup_note=?,
                     revision=revision + 1, updated_at=CURRENT_TIMESTAMP
                 WHERE user_id=? AND execution_id=?
                 """,
@@ -1696,7 +1937,12 @@ class UserRepository:
                     json.dumps(observation_snapshot or {}, ensure_ascii=False, sort_keys=True),
                     plan_version_id,
                     evaluation_cycle_id,
-                    setup_code,
+                    assignment["setup_code"],
+                    assignment["setup_kind"],
+                    assignment["plan_setup_id"],
+                    assignment["setup_code_snapshot"],
+                    assignment["setup_name_snapshot"],
+                    assignment["other_setup_note"],
                     user_id,
                     execution_id,
                 ),
@@ -1720,6 +1966,7 @@ class UserRepository:
             date.fromisoformat(date_to)
         for row in rows:
             row["snapshot"] = json.loads(str(row.pop("observation_snapshot_json") or "{}"))
+            _decorate_setup(row)
         return list(reversed(rows))
 
     def validate_trade_batch(
@@ -1795,8 +2042,10 @@ class UserRepository:
                         quantity, price, fee, method, setup_method, stop_price,
                         initial_stop_price,
                         rationale, invalidation, exit_reason, market_context,
-                        observation_snapshot_json, plan_version_id, evaluation_cycle_id, setup_code
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        observation_snapshot_json, plan_version_id, evaluation_cycle_id, setup_code,
+                        setup_kind, plan_setup_id, setup_code_snapshot,
+                        setup_name_snapshot, other_setup_note
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         candidate["execution_id"],
@@ -1826,6 +2075,11 @@ class UserRepository:
                         candidate.get("plan_version_id"),
                         candidate.get("evaluation_cycle_id"),
                         candidate.get("setup_code"),
+                        candidate.get("setup_kind", "OTHER"),
+                        candidate.get("plan_setup_id"),
+                        candidate.get("setup_code_snapshot", ""),
+                        candidate.get("setup_name_snapshot", ""),
+                        candidate.get("other_setup_note", ""),
                     ),
                 )
             results = []
@@ -2015,13 +2269,18 @@ class UserRepository:
                 if plan is not None:
                     item["plan_version_id"] = plan["version_id"]
                     item["evaluation_cycle_id"] = plan["evaluation_cycle_id"]
-                item["setup_code"] = item.get("setup_code") or PLAN_SETUP_BY_TRADE_SETUP.get(
-                    item["setup_method"]
+                assignment = _setup_assignment(
+                    plan,
+                    plan_setup_id=str(item.get("plan_setup_id") or OTHER_SETUP_ID),
+                    setup_code=item.get("setup_code"),
+                    setup_method=str(item.get("explicit_setup_method") or ""),
+                    other_setup_note=str(item.get("other_setup_note") or ""),
                 )
+                item.update(assignment)
             else:
                 item["plan_version_id"] = None
                 item["evaluation_cycle_id"] = None
-                item["setup_code"] = None
+                item.update(_setup_assignment(None))
             execution_id = uuid4().hex
             candidate = {
                 **item,
@@ -2232,6 +2491,8 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         "price",
         "fee",
         "setup_method",
+        "plan_setup_id",
+        "other_setup_note",
         "stop_price",
         "rationale",
         "invalidation",
@@ -2265,6 +2526,7 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
     side = str(payload.get("side") or "").upper().strip()
     if side == "SELL" and stop_price is not None:
         raise ValueError("SELL 不能填写止损价")
+    explicit_setup_method = str(payload.get("setup_method") or "")
     values = _validated_trade_values(
         traded_on=str(payload.get("traded_on") or ""),
         traded_at=str(payload.get("traded_at") or ""),
@@ -2273,7 +2535,7 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         price=price,
         fee=fee,
         method="MANUAL",
-        setup_method=str(payload.get("setup_method") or DEFAULT_TRADE_SETUP),
+        setup_method=explicit_setup_method or DEFAULT_TRADE_SETUP,
         stop_price=stop_price,
     )
     client_id = str(payload.get("client_id") or "").strip()
@@ -2301,9 +2563,12 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         "fee": fee,
         "method": values["method"],
         "setup_method": values["setup_method"],
+        "explicit_setup_method": explicit_setup_method,
         "stop_price": values["stop_price"],
         "plan_version_id": str(payload.get("plan_version_id") or "").strip() or None,
         "setup_code": setup_code,
+        "plan_setup_id": str(payload.get("plan_setup_id") or OTHER_SETUP_ID).strip().upper(),
+        "other_setup_note": str(payload.get("other_setup_note") or "").strip()[:300],
         "rationale": str(payload.get("rationale") or "").strip(),
         "invalidation": str(payload.get("invalidation") or "").strip(),
         "exit_reason": str(payload.get("exit_reason") or "").strip(),

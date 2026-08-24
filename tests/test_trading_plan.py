@@ -70,6 +70,9 @@ def test_demo_grill_publishes_frozen_private_version(tmp_path: Path) -> None:
     assert hashlib.sha256(frozen.encode()).hexdigest() == current["content_hash"]
     setup_layer = current["content"]["layers"]["setups"]
     assert {"A1.rules", "A3.rules", "B1.rules", "B2.rules"} <= set(setup_layer)
+    assert [item["setup_id"] for item in current["setup_catalog"] if item["enabled"]] == [
+        "A1", "A3", "B1", "B2"
+    ]
     setup_section = next(
         section for section in current["display_sections"] if section["key"] == "setups"
     )
@@ -299,6 +302,9 @@ def test_minor_versions_reuse_cycle_and_trades_bind_to_active_version(
     assert buy is not None
     assert buy["plan_version_id"] == minor["version_id"]
     assert buy["setup_code"] == "A1"
+    assert buy["setup_kind"] == "PLAN"
+    assert buy["plan_setup_id"] == "A1"
+    assert buy["setup_name_snapshot"] == "突破前入场"
     raw_token, _ = repository.create_api_token(alice, "stop-editor", scopes=("trades:write",))
     principal = repository.api_token_user(raw_token)
     assert principal is not None
@@ -347,6 +353,56 @@ def test_minor_versions_reuse_cycle_and_trades_bind_to_active_version(
             fee=0,
             method="MANUAL",
             plan_version_id=minor["version_id"],
+        )
+
+
+def test_personal_plan_controls_trade_setup_options_and_other_is_default(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    alice = repository.create_user("alice", "Secure-password-123")
+    bob = repository.create_user("bob", "Secure-password-123")
+    session = repository.trading_plans.start(alice, template="personal-a-share-v1")
+    while True:
+        question = repository.trading_plans.next(alice, session["session_id"])
+        if question["status"] == "COMPLETE":
+            revision = int(question["revision"])
+            break
+        status = repository.trading_plans.status(alice, session["session_id"])
+        assert status is not None
+        identifier = question["question"]["question_id"]
+        proposed = status["answers"].get(identifier, {}).get("value")
+        value = "A1,B1" if identifier == "setup.enabled" else proposed
+        repository.trading_plans.answer(
+            alice,
+            session["session_id"],
+            {
+                "question_id": identifier,
+                "expected_revision": status["revision"],
+                "decision": {"state": "CONFIRMED", "value": value},
+            },
+        )
+    repository.trading_plans.publish(alice, session["session_id"], revision)
+
+    assert repository.trade_setup_options(alice) == [
+        {"value": "OTHER", "label": "其他（未归入交易计划）"},
+        {"value": "A1", "label": "A1 · 突破前入场"},
+        {"value": "B1", "label": "B1 · 简单回调"},
+    ]
+    assert repository.trade_setup_options(bob) == [
+        {"value": "OTHER", "label": "其他（未归入交易计划）"}
+    ]
+    other_id = repository.record_trade(
+        alice, traded_on="2026-08-01", symbol="000001.SZ", side="BUY",
+        quantity=100, price=10, fee=0, method="MANUAL",
+    )
+    other = repository.trade_execution(alice, other_id)
+    assert other is not None
+    assert other["setup_kind"] == "OTHER"
+    assert other["plan_version_id"]
+    with pytest.raises(ValueError, match="未启用"):
+        repository.record_trade(
+            alice, traded_on="2026-08-01", symbol="000002.SZ", side="BUY",
+            quantity=100, price=10, fee=0, method="MANUAL", plan_setup_id="A3",
         )
 
 
@@ -428,6 +484,11 @@ def test_plan_api_scopes_freeze_and_web_isolation(tmp_path: Path) -> None:
     assert "A3 首次回调" in page.text
     assert "B1 简单回调" in page.text
     assert "B2 复杂回调" in page.text
+    stock_page = client.get("/a/stocks/000001.SZ?date=2026-07-31")
+    assert stock_page.status_code == 200
+    assert '<option value="OTHER" selected>其他（未归入交易计划）</option>' in stock_page.text
+    for code in ("A1", "A3", "B1", "B2"):
+        assert f'<option value="{code}"' in stock_page.text
     assert "每笔使用完整 1R" in page.text
     assert ">FULL_R<" not in page.text
     assert "从完整模板开始" in page.text

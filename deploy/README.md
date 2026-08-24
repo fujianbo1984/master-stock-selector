@@ -49,7 +49,7 @@ HTTPS 模板对动态请求设置了按来源 IP 的限速和并发上限，静�
   HTTPS 登录后改为 `1`。Agent CLI 使用 Bearer Token，通过 SSH 隧道访问回环 HTTP
   不依赖会话 Cookie，仍可继续使用。
 
-访问日志匿名汇总与保留期使用用户库 schema v8。上线前先停止 Web，用
+个人交易方案归属快照及访问日志匿名汇总与保留期使用用户库 schema v9。上线前先停止 Web，用
 `scripts/manage_users.sh schema-migrate --apply --backup <未存在的备份路径>` 在 ECS
 权威用户库上显式迁移，不得上传本地数据库覆盖。需要归属地时，将合法获取并
 定期更新的 `GeoLite2-City.mmdb` 放在 `/var/lib/masterstock/`，并设置

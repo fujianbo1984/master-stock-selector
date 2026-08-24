@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .users import UserRepository
 
 GRILL_VERSION = "trading-plan-grill/1"
-SCHEMA_VERSION = "trading-plan/1"
+SCHEMA_VERSION = "trading-plan/2"
 ANSWER_STATES = {"CONFIRMED", "PROPOSED", "DEFERRED", "NOT_APPLICABLE"}
 
 ANSWER_VALUE_LABELS = {
@@ -32,6 +32,13 @@ PLAN_SECTIONS = (
     ("risk", "第二层", "类别、风险与目标"),
     ("setups", "第三层", "入场形态表"),
 )
+
+PLAN_SETUP_DEFINITIONS = {
+    "A1": {"name": "突破前入场", "rule_id": "A1.rules"},
+    "A3": {"name": "首次回调", "rule_id": "A3.rules"},
+    "B1": {"name": "简单回调", "rule_id": "B1.rules"},
+    "B2": {"name": "复杂回调", "rule_id": "B2.rules"},
+}
 
 
 def _question(
@@ -129,7 +136,7 @@ DEMO_ANSWERS = {
     "B1.rules": "既有上升趋势中的一段受控逆势回调，没有明显强劲下行动量，以高1等简单回调转强；不要求前高至少提供1R空间。初始止损=回调最低点－入场前一交易日TradingView ATR(14)；第一目标为实际1R并卖出一半。",
     "B2.rules": "两段清晰逆势运动的高2、楔形或显性/隐藏ABCD复杂回调；计划触发价至前高空间至少为计划1R；初始止损=第二腿最低点－0.01元；第一目标=前一摆动高点并卖出一半。高开后即使到前高不足1R仍交易并以前高为目标；若成交价已超前高，T+1次日仍在前高上方立即卖一半，否则等待重回前高。",
     "setup.reentry": "同一形态止损后，重新评估合格可完整1R重入并独立统计；持有A1后形成A3可再加完整1R并分别管理统计；B1止损后形成B2可重新完整1R入场；B1未止损但演化B2则不增加B2仓位。同一股票A1和A3双仓，行业集中度仍按1只股票计算。",
-    "setup.enabled": "A1、A3、B1、B2；A2（突破当下入场）暂不交易。",
+    "setup.enabled": "A1,A3,B1,B2",
 }
 
 
@@ -330,6 +337,25 @@ class TradingPlanService:
                     key: {**value, "state": "PROPOSED"}
                     for key, value in base_content.get("answers", {}).items()
                 }
+                try:
+                    self._setup_catalog(answers)
+                except ValueError:
+                    legacy = answers.get("setup.enabled", {})
+                    raw_enabled = str(legacy.get("value") or "").upper()
+                    legacy_codes = set(
+                        re.findall(
+                            r"(?<![A-Z0-9])(A1|A3|B1|B2)(?![A-Z0-9])",
+                            raw_enabled,
+                        )
+                    )
+                    if legacy_codes:
+                        answers["setup.enabled"] = {
+                            **legacy,
+                            "state": "PROPOSED",
+                            "value": ",".join(
+                                code for code in PLAN_SETUP_DEFINITIONS if code in legacy_codes
+                            ),
+                        }
                 base_version_id = requested_version_id
             if not plan:
                 c.execute(
@@ -495,6 +521,17 @@ class TradingPlanService:
             q["id"] for q in QUESTIONS if answers.get(q["id"], {}).get("state") != "CONFIRMED"
         ]
         conflicts = []
+        try:
+            self._setup_catalog(answers)
+        except ValueError as exc:
+            conflicts.append(
+                {
+                    "conflict_id": "setup.enabled.invalid",
+                    "severity": "BLOCKING",
+                    "rules": ["setup.enabled"],
+                    "message": str(exc),
+                }
+            )
         warnings = self._warnings(answers)
         if (
             answers.get("risk.position_sizing", {}).get("value") == "FULL_R"
@@ -653,8 +690,35 @@ class TradingPlanService:
             "schema_version": SCHEMA_VERSION,
             "answers": answers,
             "layers": layers,
+            "setup_catalog": self._setup_catalog(answers),
             "risk_warnings": self._warnings(answers),
         }
+
+    @staticmethod
+    def _setup_catalog(answers: Mapping[str, Any]) -> list[dict[str, Any]]:
+        decision = answers.get("setup.enabled", {})
+        raw = str(decision.get("value") or "") if isinstance(decision, Mapping) else ""
+        tokens = [token for token in re.split(r"[\s,，、;；]+", raw.upper()) if token]
+        unknown = [token for token in tokens if token not in PLAN_SETUP_DEFINITIONS]
+        if unknown:
+            raise ValueError(
+                "启用形态只能填写 A1、A3、B1、B2，以逗号分隔；无法识别："
+                + "、".join(unknown)
+            )
+        enabled = set(tokens)
+        catalog: list[dict[str, Any]] = []
+        for code, definition in PLAN_SETUP_DEFINITIONS.items():
+            rule = answers.get(str(definition["rule_id"]), {})
+            catalog.append(
+                {
+                    "setup_id": code,
+                    "code": code,
+                    "name": str(definition["name"]),
+                    "enabled": code in enabled,
+                    "rules": str(rule.get("value") or "") if isinstance(rule, Mapping) else "",
+                }
+            )
+        return catalog
 
     @staticmethod
     def _warnings(answers: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -754,6 +818,24 @@ class TradingPlanService:
         value = dict(row)
         value["content"] = json.loads(str(value.pop("content_json")))
         answers = value["content"].get("answers", {})
+        catalog = value["content"].get("setup_catalog")
+        if not isinstance(catalog, list):
+            try:
+                catalog = self._setup_catalog(answers)
+            except ValueError:
+                # Read-only compatibility for older frozen versions.  Never infer
+                # anything except the four explicit, recognizable setup codes.
+                raw = str(answers.get("setup.enabled", {}).get("value") or "").upper()
+                codes = set(
+                    re.findall(r"(?<![A-Z0-9])(A1|A3|B1|B2)(?![A-Z0-9])", raw)
+                )
+                compatible_answers = dict(answers)
+                compatible_answers["setup.enabled"] = {
+                    "state": "CONFIRMED",
+                    "value": ",".join(code for code in PLAN_SETUP_DEFINITIONS if code in codes),
+                }
+                catalog = self._setup_catalog(compatible_answers)
+        value["setup_catalog"] = catalog
         value["risk_profile"] = self._warnings(answers)
         value["display_sections"] = self._display_sections(answers)
         value["confirmed_rule_count"] = sum(

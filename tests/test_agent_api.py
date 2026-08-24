@@ -132,6 +132,9 @@ def test_agent_api_preflight_atomic_commit_idempotency_and_stop_update(tmp_path)
     assert listed.json()["count"] == 2
     buy = next(item for item in listed.json()["trades"] if item["side"] == "BUY")
     sell = next(item for item in listed.json()["trades"] if item["side"] == "SELL")
+    assert buy["setup_kind"] == "OTHER"
+    assert buy["plan_setup_id"] is None
+    assert buy["setup_label"] == "其他（未归入交易计划）"
     changed = client.patch(
         f"/api/v1/trades/{buy['execution_id']}/stop",
         headers=headers,

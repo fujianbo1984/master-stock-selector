@@ -13,18 +13,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from ...watchlist.charting import keltner_channels
 from ...watchlist.industry import INDUSTRY_POLICY_VERSION
 from ...watchlist.industry_confirmation import build_industry_weinstein_confirmation
-from ...watchlist.repository import (
-    DEFAULT_TRADE_SETUP,
-    TRADE_SETUP_LABELS,
-    MarketDataReader,
-    WatchlistRepository,
-)
+from ...watchlist.repository import MarketDataReader, WatchlistRepository
 from ..owner import (
     OWNER_READING_NOTES,
     build_owner_activity_feed,
     build_owner_trade_feed,
 )
-from ..users import AuthenticatedUser, UserRepository
+from ..users import OTHER_SETUP_ID, OTHER_SETUP_LABEL, AuthenticatedUser, UserRepository
 from .auth import current_user, require_user
 
 METHOD_LABELS = {"minervini": "Minervini", "weinstein": "Weinstein"}
@@ -1047,7 +1042,6 @@ def build_watchlist_router(
                 "query_date": repository.latest_fact_date(),
                 "latest_date": repository.latest_fact_date(),
                 "review": review,
-                "trade_setup_labels": TRADE_SETUP_LABELS,
             },
         )
 
@@ -1139,6 +1133,22 @@ def build_watchlist_router(
                 pass
         if editing_trade is not None and str(editing_trade["symbol"]) != symbol.upper():
             raise HTTPException(status_code=404, detail="trade does not belong to this stock")
+        setup_options = (
+            users.trade_setup_options(
+                user.user_id,
+                plan_version_id=(
+                    str(editing_trade.get("plan_version_id"))
+                    if editing_trade and editing_trade.get("plan_version_id")
+                    else None
+                ),
+            )
+            if user is not None
+            else [{"value": OTHER_SETUP_ID, "label": OTHER_SETUP_LABEL}]
+        )
+        if editing_trade and editing_trade.get("setup_kind") == "LEGACY":
+            setup_options.append(
+                {"value": "LEGACY", "label": str(editing_trade.get("setup_label") or "历史分类")}
+            )
         navigation = _stock_navigation(
             repository,
             market_reader,
@@ -1186,9 +1196,9 @@ def build_watchlist_router(
                 "manual_labels": MANUAL_LABELS,
                 "minervini_check_labels": MINERVINI_CHECK_LABELS,
                 "minervini_metric_labels": MINERVINI_METRIC_LABELS,
-                "trade_setup_labels": TRADE_SETUP_LABELS,
+                "trade_setup_options": setup_options,
                 "exit_reason_options": EXIT_REASON_OPTIONS,
-                "default_trade_setup": DEFAULT_TRADE_SETUP,
+                "default_plan_setup": OTHER_SETUP_ID,
                 "editing_trade": editing_trade,
                 "trade_prefill": trade_prefill,
                 "navigation": navigation,
@@ -1448,7 +1458,8 @@ def build_watchlist_router(
                 quantity=int(value("quantity")),
                 price=float(value("price")),
                 fee=float(value("fee", "0") or "0"),
-                method="MANUAL", setup_method=value("setup_method", DEFAULT_TRADE_SETUP),
+                method="MANUAL", plan_setup_id=value("plan_setup_id", OTHER_SETUP_ID),
+                other_setup_note=value("other_setup_note"),
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"),
                 invalidation=value("invalidation"),
@@ -1487,7 +1498,8 @@ def build_watchlist_router(
                 traded_on=traded_on, traded_at=value("traded_at"), side=value("side"),
                 quantity=int(value("quantity")), price=float(value("price")),
                 fee=float(value("fee", "0") or "0"), method="MANUAL",
-                setup_method=value("setup_method", DEFAULT_TRADE_SETUP),
+                plan_setup_id=value("plan_setup_id", OTHER_SETUP_ID),
+                other_setup_note=value("other_setup_note"),
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"), invalidation=value("invalidation"),
                 exit_reason=exit_reason, market_context=value("market_context"),

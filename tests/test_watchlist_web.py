@@ -1568,18 +1568,10 @@ def test_stock_industry_context_is_optional_and_does_not_replace_method_evidence
     for reason in ("部分止盈", "抵达阻力位", "高潮离场", "形态不符合预期", "其他"):
         assert f">{reason}</option>" in page.text
     assert 'name="exit_reason_other"' in page.text
-    for label in (
-        "失败测试",
-        "简单回调",
-        "低周期突破入场",
-        "复杂回调",
-        "Anti（趋势转换首次回调）",
-        "突破前基底入场",
-        "突破后回调",
-        "失败突破",
-    ):
-        assert label in page.text
-    assert page.text.count('<option value="') >= 10
+    assert "其他（未归入交易计划）" in page.text
+    assert 'name="plan_setup_id"' in page.text
+    assert 'name="other_setup_note"' in page.text
+    assert "突破前基底入场" not in page.text
     assert "行业背景（仅人工参考）" in page.text
     assert "行业代理不参与 000001.SZ 的 Weinstein 或 Minervini 结论。" in page.text
 
@@ -1617,7 +1609,7 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
         data={
             "csrf_token": _csrf(client),
             "traded_on": "2026-07-31", "side": "BUY", "quantity": "100",
-                "price": "12.5", "fee": "5", "setup_method": "BREAKOUT", "stop_price": "12.0",
+                "price": "12.5", "fee": "5", "plan_setup_id": "OTHER", "stop_price": "12.0",
             "rationale": "突破", "invalidation": "跌破止损", "market_context": "指数 Stage 2",
         },
         follow_redirects=False,
@@ -1637,7 +1629,7 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
     assert page.status_code == 200
     assert "实际成交的描述统计，不生成买卖指令" in page.text
     assert "已完成交易" in page.text
-    assert "突破" in page.text
+    assert "其他（未归入交易计划）" in page.text
     assert "平安银行" in page.text
     assert "000001.SZ" in page.text
     assert "部分止盈" in page.text
