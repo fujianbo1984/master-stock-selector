@@ -534,7 +534,35 @@ def test_trade_edits_keep_plan_binding_consistent(tmp_path: Path) -> None:
     repository = UserRepository(tmp_path / "users.sqlite3")
     repository.initialize()
     user = repository.create_user("alice", "Secure-password-123")
+    legacy_buy = repository.record_trade(
+        user,
+        traded_on="2026-07-31",
+        symbol="000003.SZ",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        setup_method="PRE_BREAKOUT_BASE",
+    )
+    assert repository.trade_execution(user, legacy_buy)["plan_version_id"] is None
     plan = _published_demo(repository, user)
+    repository.update_trade(
+        user,
+        legacy_buy,
+        traded_on="2026-07-31",
+        traded_at="",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        plan_setup_id="A1",
+    )
+    rebound_legacy_buy = repository.trade_execution(user, legacy_buy)
+    assert rebound_legacy_buy["plan_version_id"] == plan["version_id"]
+    assert rebound_legacy_buy["plan_setup_id"] == "A1"
+
     buy_id = repository.record_trade(
         user,
         traded_on="2026-08-01",
@@ -611,3 +639,45 @@ def test_trade_edits_keep_plan_binding_consistent(tmp_path: Path) -> None:
     changed_buy = repository.trade_execution(user, unmatched_sell)
     assert changed_buy["plan_version_id"] == plan["version_id"]
     assert changed_buy["setup_code"] == "B1"
+
+
+def test_web_trade_edit_binds_legacy_buy_to_current_plan(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    repository = client.app.state.user_repository
+    user = repository.session_user(client.cookies.get(SESSION_COOKIE))
+    assert user is not None
+    execution_id = repository.record_trade(
+        user.user_id,
+        traded_on="2026-07-31",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=12.5,
+        fee=0,
+        method="MANUAL",
+        setup_method="PRE_BREAKOUT_BASE",
+    )
+    plan = _published_demo(repository, user.user_id)
+
+    response = client.post(
+        f"/a/trades/{execution_id}",
+        data={
+            "csrf_token": _csrf(client),
+            "traded_on": "2026-07-31",
+            "traded_at": "",
+            "side": "BUY",
+            "quantity": "100",
+            "price": "12.5",
+            "fee": "0",
+            "plan_setup_id": "A1",
+            "stop_price": "12.0",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/a/stocks/000001.SZ#trade-journal"
+    saved = repository.trade_execution(user.user_id, execution_id)
+    assert saved is not None
+    assert saved["plan_version_id"] == plan["version_id"]
+    assert saved["plan_setup_id"] == "A1"

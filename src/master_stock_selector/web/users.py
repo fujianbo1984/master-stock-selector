@@ -1865,6 +1865,14 @@ class UserRepository:
                         "setup_method": current["setup_method"],
                     }
                 else:
+                    requested_setup = str(plan_setup_id or "").strip().upper()
+                    if (
+                        plan is None
+                        and requested_setup not in {"", OTHER_SETUP_ID}
+                    ) or (plan is None and setup_method):
+                        plan = self.trading_plans.current(user_id)
+                        plan_version_id = plan["version_id"] if plan else None
+                        evaluation_cycle_id = plan["evaluation_cycle_id"] if plan else None
                     assignment = _setup_assignment(
                         plan,
                         plan_setup_id=plan_setup_id,
