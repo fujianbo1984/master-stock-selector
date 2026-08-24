@@ -50,6 +50,7 @@
   let editingDrawingId = null;
   let requestVersion = 0;
   let requestController = null;
+  let adjacentPrefetchSignature = "";
   let methodEventsById = new Map();
   const canonicalDrawingAnchors = new Map();
   const chartViewStorageKey = "masterstock-chart:view";
@@ -359,11 +360,39 @@
     return `/api/a/stocks/${encodeURIComponent(targetSymbol)}/chart?${query}`;
   };
   const chartCacheKey = (url) => `masterstock-chart:${url}`;
+  const chartCacheIndexKey = "masterstock-chart:index:v2";
+  const chartCacheLimit = 12;
   const cachedPayload = (url) => {
-    try { return JSON.parse(window.sessionStorage.getItem(chartCacheKey(url)) || "null"); } catch (_) { return null; }
+    const key = chartCacheKey(url);
+    try { return JSON.parse(window.sessionStorage.getItem(key) || "null"); }
+    catch (_) {
+      try { window.sessionStorage.removeItem(key); } catch (_) { /* Storage can be unavailable. */ }
+      return null;
+    }
   };
   const storePayload = (url, value) => {
-    try { window.sessionStorage.setItem(chartCacheKey(url), JSON.stringify(value)); } catch (_) { /* Browser storage can be unavailable. */ }
+    const key = chartCacheKey(url);
+    const serialized = JSON.stringify(value);
+    const write = () => {
+      window.sessionStorage.setItem(key, serialized);
+      const prior = JSON.parse(window.sessionStorage.getItem(chartCacheIndexKey) || "[]");
+      const index = [key, ...prior.filter(item => item !== key)];
+      index.slice(chartCacheLimit).forEach(item => window.sessionStorage.removeItem(item));
+      window.sessionStorage.setItem(chartCacheIndexKey, JSON.stringify(index.slice(0, chartCacheLimit)));
+    };
+    try { write(); }
+    catch (_) {
+      try {
+        const staleKeys = [];
+        for (let index = 0; index < window.sessionStorage.length; index += 1) {
+          const item = window.sessionStorage.key(index);
+          if (item?.startsWith("masterstock-chart:") && item !== chartCacheIndexKey) staleKeys.push(item);
+        }
+        staleKeys.forEach(item => window.sessionStorage.removeItem(item));
+        window.sessionStorage.removeItem(chartCacheIndexKey);
+        write();
+      } catch (_) { /* Browser storage can be unavailable or too small. */ }
+    }
   };
   const chartDate = (value) => typeof value === "string" ? value : `${value.year}-${String(value.month).padStart(2, "0")}-${String(value.day).padStart(2, "0")}`;
   const compactVolume = (value) => {
@@ -452,12 +481,15 @@
     requestController = controller;
     const url = chartRequest(symbol, date, settings());
     const cached = cachedPayload(url);
+    let freshPayloadDrawn = false;
     setChartState(cached?.status === "OK" ? "refreshing" : "loading");
     loadState.textContent = cached?.status === "OK" ? "正在检查更新…" : "";
     try {
       if (cached?.status === "OK") {
-        const combined = await withPrivateOverlay(cached);
-        if (version === requestVersion) drawPayload(combined);
+        drawPayload(cached);
+        void withPrivateOverlay(cached).then((combined) => {
+          if (version === requestVersion && !freshPayloadDrawn) drawPayload(combined);
+        });
       }
       const response = await fetch(url, { signal: controller.signal });
       const nextPayload = await response.json();
@@ -473,10 +505,13 @@
         return;
       }
       storePayload(url, nextPayload);
-      const combined = await withPrivateOverlay(nextPayload);
       if (version === requestVersion) {
-        drawPayload(combined);
+        freshPayloadDrawn = true;
+        drawPayload(nextPayload);
         setChartState("idle");
+        scheduleAdjacentChartPrefetch();
+        const combined = await withPrivateOverlay(nextPayload);
+        if (version === requestVersion) drawPayload(combined);
       }
     } catch (error) {
       if (error?.name === "AbortError") return;
@@ -498,17 +533,27 @@
       }
     }
   };
-  const prefetchAdjacentCharts = () => {
-    root.querySelectorAll("[data-chart-previous], [data-chart-next]").forEach((link) => {
+  const prefetchAdjacentCharts = async () => {
+    const links = [root.querySelector("[data-chart-next]"), root.querySelector("[data-chart-previous]")].filter(Boolean);
+    for (const link of links) {
       const match = new URL(link.href, window.location.origin).pathname.match(/\/a\/stocks\/([^/]+)\/chart$/);
-      if (!match) return;
+      if (!match) continue;
       const url = chartRequest(decodeURIComponent(match[1]), date, settings());
-      if (cachedPayload(url)?.status === "OK") return;
-      fetch(url).then(async (response) => {
+      if (cachedPayload(url)?.status === "OK") continue;
+      try {
+        const response = await fetch(url);
         const nextPayload = await response.json();
         if (response.ok && nextPayload.status === "OK") storePayload(url, nextPayload);
-      }).catch(() => {});
-    });
+      } catch (_) { /* Prefetch is opportunistic. */ }
+    }
+  };
+  const scheduleAdjacentChartPrefetch = () => {
+    const signature = JSON.stringify(settings());
+    if (adjacentPrefetchSignature === signature) return;
+    adjacentPrefetchSignature = signature;
+    const run = () => { void prefetchAdjacentCharts(); };
+    if ("requestIdleCallback" in window) window.requestIdleCallback(run, { timeout: 1500 });
+    else window.setTimeout(run, 350);
   };
   const pointFromEvent = (event) => {
     const rect = overlay.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top;
@@ -717,6 +762,4 @@
   root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
   chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); request();
-  if ("requestIdleCallback" in window) window.requestIdleCallback(prefetchAdjacentCharts, { timeout: 1200 });
-  else window.setTimeout(prefetchAdjacentCharts, 250);
 })();

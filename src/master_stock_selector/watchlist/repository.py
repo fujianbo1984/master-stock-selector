@@ -1161,6 +1161,23 @@ class WatchlistRepository:
         self.path = Path(path)
         self._initialized = False
         self._initialize_lock = Lock()
+        self._breadth_cache: dict[
+            tuple[str, str, int, bool, tuple[tuple[int, int], tuple[int, int]]],
+            list[dict[str, Any]],
+        ] = {}
+        self._breadth_cache_lock = Lock()
+
+    def _database_revision(self) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Track both the main file and WAL so read caches follow live inserts."""
+
+        def fingerprint(path: Path) -> tuple[int, int]:
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                return (0, 0)
+            return (stat.st_mtime_ns, stat.st_size)
+
+        return fingerprint(self.path), fingerprint(Path(f"{self.path}-wal"))
 
     def connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -2311,6 +2328,38 @@ class WatchlistRepository:
         self.initialize()
         if not end_date or limit < 2:
             return []
+        cache_key = (
+            method,
+            end_date,
+            limit,
+            formal_weinstein_only,
+            self._database_revision(),
+        )
+        with self._breadth_cache_lock:
+            cached = self._breadth_cache.get(cache_key)
+        if cached is not None:
+            return [dict(item) for item in cached]
+
+        result = self._compute_single_method_breadth_history(
+            end_date,
+            method=method,
+            limit=limit,
+            formal_weinstein_only=formal_weinstein_only,
+        )
+        with self._breadth_cache_lock:
+            if len(self._breadth_cache) >= 16:
+                self._breadth_cache.clear()
+            self._breadth_cache[cache_key] = [dict(item) for item in result]
+        return result
+
+    def _compute_single_method_breadth_history(
+        self,
+        end_date: str,
+        *,
+        method: str,
+        limit: int,
+        formal_weinstein_only: bool,
+    ) -> list[dict[str, Any]]:
         with self.connect() as connection:
             representative_symbol = ""
             if formal_weinstein_only:

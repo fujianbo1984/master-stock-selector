@@ -1512,17 +1512,19 @@ def build_watchlist_router(
         limit: int | None = Query(default=None, ge=30),
         interval: str = Query(default="day", pattern="^(day|week)$"),
     ) -> dict[str, Any]:
-        visible_daily_bars = market_reader.safe_stock_chart_bars(symbol, date, limit=limit)
         warmup_periods = max(200, length, atr_length)
         analysis_limit = (
             None
             if limit is None
             else limit + warmup_periods * (6 if interval == "week" else 1)
         )
-        analysis_daily_bars = (
-            visible_daily_bars
-            if analysis_limit is None
-            else market_reader.safe_stock_chart_bars(symbol, date, limit=analysis_limit)
+        analysis_daily_bars = market_reader.safe_stock_chart_bars(
+            symbol, date, limit=analysis_limit
+        )
+        visible_daily_bars = (
+            analysis_daily_bars
+            if limit is None
+            else analysis_daily_bars[-limit:]
         )
         bars = _weekly_bars(visible_daily_bars) if interval == "week" else visible_daily_bars
         analysis_bars = (

@@ -133,6 +133,45 @@ def test_repository_weinstein_breadth_uses_only_formal_completed_weeks(tmp_path)
     assert history[-1]["pass_count"] == 2
 
 
+def test_method_breadth_cache_follows_same_date_database_updates(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    repository.initialize()
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date,symbol,method,result,policy_version,evidence_json,
+                source_digest,origin
+            ) VALUES (?,?,?,?,?,'{}','cache-test','RECONSTRUCTED')
+            """,
+            (
+                "2026-07-01", "000001.SZ", "minervini", "PASS",
+                MINERVINI_POLICY_VERSION,
+            ),
+        )
+
+    first = repository.minervini_breadth_history("2026-07-01", limit=20)
+    assert first[-1]["pass_count"] == 1
+
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date,symbol,method,result,policy_version,evidence_json,
+                source_digest,origin
+            ) VALUES (?,?,?,?,?,'{}','cache-test','RECONSTRUCTED')
+            """,
+            (
+                "2026-07-01", "000002.SZ", "minervini", "FAIL",
+                MINERVINI_POLICY_VERSION,
+            ),
+        )
+
+    refreshed = repository.minervini_breadth_history("2026-07-01", limit=20)
+    assert refreshed[-1]["evaluable_count"] == 2
+    assert refreshed[-1]["pass_rate"] == 50.0
+
+
 def test_repository_derives_enter_continue_exit_and_reentry(tmp_path):
     path = tmp_path / "watchlist.sqlite3"
     repository = WatchlistRepository(path)

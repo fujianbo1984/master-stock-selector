@@ -1878,7 +1878,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260823-text-annotations-v1" in page.text
+    assert "stock-chart.js?v=20260824-fast-navigation-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert 'data-chart-ohlcv' in page.text
@@ -1933,6 +1933,9 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "recordMode" not in controller
     assert "version !== requestVersion" in controller
     assert "new AbortController()" in controller
+    assert 'const chartCacheLimit = 12;' in controller
+    assert 'root.querySelector("[data-chart-next]")' in controller
+    assert "scheduleAdjacentChartPrefetch();" in controller
     assert 'const periodUnit = interval === "week" ? "周" : "日";' in controller
     assert "setChartState(" in controller
     assert "compactVolume" in controller
@@ -2071,6 +2074,33 @@ def test_chart_moving_averages_are_available_after_warmup():
     assert averages[50][0]["value"] == 25.5
     assert len(averages[200]) == 11
     assert averages[200][0]["value"] == 100.5
+
+
+def test_limited_stock_chart_reads_market_bars_once(tmp_path, monkeypatch):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    market_path = tmp_path / "market.sqlite3"
+    _seed_watchlist(watchlist_path)
+    _seed_chart_market(market_path)
+    app = create_app(
+        market_database=market_path,
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+    )
+    original = app.state.market_reader.safe_stock_chart_bars
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(app.state.market_reader, "safe_stock_chart_bars", counted)
+    response = TestClient(app).get(
+        "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30"
+    )
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][1]["limit"] == 230
 
 
 def test_private_review_overlays_public_cache_and_exposes_timing(tmp_path):
