@@ -182,7 +182,6 @@ def create_app(
                 ("我的观察", "/a/observations"),
                 ("交易计划", "/a/plan"),
                 ("交易复盘", "/a/review"),
-                ("阅读感想", "/a/reading/mine"),
             ]
             if user is not None
             else []
@@ -218,6 +217,7 @@ def create_app(
             render=render,
             users=users,
             secure_cookies=cookies_are_secure,
+            site_owner_username=owner_username,
         )
     )
     app.include_router(

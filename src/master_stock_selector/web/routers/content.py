@@ -42,6 +42,12 @@ def build_content_router(
             raise HTTPException(status_code=401, detail="请先登录")
         return user
 
+    def require_site_owner(request: Request) -> Any:
+        user = require_user(request)
+        if user.username.casefold() != site_owner_username.casefold():
+            raise HTTPException(status_code=404, detail="页面不存在")
+        return user
+
     def valid_csrf(request: Request, user: Any, values: dict[str, list[str]]) -> None:
         supplied = str((values.get("csrf_token") or [""])[0])
         if not users.csrf_valid(user, supplied):
@@ -81,7 +87,7 @@ def build_content_router(
         redirect = require_reader(request)
         if redirect is not None:
             return redirect
-        user = require_user(request)
+        user = require_site_owner(request)
         return mark_private(
             render(
                 request,
@@ -95,6 +101,7 @@ def build_content_router(
         redirect = require_reader(request)
         if redirect is not None:
             return redirect
+        require_site_owner(request)
         return mark_private(
             render(request, "reading/editor.html", {"active": "阅读感想", "note": None, "versions": [], "share": None})
         )
@@ -106,7 +113,7 @@ def build_content_router(
         redirect = require_reader(request)
         if redirect is not None:
             return redirect
-        user = require_user(request)
+        user = require_site_owner(request)
         note = users.reading_notes.get(user.user_id, note_id)
         if note is None:
             raise HTTPException(status_code=404, detail="阅读感想不存在")
@@ -130,7 +137,7 @@ def build_content_router(
 
     @router.post("/a/reading/mine/save", include_in_schema=False)
     async def save_reading_note(request: Request) -> RedirectResponse:
-        user = require_user(request)
+        user = require_site_owner(request)
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
         valid_csrf(request, user, values)
         note_id = str((values.get("note_id") or [""])[0])
@@ -157,7 +164,7 @@ def build_content_router(
 
     @router.post("/a/reading/mine/{note_id}/submit", include_in_schema=False)
     async def submit_reading_note(request: Request, note_id: str) -> RedirectResponse:
-        user = require_user(request)
+        user = require_site_owner(request)
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
         valid_csrf(request, user, values)
         try:
@@ -171,9 +178,7 @@ def build_content_router(
 
     @router.post("/a/reading/mine/{note_id}/share", include_in_schema=False)
     async def share_reading_note(request: Request, note_id: str) -> RedirectResponse:
-        user = require_user(request)
-        if user.username.casefold() != site_owner_username.casefold():
-            raise HTTPException(status_code=403, detail="只有站长可以共享阅读感想")
+        user = require_site_owner(request)
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
         valid_csrf(request, user, values)
         version_id = str((values.get("version_id") or [""])[0])
@@ -186,9 +191,7 @@ def build_content_router(
 
     @router.post("/a/reading/mine/{note_id}/share/stop", include_in_schema=False)
     async def stop_reading_share(request: Request, note_id: str) -> RedirectResponse:
-        user = require_user(request)
-        if user.username.casefold() != site_owner_username.casefold():
-            raise HTTPException(status_code=403, detail="只有站长可以停止共享")
+        user = require_site_owner(request)
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
         valid_csrf(request, user, values)
         users.reading_notes.revoke(user.user_id, note_id)

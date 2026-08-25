@@ -38,11 +38,10 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
         "plans:read",
         "plans:write",
         "plans:publish",
-        "reading:read",
-        "reading:write",
-        "reading:share",
     ):
         assert f'name="{scope}" checked' in page.text
+    for scope in ("reading:read", "reading:write", "reading:share"):
+        assert f'name="{scope}"' not in page.text
     created = client.post(
         "/account/tokens",
         data={
@@ -53,6 +52,7 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
             "trades:write": "on",
             "plans:read": "on",
             "plans:write": "on",
+            "reading:read": "on",
         },
     )
 

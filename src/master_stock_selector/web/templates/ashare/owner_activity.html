@@ -159,7 +159,7 @@
       <section class="owner-rail-section">
         <div class="owner-rail-heading">
           <h2>最新阅读心得 <span>{{ reading_notes|length }}</span></h2>
-          <a class="owner-rail-heading-link" href="/a/reading">查看全部</a>
+          {% if is_site_owner %}<a class="owner-rail-heading-link" href="/a/reading/mine">管理感想</a>{% else %}<a class="owner-rail-heading-link" href="/a/reading">查看全部</a>{% endif %}
         </div>
         <div class="owner-rail-reading">
           {% for article in reading_notes[:3] %}

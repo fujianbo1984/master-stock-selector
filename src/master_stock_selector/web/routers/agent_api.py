@@ -147,7 +147,7 @@ def build_agent_api_router(
 
     def require_site_owner(principal: ApiTokenPrincipal) -> None:
         if principal.username.casefold() != site_owner_username.casefold():
-            raise HTTPException(status_code=403, detail="只有站长可以共享阅读感想")
+            raise HTTPException(status_code=403, detail="阅读感想功能暂未对其他用户开放")
 
     @router.get("/me")
     def me(request: Request) -> dict[str, Any]:
@@ -162,7 +162,8 @@ def build_agent_api_router(
 
     @router.post("/reading/validate")
     async def validate_reading(request: Request) -> dict[str, Any]:
-        require_token(request, "reading:read")
+        principal = require_token(request, "reading:read")
+        require_site_owner(principal)
         payload = await json_object(request)
         try:
             normalized = users.reading_notes.validate_payload(payload)
@@ -178,11 +179,13 @@ def build_agent_api_router(
     @router.get("/reading")
     def reading_list(request: Request) -> dict[str, Any]:
         principal = require_token(request, "reading:read")
+        require_site_owner(principal)
         return {"notes": users.reading_notes.list_notes(principal.user_id)}
 
     @router.get("/reading/{note_id}")
     def reading_show(request: Request, note_id: str) -> dict[str, Any]:
         principal = require_token(request, "reading:read")
+        require_site_owner(principal)
         note = users.reading_notes.get(principal.user_id, note_id)
         if note is None:
             raise HTTPException(status_code=404, detail="阅读感想不存在")
@@ -194,6 +197,7 @@ def build_agent_api_router(
     @router.post("/reading")
     async def reading_save(request: Request) -> dict[str, Any]:
         principal = require_token(request, "reading:write")
+        require_site_owner(principal)
         rid = request_id(request)
         payload = await json_object(request)
         note_id = str(payload.pop("note_id", "") or "")
@@ -219,6 +223,7 @@ def build_agent_api_router(
     @router.post("/reading/{note_id}/submit")
     async def reading_submit(request: Request, note_id: str) -> dict[str, Any]:
         principal = require_token(request, "reading:write")
+        require_site_owner(principal)
         rid = request_id(request)
         payload = await json_object(request)
         expected_revision = payload.get("expected_revision")

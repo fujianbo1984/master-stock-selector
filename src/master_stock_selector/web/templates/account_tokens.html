@@ -45,9 +45,11 @@
             <label><input type="checkbox" name="plans:read" checked><span><strong>读取交易计划</strong><small>读取私有计划、版本与 Grill 问题</small></span></label>
             <label><input type="checkbox" name="plans:write" checked><span><strong>讨论交易计划</strong><small>保存 Grill 草稿回答，不能发布</small></span></label>
             <label><input type="checkbox" name="plans:publish" checked><span><strong>发布交易计划</strong><small>允许 Agent 冻结并发布新版本</small></span></label>
+            {% if is_site_owner %}
             <label><input type="checkbox" name="reading:read" checked><span><strong>读取阅读感想</strong><small>读取自己的私有草稿与版本</small></span></label>
             <label><input type="checkbox" name="reading:write" checked><span><strong>编写阅读感想</strong><small>保存草稿并提交私有版本</small></span></label>
             <label><input type="checkbox" name="reading:share" checked><span><strong>共享阅读感想</strong><small>只有站长身份能实际共享到站长动态</small></span></label>
+            {% endif %}
           </fieldset>
           <button class="button auth-submit" type="submit">生成 Token</button>
         </form>

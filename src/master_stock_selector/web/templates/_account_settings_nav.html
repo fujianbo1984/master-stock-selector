@@ -19,6 +19,15 @@
         <small>授权 CLI 访问个人交易</small>
       </a>
     </div>
+    {% if is_site_owner %}
+    <div class="account-settings-nav-group">
+      <p>站长工具</p>
+      <a href="/a/reading/mine" {% if request.url.path.startswith('/a/reading/mine') %}class="active" aria-current="page"{% endif %}>
+        <span>阅读感想</span>
+        <small>管理私有草稿与共享版本</small>
+      </a>
+    </div>
+    {% endif %}
   </nav>
   <p class="account-settings-boundary">账户凭据只保护个人工作区，不会改变公开方法事实。</p>
 </aside>

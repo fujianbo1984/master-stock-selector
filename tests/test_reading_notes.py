@@ -78,30 +78,29 @@ def test_private_draft_submission_and_frozen_version_boundary(tmp_path) -> None:
         raise AssertionError("过期修订号必须被拒绝")
 
 
-def test_agent_api_allows_private_writing_but_only_owner_can_share(tmp_path) -> None:
+def test_agent_api_keeps_all_reading_operations_owner_only(tmp_path) -> None:
     app, users, owner_id, reader_id = _app(tmp_path)
     client = TestClient(app)
     scopes = ("reading:read", "reading:write", "reading:share")
     reader_token, _ = users.create_api_token(reader_id, "reader", scopes=scopes)
     owner_token, _ = users.create_api_token(owner_id, "owner", scopes=scopes)
 
-    saved = client.post("/api/v1/reading", headers=_headers(reader_token), json=_payload())
-    assert saved.status_code == 200
-    reader_note = saved.json()["note"]
-    submitted = client.post(
-        f"/api/v1/reading/{reader_note['note_id']}/submit",
-        headers=_headers(reader_token),
-        json={"expected_revision": 1},
+    blocked_responses = (
+        client.get("/api/v1/reading", headers=_headers(reader_token)),
+        client.post(
+            "/api/v1/reading/validate",
+            headers=_headers(reader_token),
+            json=_payload(),
+        ),
+        client.post(
+            "/api/v1/reading",
+            headers=_headers(reader_token),
+            json=_payload(),
+        ),
     )
-    assert submitted.status_code == 200
-    reader_version = submitted.json()["version"]
-
-    forbidden = client.post(
-        f"/api/v1/reading/{reader_note['note_id']}/share",
-        headers=_headers(reader_token),
-        json={"version_id": reader_version["version_id"]},
-    )
-    assert forbidden.status_code == 403
+    for response in blocked_responses:
+        assert response.status_code == 403
+        assert response.json()["detail"] == "阅读感想功能暂未对其他用户开放"
     assert users.reading_notes.shared_notes(reader_id) == []
 
     owner_saved = client.post(
@@ -162,7 +161,7 @@ def test_owner_share_appears_for_logged_in_reader_and_draft_changes_do_not_leak(
     assert client.get(share["href"]).status_code == 404
 
 
-def test_all_logged_in_users_have_private_reading_workspace(tmp_path) -> None:
+def test_regular_users_do_not_see_or_open_private_reading_workspace(tmp_path) -> None:
     app, _, _, _ = _app(tmp_path)
     client = TestClient(app)
     assert client.post(
@@ -172,29 +171,37 @@ def test_all_logged_in_users_have_private_reading_workspace(tmp_path) -> None:
     ).status_code == 303
 
     workspace = client.get("/a/reading/mine")
-    assert workspace.status_code == 200
-    assert "我的阅读感想" in workspace.text
-    assert "新建的内容默认是私有草稿" in workspace.text
-    assert 'href="/a/reading/mine"' in workspace.text
+    assert workspace.status_code == 404
+    assert client.get("/a/reading/mine/new").status_code == 404
+    assert 'href="/a/reading/mine"' not in client.get("/a/daily").text
 
     forbidden = client.post("/a/reading/mine/not-owned/share")
-    assert forbidden.status_code == 403
+    assert forbidden.status_code == 404
 
 
-def test_website_save_and_submit_stay_private_for_regular_user(tmp_path) -> None:
-    app, users, _, reader_id = _app(tmp_path)
+def test_owner_website_save_and_submit_stay_private_until_shared(tmp_path) -> None:
+    app, users, owner_id, _ = _app(tmp_path)
     client = TestClient(app)
-    client.post("/login", data={"username": "reader", "password": "Reader-password-123"})
+    client.post(
+        "/login",
+        data={"username": "站长用户", "password": "Owner-password-123"},
+    )
+    assert 'href="/a/reading/mine"' not in client.get("/a/daily").text
+    token_page = client.get("/account/tokens")
+    assert 'name="reading:read" checked' in token_page.text
+    assert 'href="/a/reading/mine"' in token_page.text
     editor = client.get("/a/reading/mine/new")
+    assert editor.status_code == 200
+    assert "站长写作台" in editor.text
     csrf = re.search(r'name="csrf_token" value="([^"]+)"', editor.text)
     assert csrf is not None
     saved = client.post(
         "/a/reading/mine/save",
         data={
             "csrf_token": csrf.group(1),
-            "title": "普通用户的私有感想",
-            "slug": "regular-user-private-note",
-            "summary": "这篇感想保存和提交后仍然不能进入站长动态。",
+            "title": "站长的私有感想",
+            "slug": "owner-private-note",
+            "summary": "这篇感想保存和提交后仍然不能自动进入站长动态。",
             "tags": "私有, 阅读",
             "body_markdown": "## 私有正文\n\n不会自动共享。",
         },
@@ -202,7 +209,7 @@ def test_website_save_and_submit_stay_private_for_regular_user(tmp_path) -> None
     )
     assert saved.status_code == 303
     note_id = saved.headers["location"].split("/")[-1].split("?")[0]
-    note = users.reading_notes.get(reader_id, note_id)
+    note = users.reading_notes.get(owner_id, note_id)
     assert note is not None
     submitted = client.post(
         f"/a/reading/mine/{note_id}/submit",
@@ -210,9 +217,9 @@ def test_website_save_and_submit_stay_private_for_regular_user(tmp_path) -> None
         follow_redirects=False,
     )
     assert submitted.status_code == 303
-    assert len(users.reading_notes.versions(reader_id, note_id)) == 1
-    assert users.reading_notes.shared_notes(reader_id) == []
-    assert "普通用户的私有感想" not in client.get("/a/reading").text
+    assert len(users.reading_notes.versions(owner_id, note_id)) == 1
+    assert users.reading_notes.shared_notes(owner_id) == []
+    assert "站长的私有感想" not in client.get("/a/reading").text
 
 
 def test_shared_version_keeps_and_serves_its_own_image_assets(tmp_path) -> None:

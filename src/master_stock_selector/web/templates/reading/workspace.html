@@ -6,8 +6,8 @@
 {% block content %}
 <section class="section reading-workspace-shell">
   <header class="reading-workspace-header">
-    <div><p class="eyebrow">个人工作区</p><h1>我的阅读感想</h1><p>保存和提交后仍只有你可见。{% if is_site_owner %}只有点击“共享”后，指定的冻结版本才会进入站长动态。{% endif %}</p></div>
-    <a class="button" href="/a/reading/mine/new">写新感想</a>
+    <div><p class="eyebrow">站长写作台</p><h1>阅读感想</h1><p>这里管理私有草稿、冻结版本与站内共享；未主动共享的内容不会离开你的工作区。</p></div>
+    <div class="reading-workspace-actions"><span>{{ notes|length }} 篇</span><a class="button" href="/a/reading/mine/new">新建感想</a></div>
   </header>
   <div class="reading-workspace-list">
     {% for note in notes %}
@@ -18,7 +18,7 @@
       <ul class="reading-tags">{% for tag in note.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
     </article>
     {% else %}
-    <div class="reading-workspace-empty"><strong>还没有阅读感想</strong><p>新建的内容默认是私有草稿。</p></div>
+    <div class="reading-workspace-empty"><strong>还没有新模式文章</strong><p>旧文章迁入后会与新草稿一起显示在这里；新建内容默认保持私有。</p><a class="button button-secondary button-compact" href="/a/reading/mine/new">写第一篇感想</a></div>
     {% endfor %}
   </div>
 </section>

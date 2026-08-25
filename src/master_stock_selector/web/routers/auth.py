@@ -25,6 +25,7 @@ def build_auth_router(
     render: Render,
     users: UserRepository,
     secure_cookies: bool,
+    site_owner_username: str,
 ) -> APIRouter:
     router = APIRouter()
     failed_attempts: dict[str, list[float]] = {}
@@ -152,18 +153,20 @@ def build_auth_router(
                     (values.get("expires_days") or [str(API_TOKEN_DEFAULT_EXPIRES_DAYS)])[0]
                 )
             )
+            available_scopes = [
+                "trades:read",
+                "trades:write",
+                "plans:read",
+                "plans:write",
+                "plans:publish",
+            ]
+            if user.username.casefold() == site_owner_username.casefold():
+                available_scopes.extend(
+                    ("reading:read", "reading:write", "reading:share")
+                )
             scopes = [
                 scope
-                for scope in (
-                    "trades:read",
-                    "trades:write",
-                    "plans:read",
-                    "plans:write",
-                    "plans:publish",
-                    "reading:read",
-                    "reading:write",
-                    "reading:share",
-                )
+                for scope in available_scopes
                 if scope in values
             ]
             raw_token, _ = users.create_api_token(
