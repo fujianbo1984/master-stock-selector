@@ -1,6 +1,8 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
 {% set suppress_research_date_note = true %}
+{% set suppress_investment_notice = true %}
+{% block body_class %}stock-chart-body{% endblock %}
 {% block title %}{{ stock_name }} 站内K线图 · 龙场悟道{% endblock %}
 {% block heading %}{{ stock_name }} 站内K线图{% endblock %}
 {% block subtitle %}{{ symbol }} · 前复权 · 数据截至 {{ query_date }}{% endblock %}
@@ -55,6 +57,8 @@
     </details>
   </div>
   <div class="chart-legend"><span class="chart-period-change" data-chart-period-change aria-live="polite"><span data-chart-change-date>—</span><strong data-chart-change-value>当日涨跌幅 —</strong></span><span class="chart-ohlcv" data-chart-ohlcv><span>开 <b data-chart-open>—</b></span><span>高 <b data-chart-high>—</b></span><span>低 <b data-chart-low>—</b></span><span>收 <b data-chart-close>—</b></span><span>量 <b data-chart-volume>—</b></span></span><span data-framework-legend="minervini"><i class="legend-ma-m50"></i>50日 <i class="legend-ma-m150"></i>150日 <i class="legend-ma-m200"></i>200日</span><span data-framework-legend="weinstein"><i class="legend-ma-w10"></i>10周 <i class="legend-ma-w30"></i>30周</span><span data-keltner-legend hidden><i class="legend-kc"></i>KC</span>{% if private_workspace %}<span data-trade-legend hidden><span class="legend-buy">▲</span>实际买入 <span class="legend-sell">▼</span>实际卖出</span>{% endif %}<span class="chart-load-state" data-chart-load-state role="status" aria-live="polite"></span><span class="chart-attribution">图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" title="图表组件官网">开源图表组件</a>提供</span></div>
+  <p class="sr-only" id="chart-accessibility-note">价格图支持鼠标拖拽、缩放和十字光标；图下方的方法条件卡与变化时间线提供对应文字信息。</p>
+  <div class="stock-chart-stage" aria-describedby="chart-accessibility-note"><div class="stock-chart-canvas" data-chart-canvas></div><canvas class="drawing-overlay" data-drawing-overlay aria-label="趋势线、水平线与文字标记绘图区"></canvas>{% if private_workspace %}<div class="drawing-text-layer" data-drawing-text-layer aria-label="个人文字标记"></div><div class="drawing-text-editor" data-drawing-text-editor hidden><label><span>记录对 K 线／形态的理解</span><textarea data-drawing-text-input rows="4" maxlength="200" placeholder="例如：突破后首次缩量回踩，观察前高能否转为支撑"></textarea></label><div class="drawing-text-editor-footer"><small><span data-drawing-text-count>0</span>/200 · ⌘/Ctrl+Enter 完成</small><span><button class="text-button" type="button" data-drawing-text-cancel>取消</button><button class="button button-primary button-compact" type="button" data-drawing-text-save>完成标记</button></span></div></div>{% endif %}<div class="chart-state-overlay" data-chart-state-overlay role="status"><strong data-chart-state-title>正在载入图表</strong><span data-chart-state-detail>正在读取前复权行情与方法事实…</span><button class="button button-secondary button-compact" type="button" data-chart-retry hidden>重试</button></div></div>
   <details class="chart-anomaly-strip" data-chart-anomaly-evidence>
     <summary>
       <span class="chart-anomaly-verdict"><strong>异常交易复核</strong><span class="tag {{ 'tag-risk' if anomaly_evidence.status == 'REVIEW' else 'tag-caution' if anomaly_evidence.status == 'DATA_INSUFFICIENT' else 'tag-pass' }}">{{ anomaly_evidence.label }}</span></span>
@@ -69,8 +73,6 @@
       <small>规则版本：{{ anomaly_evidence.policy_version }}。只提供复核证据，不改变 Weinstein 或 Minervini 结论，不构成操纵认定或买卖指令。</small>
     </div>
   </details>
-  <p class="sr-only" id="chart-accessibility-note">价格图支持鼠标拖拽、缩放和十字光标；图下方的方法条件卡与变化时间线提供对应文字信息。</p>
-  <div class="stock-chart-stage" aria-describedby="chart-accessibility-note"><div class="stock-chart-canvas" data-chart-canvas></div><canvas class="drawing-overlay" data-drawing-overlay aria-label="趋势线、水平线与文字标记绘图区"></canvas>{% if private_workspace %}<div class="drawing-text-layer" data-drawing-text-layer aria-label="个人文字标记"></div><div class="drawing-text-editor" data-drawing-text-editor hidden><label><span>记录对 K 线／形态的理解</span><textarea data-drawing-text-input rows="4" maxlength="200" placeholder="例如：突破后首次缩量回踩，观察前高能否转为支撑"></textarea></label><div class="drawing-text-editor-footer"><small><span data-drawing-text-count>0</span>/200 · ⌘/Ctrl+Enter 完成</small><span><button class="text-button" type="button" data-drawing-text-cancel>取消</button><button class="button button-primary button-compact" type="button" data-drawing-text-save>完成标记</button></span></div></div>{% endif %}<div class="chart-state-overlay" data-chart-state-overlay role="status"><strong data-chart-state-title>正在载入图表</strong><span data-chart-state-detail>正在读取前复权行情与方法事实…</span><button class="button button-secondary button-compact" type="button" data-chart-retry hidden>重试</button></div></div>
   <aside class="chart-framework-panel" data-chart-framework-panel aria-live="polite"></aside>
   <details class="chart-method-timeline" data-chart-method-timeline><summary>条件／阶段变化时间线</summary><ol data-chart-method-timeline-list></ol></details>
   <div class="chart-method-event-detail" data-method-event-detail aria-live="polite" hidden></div>

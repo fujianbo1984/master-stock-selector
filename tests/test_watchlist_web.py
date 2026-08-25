@@ -1404,6 +1404,9 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert chart.text.index("kc-settings-panel") < chart.text.index("data-kc-summary")
     assert "data-volume checked" not in chart.text
     assert "data-chart-status" not in chart.text
+    assert 'class="app-body stock-chart-body"' in chart.text
+    assert "不构成投资建议或自动买卖指令" not in chart.text
+    assert chart.text.index("stock-chart-stage") < chart.text.index("chart-anomaly-strip")
     assert 'aria-label="我的观察"' in chart.text
     assert "归档" in chart.text
     assert ">保存</button>" not in chart.text

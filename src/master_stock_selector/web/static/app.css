@@ -1205,6 +1205,28 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .chart-page-hero .eyebrow { display: none; }
 .chart-hero-note { display: none; }
 .stock-chart-panel { overflow: hidden; padding: 10px 12px 12px; scroll-margin-top: 66px; }
+.stock-chart-body .shell { max-width: none; padding: 8px 16px 28px; }
+.stock-chart-body .research-header {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  min-height: 50px;
+  padding: 0 2px;
+}
+.stock-chart-body .research-brand-name { font-size: 21px; }
+.stock-chart-body .research-context { display: none; }
+.stock-chart-body .research-nav { min-height: 50px; overflow-x: auto; }
+.stock-chart-body .research-nav a { padding: 0 11px; font-size: 12px; white-space: nowrap; }
+.stock-chart-body .research-account { min-height: 36px; }
+.stock-chart-body .research-main { padding-top: 7px; }
+.stock-chart-body .stock-chart-panel { padding: 7px 10px 10px; }
+.stock-chart-body .chart-workbench-header { margin-bottom: 3px; padding: 0 2px 5px; }
+.stock-chart-body .chart-workbench-title h1 { font-size: 22px; }
+.stock-chart-body .chart-workbench-title .eyebrow { display: none; }
+.stock-chart-body .chart-hero-actions { gap: 6px 8px; }
+.stock-chart-body .chart-toolbar { margin-bottom: 3px; padding: 4px 0; }
+.stock-chart-body .chart-legend { padding-bottom: 3px; }
+.stock-chart-body .stock-chart-stage { height: clamp(600px, calc(100vh - 190px), 820px); min-height: 600px; }
+.stock-chart-body .chart-anomaly-strip { margin: 8px 0 0; }
 .chart-workbench-header { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr); align-items: center; gap: 14px; margin-bottom: 6px; padding: 0 4px 7px; border-bottom: 1px solid var(--line); }
 .chart-workbench-title h1 { margin: 0; color: var(--text); font-family: "Songti SC", "STSong", serif; font-size: 27px; line-height: 1.15; white-space: nowrap; }
 .chart-workbench-title h1 small { color: var(--muted); font-family: Georgia, "Times New Roman", serif; font-size: 14px; white-space: nowrap; }
@@ -1736,6 +1758,7 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .reading-prose ul { margin: 1.15em 0; padding-left: 1.25em; }
 .reading-prose li { margin: .45em 0; }
 .reading-prose blockquote { margin: 1.6em 0; padding: 18px 22px; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--text); font-size: 18px; font-weight: 700; line-height: 1.8; }
+.reading-prose img { display: block; box-sizing: border-box; max-width: 100%; height: auto; margin-right: auto; margin-left: auto; }
 .reading-prose table { width: 100%; margin: 1.7em 0; border-collapse: collapse; font-family: inherit; font-size: 14px; line-height: 1.65; }
 .reading-prose th, .reading-prose td { padding: 11px 13px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 .reading-prose th { background: var(--accent-soft); color: var(--text); }
