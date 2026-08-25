@@ -32,8 +32,19 @@ from ..watchlist.repository import (
 SESSION_COOKIE = "masterstock_session"
 SESSION_IDLE_SECONDS = 7 * 24 * 60 * 60
 API_TOKEN_PREFIX = "mst_"
+API_TOKEN_DEFAULT_EXPIRES_DAYS = 365
+API_TOKEN_MAX_EXPIRES_DAYS = 365
 API_TOKEN_SCOPES = frozenset(
-    {"trades:read", "trades:write", "plans:read", "plans:write", "plans:publish"}
+    {
+        "trades:read",
+        "trades:write",
+        "plans:read",
+        "plans:write",
+        "plans:publish",
+        "reading:read",
+        "reading:write",
+        "reading:share",
+    }
 )
 PLAN_SETUP_CODES = frozenset({"A1", "A3", "B1", "B2"})
 PLAN_SETUP_BY_TRADE_SETUP = {
@@ -45,7 +56,7 @@ PLAN_SETUP_BY_TRADE_SETUP = {
 TRADE_SETUP_BY_PLAN_SETUP = {value: key for key, value in PLAN_SETUP_BY_TRADE_SETUP.items()}
 OTHER_SETUP_ID = "OTHER"
 OTHER_SETUP_LABEL = "其他（未归入交易计划）"
-USER_SCHEMA_VERSION = 9
+USER_SCHEMA_VERSION = 10
 DEFAULT_ACCESS_LOG_RETENTION_DAYS = 90
 USER_REQUIRED_TABLES = frozenset(
     {
@@ -64,6 +75,9 @@ USER_REQUIRED_TABLES = frozenset(
         "user_plan_grill_session",
         "user_plan_grill_event",
         "user_trading_plan_share",
+        "user_reading_note",
+        "user_reading_note_version",
+        "user_reading_note_share",
     }
 )
 USER_REQUIRED_INDEXES = frozenset(
@@ -75,6 +89,10 @@ USER_REQUIRED_INDEXES = frozenset(
         "idx_user_plan_event_session_revision",
         "idx_user_plan_share_plan_status",
         "idx_user_plan_share_active",
+        "idx_user_reading_note_user_updated",
+        "idx_user_reading_version_note",
+        "idx_user_reading_share_note_status",
+        "idx_user_reading_share_active",
     }
 )
 
@@ -322,6 +340,59 @@ CREATE INDEX IF NOT EXISTS idx_user_plan_share_plan_status
 ON user_trading_plan_share(plan_id, status, published_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_plan_share_active
 ON user_trading_plan_share(plan_id) WHERE status='ACTIVE';
+CREATE TABLE IF NOT EXISTS user_reading_note (
+    note_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    tags_json TEXT NOT NULL,
+    body_markdown TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    assets_json TEXT NOT NULL DEFAULT '{}',
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    current_version_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, slug),
+    FOREIGN KEY(user_id) REFERENCES user_account(user_id) ON DELETE CASCADE,
+    FOREIGN KEY(current_version_id) REFERENCES user_reading_note_version(version_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_reading_note_user_updated
+ON user_reading_note(user_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS user_reading_note_version (
+    version_id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL,
+    version_number INTEGER NOT NULL CHECK(version_number > 0),
+    slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    tags_json TEXT NOT NULL,
+    body_markdown TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    assets_json TEXT NOT NULL DEFAULT '{}',
+    content_hash TEXT NOT NULL,
+    submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(note_id, version_number),
+    FOREIGN KEY(note_id) REFERENCES user_reading_note(note_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_reading_version_note
+ON user_reading_note_version(note_id, submitted_at DESC);
+CREATE TABLE IF NOT EXISTS user_reading_note_share (
+    share_id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    statement TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK(status IN ('ACTIVE','SUPERSEDED','REVOKED')),
+    shared_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TEXT,
+    FOREIGN KEY(note_id) REFERENCES user_reading_note(note_id) ON DELETE CASCADE,
+    FOREIGN KEY(version_id) REFERENCES user_reading_note_version(version_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_reading_share_note_status
+ON user_reading_note_share(note_id, status, shared_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_reading_share_active
+ON user_reading_note_share(note_id) WHERE status='ACTIVE';
 CREATE TABLE IF NOT EXISTS user_chart_drawing (
     drawing_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -406,6 +477,7 @@ class UserRepository:
         self.path = Path(path)
         self.password_hasher = PasswordHasher()
         self._trading_plans: TradingPlanService | None = None
+        self._reading_notes: ReadingNoteService | None = None
 
     @property
     def trading_plans(self) -> TradingPlanService:
@@ -414,6 +486,14 @@ class UserRepository:
 
             self._trading_plans = TradingPlanService(self)
         return self._trading_plans
+
+    @property
+    def reading_notes(self) -> ReadingNoteService:
+        if self._reading_notes is None:
+            from .reading_notes import ReadingNoteService
+
+            self._reading_notes = ReadingNoteService(self)
+        return self._reading_notes
 
     def connect(self, *, read_only: bool = False) -> sqlite3.Connection:
         if read_only:
@@ -456,6 +536,8 @@ class UserRepository:
                     "user_chart_drawing.interval_scope",
                     "user_plan_grill_session.published_version_id",
                     "user_plan_grill_session.head_version_id_at_start",
+                    "user_reading_note.assets_json",
+                    "user_reading_note_version.assets_json",
                 ],
                 "missing_indexes": sorted(USER_REQUIRED_INDEXES),
             }
@@ -479,6 +561,16 @@ class UserRepository:
                 drawing_columns = {
                     str(row[1])
                     for row in connection.execute("PRAGMA table_info(user_chart_drawing)")
+                }
+                reading_note_columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(user_reading_note)")
+                }
+                reading_version_columns = {
+                    str(row[1])
+                    for row in connection.execute(
+                        "PRAGMA table_info(user_reading_note_version)"
+                    )
                 }
                 indexes = {
                     str(row[0])
@@ -533,6 +625,13 @@ class UserRepository:
             missing_columns.append("user_plan_grill_session.head_version_id_at_start")
         for column in {"content_text", "interval_scope"} - drawing_columns:
             missing_columns.append(f"user_chart_drawing.{column}")
+        if "user_reading_note" in tables and "assets_json" not in reading_note_columns:
+            missing_columns.append("user_reading_note.assets_json")
+        if (
+            "user_reading_note_version" in tables
+            and "assets_json" not in reading_version_columns
+        ):
+            missing_columns.append("user_reading_note_version.assets_json")
         missing_indexes = sorted(USER_REQUIRED_INDEXES - indexes)
         legacy_observation_states = (
             "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql
@@ -600,7 +699,25 @@ class UserRepository:
                 "WHERE type='table' AND name='user_chart_drawing'"
             ).fetchone()
             drawing_table_sql = str(drawing_row[0] if drawing_row is not None else "")
+            reading_note_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(user_reading_note)")
+            }
+            reading_version_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(user_reading_note_version)")
+            }
             migration_statements: list[str] = []
+            if reading_note_columns and "assets_json" not in reading_note_columns:
+                migration_statements.append(
+                    "ALTER TABLE user_reading_note "
+                    "ADD COLUMN assets_json TEXT NOT NULL DEFAULT '{}';"
+                )
+            if reading_version_columns and "assets_json" not in reading_version_columns:
+                migration_statements.append(
+                    "ALTER TABLE user_reading_note_version "
+                    "ADD COLUMN assets_json TEXT NOT NULL DEFAULT '{}';"
+                )
             if trade_table_exists and "source_ref" not in trade_columns:
                 migration_statements.append(
                     "ALTER TABLE user_trade_execution ADD COLUMN source_ref TEXT;"
@@ -1304,15 +1421,17 @@ class UserRepository:
         user_id: str,
         name: str,
         *,
-        expires_days: int = 30,
-        scopes: Sequence[str] = ("trades:read", "trades:write"),
+        expires_days: int = API_TOKEN_DEFAULT_EXPIRES_DAYS,
+        scopes: Sequence[str] = tuple(sorted(API_TOKEN_SCOPES)),
     ) -> tuple[str, dict[str, Any]]:
         normalized_name = name.strip()
         normalized_scopes = tuple(sorted({scope.strip() for scope in scopes if scope.strip()}))
         if not normalized_name or len(normalized_name) > 80:
             raise ValueError("Token 名称长度必须为 1 至 80 个字符")
-        if expires_days < 1 or expires_days > 90:
-            raise ValueError("Token 有效期必须为 1 至 90 天")
+        if expires_days < 1 or expires_days > API_TOKEN_MAX_EXPIRES_DAYS:
+            raise ValueError(
+                f"Token 有效期必须为 1 至 {API_TOKEN_MAX_EXPIRES_DAYS} 天"
+            )
         if not normalized_scopes or not set(normalized_scopes).issubset(API_TOKEN_SCOPES):
             raise ValueError("Token 权限范围不正确")
         token_id = uuid4().hex
@@ -2788,4 +2907,5 @@ def _normalize_drawing(
             raise ValueError("invalid drawing anchor")
     return normalized, normalized_content, normalized_interval
 if TYPE_CHECKING:
+    from .reading_notes import ReadingNoteService
     from .trading_plans import TradingPlanService

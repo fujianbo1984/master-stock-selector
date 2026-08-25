@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import mimetypes
 import os
+import re
 import sys
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+_READING_IMAGE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+_READING_HTML_IMAGE = re.compile(
+    r'<img\b[^>]*?\bsrc=["\'](?!/|[a-z][a-z0-9+.-]*:|//)([^"\']+)["\']',
+    re.IGNORECASE,
+)
 
 
 class AgentApiError(RuntimeError):
@@ -20,6 +30,24 @@ class AgentApiError(RuntimeError):
 
 
 def handle(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.agent_action == "reading" and args.reading_action == "validate":
+        try:
+            payload = _load_reading_payload(str(args.path), parser)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                {
+                    "status": "READY",
+                    "slug": payload["slug"],
+                    "title": payload["title"],
+                    "tag_count": len(payload["tags"]),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 0
     token = _token(args, parser)
     base_url = _base_url(str(args.base_url), parser)
     try:
@@ -104,6 +132,52 @@ def _dispatch_agent(
                 {"expected_revision": args.expected_revision},
             )
         parser.error("unknown grill action")
+    if args.agent_action == "reading":
+        action = str(args.reading_action)
+        if action == "list":
+            return _request_json(base_url, token, "GET", "/api/v1/reading")
+        if action == "show":
+            note_id = urllib.parse.quote(str(args.note_id), safe="")
+            return _request_json(base_url, token, "GET", f"/api/v1/reading/{note_id}")
+        if action == "save":
+            if not args.commit:
+                parser.error("save 会保存私有草稿；必须显式传入 --commit")
+            if args.token_stdin and args.path == "-":
+                parser.error("--token-stdin 不能与从标准输入读取 Markdown 同时使用")
+            payload = _load_reading_payload(str(args.path), parser)
+            if args.note_id:
+                payload["note_id"] = args.note_id
+            if args.expected_revision is not None:
+                payload["expected_revision"] = args.expected_revision
+            return _request_json(base_url, token, "POST", "/api/v1/reading", payload)
+        note_id = urllib.parse.quote(str(args.note_id), safe="")
+        if action == "submit":
+            if not args.commit:
+                parser.error("submit 会生成私有冻结版本；必须显式传入 --commit")
+            return _request_json(
+                base_url,
+                token,
+                "POST",
+                f"/api/v1/reading/{note_id}/submit",
+                {"expected_revision": args.expected_revision},
+            )
+        if action == "share":
+            if not args.commit:
+                parser.error("share 会向登录用户公开冻结版本；必须显式传入 --commit")
+            return _request_json(
+                base_url,
+                token,
+                "POST",
+                f"/api/v1/reading/{note_id}/share",
+                {"version_id": args.version_id, "statement": args.statement},
+            )
+        if action == "unshare":
+            if not args.commit:
+                parser.error("unshare 会立即隐藏共享入口；必须显式传入 --commit")
+            return _request_json(
+                base_url, token, "POST", f"/api/v1/reading/{note_id}/share/stop", {}
+            )
+        parser.error("unknown reading action")
     if args.agent_action != "trades":
         parser.error("unknown agent action")
     action = str(args.trade_action)
@@ -204,6 +278,65 @@ def _load_json_object(path: str, parser: argparse.ArgumentParser) -> dict[str, A
     if not isinstance(value, dict):
         parser.error("JSON 必须是对象")
     return value
+
+
+def _load_reading_payload(path: str, parser: argparse.ArgumentParser) -> dict[str, Any]:
+    source_path = Path(path)
+    if source_path.is_dir():
+        source_path = source_path / "index.md"
+    try:
+        source = sys.stdin.read() if path == "-" else source_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        parser.error(f"无法读取阅读感想：{exc}")
+    if not source.startswith("+++\n"):
+        parser.error("Markdown 必须以 TOML front matter 开头")
+    closing = source.find("\n+++\n", 4)
+    if closing < 0:
+        parser.error("TOML front matter 没有结束标记")
+    try:
+        metadata = tomllib.loads(source[4:closing])
+    except tomllib.TOMLDecodeError as exc:
+        parser.error(f"TOML front matter 无效：{exc}")
+    body = source[closing + 5 :].strip()
+    slug = str(metadata.get("slug") or (source_path.parent.name if path != "-" else ""))
+    tags = metadata.get("tags")
+    assets: dict[str, dict[str, str]] = {}
+    image_sources = [*_READING_IMAGE.findall(body), *_READING_HTML_IMAGE.findall(body)]
+    for image_source in image_sources:
+        if image_source.startswith(("https://", "http://", "/")):
+            continue
+        if path == "-":
+            parser.error("从标准输入读取时不能使用相对路径图片")
+        asset_path = (source_path.parent / image_source).resolve()
+        article_dir = source_path.parent.resolve()
+        if not asset_path.is_relative_to(article_dir) or not asset_path.is_file():
+            parser.error(f"图片缺失或路径不安全：{image_source}")
+        media_type = mimetypes.guess_type(asset_path.name)[0] or ""
+        try:
+            data = asset_path.read_bytes()
+        except OSError as exc:
+            parser.error(f"无法读取图片 {image_source}：{exc}")
+        assets[image_source] = {
+            "media_type": media_type,
+            "data": base64.b64encode(data).decode("ascii"),
+        }
+    payload = {
+        "title": metadata.get("title"),
+        "slug": slug,
+        "summary": metadata.get("summary"),
+        "tags": tags,
+        "body_markdown": body,
+        "metadata": {
+            key: value
+            for key, value in metadata.items()
+            if key not in {"title", "slug", "summary", "tags", "status", "published_on"}
+        },
+        "assets": assets,
+    }
+    # Keep local validation identical to the server contract without importing Web state.
+    from ..web.reading_notes import ReadingNoteService
+
+    return ReadingNoteService.validate_payload(payload)
 
 
 def _default_idempotency_key(payload: dict[str, Any]) -> str:

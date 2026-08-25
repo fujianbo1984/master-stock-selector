@@ -205,7 +205,7 @@ def build_owner_activity_feed(
                 "href": str(article.get("href") or "#"),
                 "summary": "—",
                 "facts": [],
-                "detail": str(article.get("summary") or ""),
+                "detail": str(article.get("statement") or article.get("summary") or ""),
                 "action_label": "查看文章",
             }
         )

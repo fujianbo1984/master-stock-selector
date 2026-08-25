@@ -1799,6 +1799,29 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .reading-archive-list h2 a:hover { color: var(--accent); }
 .reading-archive-list > article > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.75; }
 .reading-archive-list .reading-tags { margin-top: 18px; }
+.reading-workspace-shell,.reading-editor-shell { max-width: 1100px; margin: 0 auto; padding-top: 36px; }
+.reading-workspace-header,.reading-editor-header { display:flex; align-items:flex-start; justify-content:space-between; gap:30px; margin-bottom:28px; }
+.reading-workspace-header h1,.reading-editor-header h1 { margin:8px 0 10px; font-family:"Songti SC","STSong",serif; font-size:38px; }
+.reading-workspace-header p:last-child,.reading-editor-header p:last-child { max-width:760px; color:var(--muted); line-height:1.8; }
+.reading-workspace-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.reading-workspace-list>article,.reading-workspace-empty { padding:24px 26px; border:1px solid var(--line); background:var(--panel); }
+.reading-workspace-list>article>div { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.reading-workspace-list time,.reading-version-list time { color:var(--muted); font-size:11px; }
+.reading-workspace-list h2 { margin:14px 0 8px; font-family:"Songti SC","STSong",serif; }
+.reading-workspace-list h2 a { color:var(--text); text-decoration:none; }
+.reading-workspace-list>article>p { color:var(--muted); line-height:1.7; }
+.reading-editor-form { display:grid; gap:18px; padding:28px; border:1px solid var(--line); background:var(--panel); }
+.reading-editor-form label,.reading-share-panel label { display:grid; gap:8px; color:var(--muted); font-size:12px; }
+.reading-editor-form input,.reading-editor-form textarea,.reading-share-panel textarea,.reading-share-panel select { width:100%; box-sizing:border-box; border:1px solid var(--line-strong); background:#fff; color:var(--text); padding:11px 12px; font:14px/1.7 "PingFang SC","Microsoft YaHei",sans-serif; }
+.reading-editor-form textarea[name="body_markdown"] { font-family:"SFMono-Regular",Menlo,Monaco,monospace; font-size:13px; }
+.reading-editor-actions { display:flex; justify-content:flex-end; }
+.reading-version-panel { margin-top:20px; padding:26px 28px; border:1px solid var(--line); background:var(--paper); }
+.reading-version-list { display:grid; gap:8px; margin-top:18px; }
+.reading-version-list article { display:flex; justify-content:space-between; padding:10px 12px; border:1px solid var(--line); background:var(--panel); }
+.reading-version-list article div { display:flex; gap:16px; }
+.reading-version-list article>span { color:var(--muted); font-size:11px; }
+.reading-share-panel { display:grid; gap:14px; margin-top:22px; padding-top:22px; border-top:1px solid var(--line-strong); }
+.reading-share-panel form { display:grid; gap:12px; }
 .owner-rail-heading-link { color: var(--muted); font-size: 11px; text-decoration: none; }
 .owner-rail-heading-link:hover { color: var(--accent); }
 

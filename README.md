@@ -62,6 +62,18 @@ scripts/manage_users.sh schema-migrate --apply --backup /path/to/users-before-mi
 scripts/manage_users.sh create your-name --display-name "显示名称"
 ```
 
+将历史仓库文章迁入站长的私有草稿、冻结版本与共享记录时，必须先预览，
+再使用独立备份显式导入：
+
+```bash
+scripts/manage_users.sh reading-import-static --username "我不是来玩的"
+scripts/manage_users.sh reading-import-static --username "我不是来玩的" \
+  --apply --backup /path/to/users-before-reading-import.sqlite3
+```
+
+命令按 slug 幂等执行：已完成的相同版本会跳过，非迁移内容占用同一 slug 时会在
+写入前拒绝。迁移后，旧 `/a/reading/{slug}` 入口会跳转到对应的共享冻结版本。
+
 启动本地网站：
 
 ```bash
@@ -131,6 +143,27 @@ export MASTERSTOCK_AGENT_TOKEN
 .venv/bin/masterstock agent trades validate trades.json
 .venv/bin/masterstock agent trades import trades.json --commit
 ```
+
+登录用户也可以在网站“阅读感想”工作区或 Agent CLI 中编写私有感想。
+保存只更新草稿，提交只生成不可变的私有版本，两者都不会改变可见范围：
+
+```bash
+.venv/bin/masterstock agent reading validate reading/my-note
+.venv/bin/masterstock agent reading save reading/my-note --commit
+.venv/bin/masterstock agent reading submit NOTE_ID --expected-revision 1 --commit
+```
+
+只有配置的站长账号能把自己已提交的冻结版本共享到站长动态；
+Token 拥有 `reading:share` 也不能绕过服务端的站长身份检查：
+
+```bash
+.venv/bin/masterstock agent reading share NOTE_ID --version-id VERSION_ID --commit
+.venv/bin/masterstock agent reading unshare NOTE_ID --commit
+```
+
+Markdown 使用 TOML front matter，至少包含 `title`、`summary` 和非空 `tags`。
+目录名默认作为 slug；CLI 会收集正文引用的本地 JPEG、PNG、GIF 和 WebP 图片，
+并把图片与提交版本一起冻结。
 
 Agent CLI 默认连接 `https://longchangwudao.cn`。如需连接其他实例，可设置
 `MASTERSTOCK_AGENT_URL`，或在 `agent` 后使用 `--base-url`：

@@ -164,7 +164,7 @@
         <div class="owner-rail-reading">
           {% for article in reading_notes[:3] %}
           <article>
-            <div><a href="{{ article.href }}"><strong>{{ article.title }}</strong></a><time datetime="{{ article.updated_on }}">{{ article.updated_on }}</time></div>
+            <div><a href="{{ article.href }}"><strong>{{ article.title }}</strong></a><time datetime="{{ article.published_on or article.updated_on[:10] }}">{{ article.published_on or article.updated_on[:10] }}</time></div>
             <p>{{ article.summary }}</p>
             <ul>{% for tag in article.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
           </article>

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from master_stock_selector.web.users import UserRepository
+from master_stock_selector.web.users import API_TOKEN_SCOPES, UserRepository
 from master_stock_selector.web.users_cli import migrate_legacy_private_data, migrate_user_schema
 
 
@@ -43,6 +43,19 @@ def test_accounts_sessions_and_sqlite_security_settings(tmp_path):
     assert repository.session_user(token) is None
     assert repository.api_token_user(api_token) is None
     assert repository.authenticate("alice", "Secure-password-123") is None
+
+
+def test_new_api_token_defaults_to_all_scopes_and_365_days(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("alice", "Secure-password-123")
+
+    _, metadata = repository.create_api_token(user_id, "default-all")
+
+    assert metadata["scopes"] == sorted(API_TOKEN_SCOPES)
+    assert metadata["expires_at_epoch"] - metadata["created_at_epoch"] == 365 * 24 * 60 * 60
+    with pytest.raises(ValueError, match="1 至 365 天"):
+        repository.create_api_token(user_id, "too-long", expires_days=366)
 
 
 def test_user_can_change_password_and_all_existing_sessions_are_revoked(tmp_path):
@@ -103,7 +116,7 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
     assert user_id
 
 

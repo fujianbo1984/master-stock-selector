@@ -1,0 +1,53 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block title %}{{ note.title if note else '新建阅读感想' }} · 龙场悟道{% endblock %}
+{% block heading %}阅读感想{% endblock %}
+{% block subtitle %}私有编辑区{% endblock %}
+{% block content %}
+<section class="section reading-editor-shell">
+  <header class="reading-editor-header">
+    <div><p class="eyebrow">仅你可见</p><h1>{{ note.title if note else '写一篇新的阅读感想' }}</h1><p>保存只更新草稿；提交会生成不可变版本，但不会改变可见范围。</p></div>
+    <a class="button button-secondary" href="/a/reading/mine">返回我的感想</a>
+  </header>
+
+  <form method="post" action="/a/reading/mine/save" class="reading-editor-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="note_id" value="{{ note.note_id if note else '' }}">
+    <input type="hidden" name="expected_revision" value="{{ note.revision if note else '' }}">
+    <label><span>标题</span><input name="title" maxlength="160" required value="{{ note.title if note else '' }}"></label>
+    <label><span>Slug</span><input name="slug" maxlength="100" pattern="[a-z0-9]+(-[a-z0-9]+)*" required value="{{ note.slug if note else '' }}" placeholder="my-reading-note"></label>
+    <label><span>摘要</span><textarea name="summary" maxlength="500" rows="3" required>{{ note.summary if note else '' }}</textarea></label>
+    <label><span>标签</span><input name="tags" required value="{{ note.tags|join(', ') if note else '' }}" placeholder="趋势交易, 风险管理"><small>用英文逗号分隔，最多 10 个。</small></label>
+    <label><span>Markdown 正文</span><textarea name="body_markdown" rows="24" required>{{ note.body_markdown if note else '' }}</textarea></label>
+    <div class="reading-editor-actions"><button class="button" type="submit">保存私有草稿</button></div>
+  </form>
+
+  {% if note %}
+  <section class="reading-version-panel">
+    <div><p class="eyebrow">冻结版本</p><h2>提交与共享</h2></div>
+    <form method="post" action="/a/reading/mine/{{ note.note_id }}/submit">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_revision" value="{{ note.revision }}">
+      <p>将当前草稿保存为新的不可变版本。提交后仍只有你可见。</p><button class="button button-secondary" type="submit">提交当前版本</button>
+    </form>
+    {% if versions %}
+    <div class="reading-version-list">
+      {% for version in versions %}<article><div><strong>v{{ version.version_number }}</strong><time>{{ version.submitted_at }}</time></div><span>{{ version.content_hash[:12] }}</span></article>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if is_site_owner and versions %}
+    <div class="reading-share-panel">
+      {% if share %}<p><span class="plan-share-status active">已共享</span>v{{ share.version_number }} 已进入站长动态。</p>{% else %}<p><span class="plan-share-status">未共享</span>所有版本仍只在你的工作区。</p>{% endif %}
+      <form method="post" action="/a/reading/mine/{{ note.note_id }}/share">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label><span>选择冻结版本</span><select name="version_id">{% for version in versions %}<option value="{{ version.version_id }}">v{{ version.version_number }} · {{ version.submitted_at }}</option>{% endfor %}</select></label>
+        <label><span>共享说明</span><textarea name="statement" maxlength="300" rows="3" placeholder="可选，用于站长动态摘要。"></textarea></label>
+        <button class="button" type="submit">共享选定版本</button>
+      </form>
+      {% if share %}<form method="post" action="/a/reading/mine/{{ note.note_id }}/share/stop"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary danger-button" type="submit">停止共享</button></form>{% endif %}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..watchlist.repository import TRADE_SETUP_ALIASES
+from .articles import all_articles, repository_article_payload
 from .users import DEFAULT_ACCESS_LOG_RETENTION_DAYS, UserRepository
 
 
@@ -48,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--source", required=True)
     migrate.add_argument("--username", required=True)
     migrate.add_argument("--apply", action="store_true")
+    reading_import = subparsers.add_parser("reading-import-static")
+    reading_import.add_argument("--username", required=True)
+    reading_import.add_argument("--apply", action="store_true")
+    reading_import.add_argument("--backup", default="")
     return parser
 
 
@@ -107,6 +112,15 @@ def main(argv: list[str] | None = None) -> int:
             destination=repository,
             username=args.username,
             apply=bool(args.apply),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "reading-import-static":
+        result = migrate_static_reading_articles(
+            repository=repository,
+            username=args.username,
+            apply=bool(args.apply),
+            backup=Path(args.backup) if args.backup else None,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
@@ -244,6 +258,177 @@ def _backup_database(source: Path, backup: Path) -> dict[str, Any]:
     if quick_check != "ok":
         raise ValueError(f"用户库备份 quick_check 失败：{quick_check}")
     return {"path": str(backup.resolve()), "quick_check": quick_check}
+
+
+def migrate_static_reading_articles(
+    *,
+    repository: UserRepository,
+    username: str,
+    apply: bool,
+    backup: Path | None,
+) -> dict[str, Any]:
+    """Move bundled articles into the owner's private/version/share model."""
+    repository.require_schema()
+    account = repository.active_user_by_username(username)
+    if account is None:
+        raise ValueError("目标站长账号不存在或已停用")
+    user_id = str(account["user_id"])
+    notes_by_slug = {
+        str(note["slug"]): note for note in repository.reading_notes.list_notes(user_id)
+    }
+    plan: list[dict[str, Any]] = []
+    prepared: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    conflicts: list[dict[str, str]] = []
+    for article in all_articles():
+        slug = str(article["slug"])
+        payload = repository_article_payload(article)
+        desired_hash = repository.reading_notes.payload_content_hash(payload)
+        note = notes_by_slug.get(slug)
+        action = "CREATE"
+        version_id = ""
+        if note is not None:
+            marker = note.get("metadata", {}).get("repository_import")
+            expected_source = f"{slug}/index.md"
+            if not isinstance(marker, dict) or str(marker.get("source") or "") != expected_source:
+                action = "CONFLICT"
+                conflicts.append(
+                    {"slug": slug, "reason": "slug 已被非迁移内容占用"}
+                )
+            else:
+                versions = repository.reading_notes.versions(user_id, str(note["note_id"]))
+                current = next(
+                    (
+                        version
+                        for version in versions
+                        if str(version["version_id"]) == str(note.get("current_version_id") or "")
+                    ),
+                    None,
+                )
+                active_share = repository.reading_notes.active_share_for_note(
+                    user_id, str(note["note_id"])
+                )
+                if current is not None and str(current["content_hash"]) == desired_hash:
+                    version_id = str(current["version_id"])
+                    if str(article["status"]) != "published":
+                        action = "SKIP"
+                    elif (
+                        active_share is not None
+                        and str(active_share["version_id"]) == version_id
+                    ):
+                        action = "SKIP"
+                    else:
+                        action = "SHARE"
+                else:
+                    action = "UPDATE"
+        plan.append(
+            {
+                "slug": slug,
+                "title": str(article["title"]),
+                "status": str(article["status"]),
+                "asset_count": len(payload["assets"]),
+                "action": action,
+            }
+        )
+        prepared[slug] = (article, payload | {"_existing_version_id": version_id})
+
+    summary = {
+        action: sum(1 for item in plan if item["action"] == action)
+        for action in ("CREATE", "UPDATE", "SHARE", "SKIP", "CONFLICT")
+    }
+    if not apply:
+        return {
+            "status": "blocked" if conflicts else "dry-run",
+            "username": username,
+            "article_count": len(plan),
+            "summary": summary,
+            "articles": plan,
+            "conflicts": conflicts,
+            "next": (
+                "解决 slug 冲突后重试"
+                if conflicts
+                else "指定 --apply 和未存在的 --backup 路径执行迁移"
+            ),
+        }
+    if conflicts:
+        raise ValueError("存在 slug 冲突，迁移未写入")
+    if backup is None:
+        raise ValueError("导入既有文章必须指定 --backup 路径")
+    backup_result = _backup_database(repository.path, backup)
+    applied: list[dict[str, Any]] = []
+    for item in plan:
+        action = str(item["action"])
+        slug = str(item["slug"])
+        article, prepared_payload = prepared[slug]
+        payload = {key: value for key, value in prepared_payload.items() if not key.startswith("_")}
+        note = notes_by_slug.get(slug)
+        if action == "SKIP":
+            applied.append({"slug": slug, "action": action})
+            continue
+        if action == "CREATE":
+            note = repository.reading_notes.save(user_id, payload)
+            notes_by_slug[slug] = note
+            version = repository.reading_notes.submit(user_id, str(note["note_id"]), 1)
+        elif action == "UPDATE":
+            assert note is not None
+            note = repository.reading_notes.save(
+                user_id,
+                payload,
+                note_id=str(note["note_id"]),
+                expected_revision=int(note["revision"]),
+            )
+            notes_by_slug[slug] = note
+            version = repository.reading_notes.submit(
+                user_id, str(note["note_id"]), int(note["revision"])
+            )
+        else:
+            assert note is not None
+            version_id = str(prepared_payload["_existing_version_id"])
+            version = next(
+                value
+                for value in repository.reading_notes.versions(user_id, str(note["note_id"]))
+                if str(value["version_id"]) == version_id
+            )
+        share: dict[str, Any] | None = None
+        if str(article["status"]) == "published":
+            share = repository.reading_notes.share(
+                user_id,
+                str(note["note_id"]),
+                str(version["version_id"]),
+                str(article["summary"]),
+            )
+        published_at = f"{article['published_on']} 00:00:00"
+        with repository.connect() as connection:
+            connection.execute(
+                """UPDATE user_reading_note SET created_at=?, updated_at=?
+                   WHERE note_id=?""",
+                (published_at, published_at, note["note_id"]),
+            )
+            connection.execute(
+                "UPDATE user_reading_note_version SET submitted_at=? WHERE version_id=?",
+                (published_at, version["version_id"]),
+            )
+            if share is not None:
+                connection.execute(
+                    "UPDATE user_reading_note_share SET shared_at=? WHERE share_id=?",
+                    (published_at, share["share_id"]),
+                )
+        applied.append(
+            {
+                "slug": slug,
+                "action": action,
+                "note_id": str(note["note_id"]),
+                "version_id": str(version["version_id"]),
+                "share_id": str(share["share_id"]) if share else None,
+            }
+        )
+    return {
+        "status": "migrated",
+        "username": username,
+        "backup": backup_result,
+        "summary": summary,
+        "articles": applied,
+        "rollback": f"停止 Web 后使用 {backup_result['path']} 恢复用户库",
+    }
 
 
 def migrate_legacy_private_data(

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from ...watchlist.repository import WatchlistRepository
+from ..reading_notes import ReadingConflict
 from ..trading_plans import PlanConflict
 from ..users import (
     ApiTokenPrincipal,
@@ -18,7 +19,9 @@ from ..users import (
 )
 
 
-def build_agent_api_router(*, repository: WatchlistRepository, users: UserRepository) -> APIRouter:
+def build_agent_api_router(
+    *, repository: WatchlistRepository, users: UserRepository, site_owner_username: str
+) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["agent-api"])
     recent_requests: dict[str, list[float]] = {}
 
@@ -142,6 +145,10 @@ def build_agent_api_router(*, repository: WatchlistRepository, users: UserReposi
             ]
         }
 
+    def require_site_owner(principal: ApiTokenPrincipal) -> None:
+        if principal.username.casefold() != site_owner_username.casefold():
+            raise HTTPException(status_code=403, detail="只有站长可以共享阅读感想")
+
     @router.get("/me")
     def me(request: Request) -> dict[str, Any]:
         principal = require_token(request)
@@ -152,6 +159,113 @@ def build_agent_api_router(*, repository: WatchlistRepository, users: UserReposi
             "token_id": principal.token_id,
             "scopes": list(principal.scopes),
         }
+
+    @router.post("/reading/validate")
+    async def validate_reading(request: Request) -> dict[str, Any]:
+        require_token(request, "reading:read")
+        payload = await json_object(request)
+        try:
+            normalized = users.reading_notes.validate_payload(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "status": "READY",
+            "slug": normalized["slug"],
+            "title": normalized["title"],
+            "tag_count": len(normalized["tags"]),
+        }
+
+    @router.get("/reading")
+    def reading_list(request: Request) -> dict[str, Any]:
+        principal = require_token(request, "reading:read")
+        return {"notes": users.reading_notes.list_notes(principal.user_id)}
+
+    @router.get("/reading/{note_id}")
+    def reading_show(request: Request, note_id: str) -> dict[str, Any]:
+        principal = require_token(request, "reading:read")
+        note = users.reading_notes.get(principal.user_id, note_id)
+        if note is None:
+            raise HTTPException(status_code=404, detail="阅读感想不存在")
+        return {
+            "note": note,
+            "versions": users.reading_notes.versions(principal.user_id, note_id),
+        }
+
+    @router.post("/reading")
+    async def reading_save(request: Request) -> dict[str, Any]:
+        principal = require_token(request, "reading:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        note_id = str(payload.pop("note_id", "") or "")
+        raw_revision = payload.pop("expected_revision", None)
+        if raw_revision is not None and not isinstance(raw_revision, int):
+            raise HTTPException(status_code=422, detail="expected_revision 必须是整数")
+        try:
+            note = users.reading_notes.save(
+                principal.user_id,
+                payload,
+                note_id=note_id,
+                expected_revision=raw_revision,
+            )
+        except ReadingConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal, action="reading.save", request_id=rid, outcome="UPDATED"
+        )
+        return {"request_id": rid, "note": note}
+
+    @router.post("/reading/{note_id}/submit")
+    async def reading_submit(request: Request, note_id: str) -> dict[str, Any]:
+        principal = require_token(request, "reading:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        expected_revision = payload.get("expected_revision")
+        if not isinstance(expected_revision, int):
+            raise HTTPException(status_code=422, detail="expected_revision 必须是整数")
+        try:
+            version = users.reading_notes.submit(
+                principal.user_id, note_id, expected_revision
+            )
+        except ReadingConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal, action="reading.submit", request_id=rid, outcome="SUBMITTED"
+        )
+        return {"request_id": rid, "version": version}
+
+    @router.post("/reading/{note_id}/share")
+    async def reading_share(request: Request, note_id: str) -> dict[str, Any]:
+        principal = require_token(request, "reading:share")
+        require_site_owner(principal)
+        rid = request_id(request)
+        payload = await json_object(request)
+        version_id = str(payload.get("version_id") or "")
+        statement = str(payload.get("statement") or "")
+        try:
+            share = users.reading_notes.share(
+                principal.user_id, note_id, version_id, statement
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal, action="reading.share", request_id=rid, outcome="SHARED"
+        )
+        return {"request_id": rid, "share": share}
+
+    @router.post("/reading/{note_id}/share/stop")
+    def reading_unshare(request: Request, note_id: str) -> dict[str, Any]:
+        principal = require_token(request, "reading:share")
+        require_site_owner(principal)
+        rid = request_id(request)
+        revoked = users.reading_notes.revoke(principal.user_id, note_id)
+        users.audit_api_action(
+            principal, action="reading.unshare", request_id=rid, outcome="REVOKED"
+        )
+        return {"request_id": rid, "revoked": revoked}
 
     @router.get("/trades")
     def list_trades(

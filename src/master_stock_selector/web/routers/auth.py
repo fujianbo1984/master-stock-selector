@@ -9,7 +9,13 @@ from urllib.parse import parse_qs, quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from ..users import SESSION_COOKIE, SESSION_IDLE_SECONDS, AuthenticatedUser, UserRepository
+from ..users import (
+    API_TOKEN_DEFAULT_EXPIRES_DAYS,
+    SESSION_COOKIE,
+    SESSION_IDLE_SECONDS,
+    AuthenticatedUser,
+    UserRepository,
+)
 
 Render = Callable[[Request, str, dict[str, Any]], HTMLResponse]
 
@@ -141,7 +147,11 @@ def build_auth_router(
             raise HTTPException(status_code=403, detail="CSRF 校验失败")
         name = str((values.get("name") or [""])[0])
         try:
-            expires_days = int(str((values.get("expires_days") or ["30"])[0]))
+            expires_days = int(
+                str(
+                    (values.get("expires_days") or [str(API_TOKEN_DEFAULT_EXPIRES_DAYS)])[0]
+                )
+            )
             scopes = [
                 scope
                 for scope in (
@@ -150,6 +160,9 @@ def build_auth_router(
                     "plans:read",
                     "plans:write",
                     "plans:publish",
+                    "reading:read",
+                    "reading:write",
+                    "reading:share",
                 )
                 if scope in values
             ]

@@ -182,6 +182,7 @@ def create_app(
                 ("我的观察", "/a/observations"),
                 ("交易计划", "/a/plan"),
                 ("交易复盘", "/a/review"),
+                ("阅读感想", "/a/reading/mine"),
             ]
             if user is not None
             else []
@@ -228,7 +229,13 @@ def create_app(
             site_owner_username=owner_username,
         )
     )
-    app.include_router(build_content_router(render=render))
+    app.include_router(
+        build_content_router(
+            render=render,
+            users=users,
+            site_owner_username=owner_username,
+        )
+    )
     app.include_router(
         build_trading_plan_router(
             render=render,
@@ -236,7 +243,13 @@ def create_app(
             site_owner_username=owner_username,
         )
     )
-    app.include_router(build_agent_api_router(repository=repository, users=users))
+    app.include_router(
+        build_agent_api_router(
+            repository=repository,
+            users=users,
+            site_owner_username=owner_username,
+        )
+    )
 
     return app
 

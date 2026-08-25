@@ -421,6 +421,21 @@ def build_watchlist_router(
         latest_updated_at = ""
         if owner is not None:
             owner_id = str(owner["user_id"])
+            reading_notes_by_slug = {
+                str(article.get("slug") or article.get("href")): article
+                for article in reading_notes
+            }
+            reading_notes_by_slug.update(
+                {
+                    str(article["slug"]): article
+                    for article in users.reading_notes.shared_notes(owner_id)
+                }
+            )
+            reading_notes = sorted(
+                reading_notes_by_slug.values(),
+                key=lambda article: str(article.get("updated_on") or ""),
+                reverse=True,
+            )
             shared_plans = users.trading_plans.shared_versions(owner_id)
             current_shared_plan = next(
                 (

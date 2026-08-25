@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import mimetypes
 import re
 import tomllib
 from datetime import date
@@ -91,7 +93,44 @@ def _load_article(path: Path) -> dict[str, Any]:
         "slug": slug,
         "href": f"/a/reading/{slug}",
         "body_html": body_html,
+        "body_markdown": body,
         "source_path": path,
+    }
+
+
+def repository_article_payload(article: dict[str, Any]) -> dict[str, Any]:
+    """Convert a bundled article into the user-reading API payload."""
+    source_path = Path(article["source_path"])
+    article_dir = source_path.parent.resolve()
+    assets: dict[str, dict[str, str]] = {}
+    for asset in sorted(article_dir.rglob("*")):
+        if not asset.is_file() or asset == source_path:
+            continue
+        relative = asset.relative_to(article_dir).as_posix()
+        media_type = mimetypes.guess_type(asset.name)[0] or ""
+        assets[relative] = {
+            "media_type": media_type,
+            "data": base64.b64encode(asset.read_bytes()).decode("ascii"),
+        }
+    source_reference = source_path.relative_to(READING_CONTENT_DIR).as_posix()
+    return {
+        "slug": str(article["slug"]),
+        "title": str(article["title"]),
+        "summary": str(article["summary"]),
+        "tags": list(article["tags"]),
+        "body_markdown": str(article["body_markdown"]),
+        "assets": assets,
+        "metadata": {
+            key: article[key]
+            for key in ("heading", "deck", "eyebrow", "subtitle")
+        }
+        | {
+            "repository_import": {
+                "source": source_reference,
+                "published_on": str(article["published_on"]),
+                "status": str(article["status"]),
+            }
+        },
     }
 
 

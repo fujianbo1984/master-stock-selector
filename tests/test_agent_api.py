@@ -31,6 +31,18 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
     assert "三步连接 Agent" in page.text
     assert "trades validate trades.json" in page.text
     assert 'aria-current="page"' in page.text
+    assert '<option value="365" selected>365 天</option>' in page.text
+    for scope in (
+        "trades:read",
+        "trades:write",
+        "plans:read",
+        "plans:write",
+        "plans:publish",
+        "reading:read",
+        "reading:write",
+        "reading:share",
+    ):
+        assert f'name="{scope}" checked' in page.text
     created = client.post(
         "/account/tokens",
         data={
