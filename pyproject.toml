@@ -24,6 +24,7 @@ masterstock = "master_stock_selector.cli:main"
 "master_stock_selector.web" = [
   "content/reading/*/*.md",
   "content/reading/*/images/*",
+  "content/reading/*/images/*/*",
   "static/*",
   "static/vendor/*",
   "templates/*.html",

@@ -36,6 +36,9 @@ REQUIRED_WHEEL_RESOURCES = (
     "master_stock_selector/web/templates/reading/article.html",
     "master_stock_selector/web/content/reading/adam-grimes-trading-templates/index.md",
     "master_stock_selector/web/content/reading/adam-grimes-trading-templates/images/00103.jpg",
+    "master_stock_selector/web/content/reading/mark-minervini-breakout-trading/index.md",
+    "master_stock_selector/web/content/reading/mark-minervini-breakout-trading/"
+    "images/workbook-figures/mtp-v2-p453-fwlt-breakout.jpeg",
 )
 FORBIDDEN_ARCHIVE_PATTERNS = (
     re.compile(r"(^|/)(data|logs|artifacts|backups)/"),

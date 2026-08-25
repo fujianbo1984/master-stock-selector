@@ -64,6 +64,14 @@ def test_archive_policy_rejects_runtime_data_and_secrets() -> None:
             release_ecs.validate_archive_names([forbidden])
 
 
+def test_required_wheel_resources_include_nested_reading_assets() -> None:
+    assert (
+        "master_stock_selector/web/content/reading/mark-minervini-breakout-trading/"
+        "images/workbook-figures/mtp-v2-p453-fwlt-breakout.jpeg"
+        in release_ecs.REQUIRED_WHEEL_RESOURCES
+    )
+
+
 def test_baseline_and_apply_scripts_keep_safety_contract() -> None:
     config = release_ecs.ReleaseConfig(
         apply=True,
