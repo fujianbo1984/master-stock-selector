@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from master_stock_selector.web.display_time import sqlite_utc_to_shanghai
 from master_stock_selector.web.owner import build_owner_activity_feed, build_owner_trade_feed
 
 
@@ -226,3 +227,24 @@ def test_owner_activity_feed_merges_sanitized_records_newest_first() -> None:
     ]
     assert "quantity" not in repr(items)
     assert "fee" not in repr(items)
+
+
+def test_focus_dynamic_uses_localized_sqlite_timestamp_before_feed_rendering() -> None:
+    reviewed_at = sqlite_utc_to_shanghai("2026-08-25 23:31:26")
+    items = build_owner_activity_feed(
+        executions=[],
+        positions=[],
+        focus_items=[
+            {
+                "symbol": "000002.SZ",
+                "name": "万科A",
+                "reviewed_at": reviewed_at,
+                "note": "观察平台突破",
+                "is_held": False,
+            }
+        ],
+        reading_notes=[],
+    )
+
+    assert items[0]["day"] == "2026-08-26"
+    assert items[0]["clock"] == "07:31:26"

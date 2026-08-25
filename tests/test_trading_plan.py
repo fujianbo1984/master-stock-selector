@@ -124,6 +124,26 @@ def test_owner_plan_sharing_versions_and_global_revoke(tmp_path: Path) -> None:
     assert repository.trading_plans.shared_by_id(owner, shared_second["share_id"]) is None
 
 
+def test_shared_plan_uses_shanghai_display_time_across_utc_date_boundary(
+    tmp_path: Path,
+) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    owner = repository.create_user("我不是来玩的", "Secure-password-123")
+    _published_demo(repository, owner)
+    share = repository.trading_plans.share_current(owner)
+
+    with repository.connect() as connection:
+        connection.execute(
+            "UPDATE user_trading_plan_share SET published_at=? WHERE share_id=?",
+            ("2026-08-25 23:31:26", share["share_id"]),
+        )
+
+    displayed = repository.trading_plans.current_share(owner)
+    assert displayed is not None
+    assert displayed["published_at"] == "2026-08-26 07:31:26"
+
+
 def test_only_site_owner_can_share_plan_and_viewers_see_sanitized_page(
     tmp_path: Path,
 ) -> None:

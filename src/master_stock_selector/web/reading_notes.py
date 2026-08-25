@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import markdown  # type: ignore[import-untyped]
 
+from .display_time import sqlite_utc_to_shanghai
 from .users import UserRepository
 
 _SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -447,6 +448,9 @@ class ReadingNoteService:
     @staticmethod
     def _draft(row: Any) -> dict[str, Any]:
         value = dict(row)
+        for field in ("created_at", "updated_at", "submitted_at"):
+            if field in value:
+                value[field] = sqlite_utc_to_shanghai(value[field])
         value["tags"] = json.loads(str(value.pop("tags_json")))
         value["metadata"] = json.loads(str(value.pop("metadata_json")))
         assets = json.loads(str(value.pop("assets_json", "{}")))
@@ -457,6 +461,9 @@ class ReadingNoteService:
     @staticmethod
     def _version(row: Any) -> dict[str, Any]:
         value = dict(row)
+        for field in ("created_at", "submitted_at"):
+            if field in value:
+                value[field] = sqlite_utc_to_shanghai(value[field])
         value["tags"] = json.loads(str(value.pop("tags_json")))
         value["metadata"] = json.loads(str(value.pop("metadata_json")))
         assets = json.loads(str(value.pop("assets_json", "{}")))
@@ -466,7 +473,9 @@ class ReadingNoteService:
     @classmethod
     def _shared(cls, row: Any) -> dict[str, Any]:
         value = cls._version(row)
-        value["shared_at"] = str(value.pop("share_shared_at", value.get("shared_at", "")))
+        value["shared_at"] = sqlite_utc_to_shanghai(
+            value.pop("share_shared_at", value.get("shared_at", ""))
+        )
         value["published_on"] = value["shared_at"][:10] or date.today().isoformat()
         value["updated_on"] = value["shared_at"] or value["published_on"]
         value["href"] = f"/a/owner/reading/{value['share_id']}"

@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from .display_time import sqlite_utc_to_shanghai
+
 if TYPE_CHECKING:
     from .users import UserRepository
 
@@ -816,6 +818,9 @@ class TradingPlanService:
 
     def _version(self, row: Any) -> dict[str, Any]:
         value = dict(row)
+        for field in ("created_at", "activated_at", "archived_at"):
+            if field in value:
+                value[field] = sqlite_utc_to_shanghai(value[field])
         value["content"] = json.loads(str(value.pop("content_json")))
         answers = value["content"].get("answers", {})
         catalog = value["content"].get("setup_catalog")
@@ -847,6 +852,9 @@ class TradingPlanService:
 
     def _shared_version(self, row: Any) -> dict[str, Any]:
         value = self._version(row)
+        for field in ("published_at", "share_revoked_at"):
+            if field in value:
+                value[field] = sqlite_utc_to_shanghai(value[field])
         value["share_href"] = f"/a/owner/plans/{value['share_id']}"
         return value
 

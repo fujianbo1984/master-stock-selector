@@ -14,6 +14,7 @@ from ...watchlist.charting import keltner_channels
 from ...watchlist.industry import INDUSTRY_POLICY_VERSION
 from ...watchlist.industry_confirmation import build_industry_weinstein_confirmation
 from ...watchlist.repository import MarketDataReader, WatchlistRepository
+from ..display_time import sqlite_utc_to_shanghai
 from ..owner import (
     OWNER_READING_NOTES,
     build_owner_activity_feed,
@@ -458,7 +459,7 @@ def build_watchlist_router(
             )
             positions = list(feed["positions"])
             executions = list(feed["executions"])
-            latest_updated_at = str(feed["latest_updated_at"] or "")
+            latest_updated_at = sqlite_utc_to_shanghai(feed["latest_updated_at"])
 
             reviews = [
                 row
@@ -481,7 +482,7 @@ def build_watchlist_router(
                         or (public_by_symbol.get(symbol) or {}).get("name")
                         or "名称待补",
                         "note": str(row.get("note") or ""),
-                        "reviewed_at": str(row.get("reviewed_at") or ""),
+                        "reviewed_at": sqlite_utc_to_shanghai(row.get("reviewed_at")),
                         "public": public_by_symbol.get(symbol),
                         "is_held": symbol in held_symbols,
                     }

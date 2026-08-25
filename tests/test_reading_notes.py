@@ -78,6 +78,25 @@ def test_private_draft_submission_and_frozen_version_boundary(tmp_path) -> None:
         raise AssertionError("过期修订号必须被拒绝")
 
 
+def test_shared_note_uses_shanghai_display_time_across_utc_date_boundary(tmp_path) -> None:
+    _, users, owner_id, _ = _app(tmp_path)
+    note = users.reading_notes.save(owner_id, _payload())
+    version = users.reading_notes.submit(owner_id, note["note_id"], 1)
+    share = users.reading_notes.share(owner_id, note["note_id"], version["version_id"])
+
+    with users.connect() as connection:
+        connection.execute(
+            "UPDATE user_reading_note_share SET shared_at=? WHERE share_id=?",
+            ("2026-08-25 23:31:26", share["share_id"]),
+        )
+
+    shared = users.reading_notes.shared_by_id(owner_id, share["share_id"])
+    assert shared is not None
+    assert shared["shared_at"] == "2026-08-26 07:31:26"
+    assert shared["published_on"] == "2026-08-26"
+    assert shared["updated_on"] == "2026-08-26 07:31:26"
+
+
 def test_agent_api_keeps_all_reading_operations_owner_only(tmp_path) -> None:
     app, users, owner_id, reader_id = _app(tmp_path)
     client = TestClient(app)
