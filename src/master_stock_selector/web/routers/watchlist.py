@@ -1076,6 +1076,10 @@ def build_watchlist_router(
         edit_trade: str = "",
         traded_on: str = "",
         trade_price: str = "",
+        nav_previous: str = "",
+        nav_next: str = "",
+        nav_position: str = "",
+        nav_total: str = "",
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
@@ -1194,6 +1198,10 @@ def build_watchlist_router(
                 if section.partition("#")[0] == "open-positions"
                 else None
             ),
+            nav_previous=nav_previous,
+            nav_next=nav_next,
+            nav_position=nav_position,
+            nav_total=nav_total,
         )
         payload["market_metrics"] = market_reader.safe_stock_market_metrics(
             query_date,
@@ -1293,28 +1301,14 @@ def build_watchlist_router(
                 if section.partition("#")[0] == "open-positions"
                 else None
             ),
+            nav_previous=nav_previous,
+            nav_next=nav_next,
+            nav_position=nav_position,
+            nav_total=nav_total,
         )
-        submitted_position = _navigation_count(nav_position)
-        submitted_total = _navigation_count(nav_total)
-        if 0 < submitted_position <= submitted_total and (nav_previous or nav_next):
-            submitted_symbols = {
-                value.upper().strip() for value in (nav_previous, nav_next) if value.strip()
-            }
-            submitted_names = repository.stock_names(submitted_symbols)
-            navigation.update(
-                {
-                    "position": submitted_position,
-                    "total": submitted_total,
-                    "previous": _navigation_item(nav_previous, submitted_names),
-                    "next": _navigation_item(nav_next, submitted_names),
-                }
-            )
         chart_methods = _chart_method_statuses(payload["history"], query_date)
         market_metrics = market_reader.safe_stock_market_metrics(query_date, [symbol]).get(
             symbol.upper(), {}
-        )
-        anomaly_evidence = _stock_anomaly_evidence(
-            repository, market_reader, payload, query_date, symbol
         )
         return render(
             request,
@@ -1327,7 +1321,6 @@ def build_watchlist_router(
                 "stock_name": str(payload["identity"].get("name") or symbol.upper()),
                 "industry_name": str(payload["industry"].get("industry_name") or "行业待补"),
                 "market_metrics": market_metrics,
-                "anomaly_evidence": anomaly_evidence,
                 "external_urls": _stock_external_urls(symbol),
                 "stock": payload,
                 "manual_labels": MANUAL_LABELS,
@@ -1340,6 +1333,16 @@ def build_watchlist_router(
                 "navigation": navigation,
                 "private_workspace": user is not None,
             },
+        )
+
+    @router.get("/api/a/stocks/{symbol}/anomaly")
+    def api_stock_anomaly(symbol: str, date: str) -> dict[str, Any]:
+        return _stock_anomaly_evidence(
+            repository,
+            market_reader,
+            {"industry": repository.stock_industry(symbol, date)},
+            date,
+            symbol,
         )
 
     @router.get("/a/stocks/{symbol}/realtime", response_class=HTMLResponse)
@@ -2618,6 +2621,10 @@ def _stock_navigation(
     rows_for_date: Callable[[str], list[dict[str, Any]]] | None = None,
     personal_rows: list[dict[str, Any]] | None = None,
     position_rows: list[dict[str, Any]] | None = None,
+    nav_previous: str = "",
+    nav_next: str = "",
+    nav_position: str = "",
+    nav_total: str = "",
 ) -> dict[str, Any]:
     """Keep chart navigation inside the selected daily-list context, not a global rank."""
 
@@ -2675,6 +2682,7 @@ def _stock_navigation(
     }
     empty: dict[str, Any] = {
         "query": query,
+        "entry_query": query,
         "list_url": list_url,
         "section_label": labels.get(section, "当前列表"),
         "position": 0,
@@ -2682,7 +2690,40 @@ def _stock_navigation(
         "previous": None,
         "next": None,
     }
-    if section not in labels or not query_date:
+    if not query_date:
+        return empty
+    submitted_position = _navigation_count(nav_position)
+    submitted_total = _navigation_count(nav_total)
+    submitted_is_complete = bool(
+        0 < submitted_position <= submitted_total
+        and (submitted_position == 1 or nav_previous.strip())
+        and (submitted_position == submitted_total or nav_next.strip())
+    )
+    if submitted_is_complete:
+        submitted_symbols = {
+            value.upper().strip()
+            for value in (nav_previous, nav_next)
+            if value.strip()
+        }
+        submitted_names = repository.stock_names(submitted_symbols)
+        nav_query = urlencode(
+            {
+                "nav_previous": nav_previous.upper().strip(),
+                "nav_next": nav_next.upper().strip(),
+                "nav_position": submitted_position,
+                "nav_total": submitted_total,
+            }
+        )
+        return {
+            **empty,
+            "entry_query": f"{query}&{nav_query}",
+            "section_label": labels.get(section, "当前列表"),
+            "position": submitted_position,
+            "total": submitted_total,
+            "previous": _navigation_item(nav_previous, submitted_names),
+            "next": _navigation_item(nav_next, submitted_names),
+        }
+    if section not in labels:
         return empty
     if section == "personal-observations" and personal_rows is not None:
         selected = [

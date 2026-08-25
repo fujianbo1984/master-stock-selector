@@ -930,7 +930,7 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert "https://stockpage.10jqka.com.cn/000001/" in response.text
     assert (
         'href="/a/stocks/000001.SZ?date=2026-07-31&amp;view=current&amp;method=all'
-        '&amp;min_cap=0&amp;section=daily-results"'
+        '&amp;min_cap=0&amp;section=daily-results'
     ) in response.text
     assert response.text.count("kpi-link") == 4
     assert "view=current" in response.text
@@ -1457,6 +1457,38 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert "保留既有备注" in client.get("/a/stocks/000001.SZ").text
 
 
+def test_list_navigation_snapshot_skips_chart_list_rebuild(tmp_path, monkeypatch):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    market_path = tmp_path / "market.sqlite3"
+    _seed_watchlist(watchlist_path)
+    _seed_filter_cases(watchlist_path)
+    _seed_market_context(market_path)
+    app = create_app(
+        market_database=market_path,
+        watchlist_database=watchlist_path,
+        secure_cookies=False,
+    )
+    client = TestClient(app)
+
+    listing = client.get("/a/daily?date=2026-07-31&min_cap=0")
+    assert listing.status_code == 200
+    assert "nav_position=1&amp;nav_total=" in listing.text
+    assert "nav_next=" in listing.text
+
+    def fail_if_rebuilt(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("chart navigation should use the submitted list snapshot")
+
+    monkeypatch.setattr(app.state.watchlist_repository, "watchlist_rows", fail_if_rebuilt)
+    chart = client.get(
+        "/a/stocks/000001.SZ/chart?date=2026-07-31&min_cap=0"
+        "&section=daily-results&nav_next=000003.SZ&nav_position=1&nav_total=2"
+    )
+
+    assert chart.status_code == 200
+    assert "当前观察池 <b>1 / 2</b>" in chart.text
+    assert 'aria-label="下一只：小盘示例"' in chart.text
+
+
 def test_chart_review_keeps_position_when_manual_state_changes_sort_order(tmp_path):
     watchlist_path = tmp_path / "master_watchlist.sqlite3"
     market_path = tmp_path / "market.sqlite3"
@@ -1877,7 +1909,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260824-fast-navigation-v1" in page.text
+    assert "stock-chart.js?v=20260825-kline-latency-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert 'data-chart-ohlcv' in page.text
@@ -1918,7 +1950,9 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-chart-method-timeline' in page.text
     assert 'data-chart-anomaly-evidence' in page.text
     assert "异常交易复核" in page.text
-    assert "daily-anomaly-review-v1" in page.text
+    assert 'data-anomaly-url="/api/a/stocks/000001.SZ/anomaly?date=2026-06-30"' in page.text
+    assert "daily-anomaly-review-v1" not in page.text
+    assert "异常证据将在图表首屏之后独立加载" in page.text
     assert "只提供复核证据，不改变 Weinstein 或 Minervini 结论" in page.text
     assert "状态事件可用区间" not in page.text
     assert "W/M 标志只表示规则观察状态变化" not in page.text
@@ -1939,6 +1973,9 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'const chartCacheLimit = 12;' in controller
     assert 'root.querySelector("[data-chart-next]")' in controller
     assert "scheduleAdjacentChartPrefetch();" in controller
+    assert "overlayRequest = loadPrivateOverlay(cached);" in controller
+    assert "canReuseOverlay ? overlayRequest : loadPrivateOverlay(nextPayload)" in controller
+    assert "void loadAnomalyEvidence(); request();" in controller
     assert 'const periodUnit = interval === "week" ? "周" : "日";' in controller
     assert "setChartState(" in controller
     assert "compactVolume" in controller
@@ -1976,6 +2013,13 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert all_payload["bars"][0]["close"] == 10.4
     assert payload["keltner"][-1]["upper"] is not None
     assert "trade_overlay" not in payload
+
+    anomaly = client.get(
+        "/api/a/stocks/000001.SZ/anomaly?date=2026-06-30"
+    )
+    assert anomaly.status_code == 200
+    assert anomaly.json()["policy_version"] == "daily-anomaly-review-v1"
+    assert len(anomaly.json()["evidence"]) == 5
 
     overlay = client.get(
         "/api/me/stocks/000001.SZ/overlay"

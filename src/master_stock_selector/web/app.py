@@ -38,7 +38,7 @@ PUBLIC_HTML_CACHE_PATH = re.compile(
     r"stocks/[^/]+(?:/(?:chart|realtime))?)$"
 )
 PUBLIC_API_CACHE_PATH = re.compile(
-    r"^/api/a/(?:stocks/[^/]+/chart|watchlist/[^/]+|"
+    r"^/api/a/(?:stocks/[^/]+/(?:chart|anomaly)|watchlist/[^/]+|"
     r"industries/[^/]+(?:/[^/]+)?|indices/[^/]+)$"
 )
 

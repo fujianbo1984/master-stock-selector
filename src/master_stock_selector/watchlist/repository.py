@@ -1377,14 +1377,27 @@ class WatchlistRepository:
 
     @classmethod
     def _identity_rows_as_of(
-        cls, connection: sqlite3.Connection, as_of_date: str
+        cls,
+        connection: sqlite3.Connection,
+        as_of_date: str,
+        *,
+        symbols: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
+        requested = sorted({str(symbol).upper() for symbol in symbols or () if symbol})
+        if symbols is not None and not requested:
+            return []
+        symbol_clause = ""
+        symbol_parameters: tuple[str, ...] = ()
+        if requested:
+            symbol_clause = f" AND identity.symbol IN ({','.join('?' for _ in requested)})"
+            symbol_parameters = tuple(requested)
         if cls._table_has_rows(connection, "security_identity_history"):
             rows = connection.execute(
-                """
+                f"""
                 SELECT identity.*
                 FROM security_identity_history AS identity
                 WHERE identity.valid_from <= ?
+                  {symbol_clause}
                   AND identity.valid_from = (
                     SELECT MAX(latest.valid_from)
                     FROM security_identity_history AS latest
@@ -1392,40 +1405,64 @@ class WatchlistRepository:
                   )
                 ORDER BY identity.symbol
                 """,
-                (as_of_date, as_of_date),
+                (as_of_date, *symbol_parameters, as_of_date),
             ).fetchall()
             return [{**dict(row), "snapshot_date": str(row["valid_from"])} for row in rows]
         if not cls._table_exists(connection, "security_identity_snapshot"):
             return []
         rows = connection.execute(
-            """
-            SELECT identity.* FROM security_identity_snapshot AS identity
-            JOIN (
-                SELECT symbol, MAX(snapshot_date) AS snapshot_date
-                FROM security_identity_snapshot
-                WHERE snapshot_date <= ? GROUP BY symbol
-            ) AS latest
-              ON latest.symbol = identity.symbol
-             AND latest.snapshot_date = identity.snapshot_date
+            f"""
+            SELECT identity.*
+            FROM security_identity_snapshot AS identity
+            WHERE identity.snapshot_date <= ? {symbol_clause}
+              AND identity.snapshot_date = (
+                SELECT MAX(latest.snapshot_date)
+                FROM security_identity_snapshot AS latest
+                WHERE latest.symbol = identity.symbol AND latest.snapshot_date <= ?
+              )
             ORDER BY identity.symbol
             """,
-            (as_of_date,),
+            (as_of_date, *symbol_parameters, as_of_date),
         ).fetchall()
         return [dict(row) for row in rows]
 
     @classmethod
     def _membership_rows_as_of(
-        cls, connection: sqlite3.Connection, as_of_date: str
+        cls,
+        connection: sqlite3.Connection,
+        as_of_date: str,
+        *,
+        symbols: Sequence[str] | None = None,
+        industry_code: str = "",
     ) -> list[dict[str, Any]]:
+        requested = sorted({str(symbol).upper() for symbol in symbols or () if symbol})
+        if symbols is not None and not requested:
+            return []
+        filters = ""
+        filter_parameters: tuple[str, ...] = ()
+        if requested:
+            filters += f" AND symbol IN ({','.join('?' for _ in requested)})"
+            filter_parameters += tuple(requested)
+        normalized_industry = industry_code.upper().strip()
+        if normalized_industry:
+            filters += " AND industry_code = ?"
+            filter_parameters += (normalized_industry,)
         if cls._table_has_rows(connection, "security_industry_membership_history"):
             rows = connection.execute(
-                """
+                f"""
                 SELECT * FROM security_industry_membership_history
                 WHERE taxonomy = ? AND industry_level = ?
                   AND valid_from <= ? AND (valid_to = '' OR valid_to >= ?)
+                  {filters}
                 ORDER BY symbol, industry_code
                 """,
-                (INDUSTRY_TAXONOMY, INDUSTRY_LEVEL, as_of_date, as_of_date),
+                (
+                    INDUSTRY_TAXONOMY,
+                    INDUSTRY_LEVEL,
+                    as_of_date,
+                    as_of_date,
+                    *filter_parameters,
+                ),
             ).fetchall()
             return [{**dict(row), "snapshot_date": as_of_date} for row in rows]
         if not cls._table_exists(connection, "security_industry_membership_snapshot"):
@@ -1441,12 +1478,13 @@ class WatchlistRepository:
         if not snapshot_date:
             return []
         rows = connection.execute(
-            """
+            f"""
             SELECT * FROM security_industry_membership_snapshot
             WHERE snapshot_date = ? AND taxonomy = ? AND industry_level = ?
+              {filters}
             ORDER BY symbol, industry_code
             """,
-            (snapshot_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL),
+            (snapshot_date, INDUSTRY_TAXONOMY, INDUSTRY_LEVEL, *filter_parameters),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -3015,11 +3053,17 @@ class WatchlistRepository:
         if not code:
             return []
         with self.connect() as connection:
+            memberships = self._membership_rows_as_of(
+                connection, as_of_date, industry_code=code
+            )
             identities = {
                 str(row["symbol"]): row
-                for row in self._identity_rows_as_of(connection, as_of_date)
+                for row in self._identity_rows_as_of(
+                    connection,
+                    as_of_date,
+                    symbols=[str(row.get("symbol") or "") for row in memberships],
+                )
             }
-            memberships = self._membership_rows_as_of(connection, as_of_date)
         return sorted(
             {
                 str(row.get("symbol") or "").upper()
@@ -3029,6 +3073,26 @@ class WatchlistRepository:
                 and not bool(identities.get(str(row.get("symbol") or ""), {}).get("is_st"))
             }
             - {""}
+        )
+
+    def stock_industry(self, symbol: str, as_of_date: str) -> dict[str, Any]:
+        """Return the verified PIT industry row for one stock without scanning all members."""
+
+        self.initialize()
+        normalized = symbol.upper().strip()
+        if not normalized:
+            return {}
+        with self.connect() as connection:
+            rows = self._membership_rows_as_of(
+                connection, as_of_date, symbols=[normalized]
+            )
+        return next(
+            (
+                row
+                for row in rows
+                if str(row.get("assignment_state") or "") == "VERIFIED"
+            ),
+            {},
         )
 
     def index_facts(self, as_of_date: str) -> list[dict[str, Any]]:
@@ -3125,7 +3189,9 @@ class WatchlistRepository:
             identity_row = next(
                 (
                     row
-                    for row in self._identity_rows_as_of(connection, detail_date)
+                    for row in self._identity_rows_as_of(
+                        connection, detail_date, symbols=[symbol]
+                    )
                     if str(row["symbol"]) == symbol
                 ),
                 None,
@@ -3133,7 +3199,9 @@ class WatchlistRepository:
             industry_row = next(
                 (
                     row
-                    for row in self._membership_rows_as_of(connection, detail_date)
+                    for row in self._membership_rows_as_of(
+                        connection, detail_date, symbols=[symbol]
+                    )
                     if str(row["symbol"]) == symbol
                     and str(row.get("assignment_state") or "") == "VERIFIED"
                 ),

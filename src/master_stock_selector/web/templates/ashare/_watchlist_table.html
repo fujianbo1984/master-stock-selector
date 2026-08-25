@@ -10,7 +10,7 @@
         <td data-sort="{{ row.symbol }}">
           <div class="stock-primary-link">
             {% if row.tradingview_url %}<a class="instrument-name-link" data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在外部行情网站打开 {{ row.name }} 价格图"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}
-            <span class="stock-secondary-links">{% if row.tonghuashun_url %}<a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.symbol }}">{{ row.symbol }}</a>{% else %}{{ row.symbol }}{% endif %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?{{ filters.query }}&amp;section={{ navigation_section }}">详情</a></span>
+            <span class="stock-secondary-links">{% if row.tonghuashun_url %}<a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.symbol }}">{{ row.symbol }}</a>{% else %}{{ row.symbol }}{% endif %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?{{ filters.query }}&amp;section={{ navigation_section }}{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}">详情</a></span>
           </div>
           {% if row.is_suspended %}<span class="tag tag-muted">停牌</span>{% endif %}
         </td>

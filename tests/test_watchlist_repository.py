@@ -387,6 +387,59 @@ def test_repository_keeps_system_facts_immutable_but_allows_manual_review(tmp_pa
     assert detail["manual"]["note"] == "继续观察"
 
 
+def test_stock_and_industry_lookup_scope_to_requested_rows(tmp_path):
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    repository.initialize()
+    with sqlite3.connect(repository.path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO security_identity_history (
+                valid_from, symbol, name, is_st, source_digest, origin
+            ) VALUES ('2026-07-01', ?, ?, ?, 'identity-test', 'OBSERVED')
+            """,
+            [
+                ("000001.SZ", "目标股票", 0),
+                ("000002.SZ", "同业ST", 1),
+                ("000003.SZ", "其他行业", 0),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO security_industry_membership_history (
+                symbol, taxonomy, industry_level, industry_code, industry_name,
+                valid_from, assignment_state, source, source_digest, origin
+            ) VALUES (?, 'SW2021', 'L3', ?, ?, '2026-07-01', 'VERIFIED',
+                      'test', 'membership-test', 'OBSERVED')
+            """,
+            [
+                ("000001.SZ", "850001.SI", "目标行业"),
+                ("000002.SZ", "850001.SI", "目标行业"),
+                ("000003.SZ", "850002.SI", "其他行业"),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO stock_method_daily_fact (
+                as_of_date, symbol, method, result, policy_version,
+                evidence_json, source_digest, origin
+            ) VALUES ('2026-07-31', '000001.SZ', 'minervini', 'PASS', ?,
+                      '{}', 'fact-test', 'OBSERVED')
+            """,
+            (MINERVINI_POLICY_VERSION,),
+        )
+
+    detail = repository.stock_detail("000001.SZ")
+
+    assert detail["identity"]["name"] == "目标股票"
+    assert detail["industry"]["industry_code"] == "850001.SI"
+    assert repository.stock_industry("000003.SZ", "2026-07-31")["industry_code"] == (
+        "850002.SI"
+    )
+    assert repository.industry_member_symbols("2026-07-31", "850001.SI") == [
+        "000001.SZ"
+    ]
+
+
 def test_trade_review_matches_fifo_costs_and_rejects_oversell(tmp_path):
     repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
     repository.record_trade(

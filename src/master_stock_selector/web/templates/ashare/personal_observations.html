@@ -21,7 +21,7 @@
     {% for item in items %}
     <article class="observation-item">
       <div class="observation-item-stock">
-        <a href="/a/stocks/{{ item.symbol }}?date={{ query_date }}&amp;manual={{ selected_state }}&amp;min_cap=0&amp;section=personal-observations"><strong>{{ item.name }}</strong><small>{{ item.symbol }}</small></a>
+        <a href="/a/stocks/{{ item.symbol }}?date={{ query_date }}&amp;manual={{ selected_state }}&amp;min_cap=0&amp;section=personal-observations{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}"><strong>{{ item.name }}</strong><small>{{ item.symbol }}</small></a>
         <span class="manual-state manual-{{ item.manual.manual_state|lower }}">{{ item.manual_label }}</span>
       </div>
       <div class="observation-item-facts">
@@ -40,7 +40,7 @@
           {% set actions = [('WATCH','恢复观察'),('UNREVIEWED','移出')] %}
         {% endif %}
         {% for value, label in actions %}<form method="post" action="/a/stocks/{{ item.symbol }}/review"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="manual_state" value="{{ value }}"><input type="hidden" name="return_to" value="{{ return_path }}"><button class="{{ 'text-button' if value == 'UNREVIEWED' else 'button button-secondary button-compact' }}" type="submit">{{ label }}</button></form>{% endfor %}
-        <a class="text-link" href="/a/stocks/{{ item.symbol }}?date={{ query_date }}&amp;manual={{ selected_state }}&amp;min_cap=0&amp;section=personal-observations">详情与备注 →</a>
+        <a class="text-link" href="/a/stocks/{{ item.symbol }}?date={{ query_date }}&amp;manual={{ selected_state }}&amp;min_cap=0&amp;section=personal-observations{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}">详情与备注 →</a>
       </div>
       <small class="observation-updated">最后更新 {{ item.manual.reviewed_at }}</small>
     </article>

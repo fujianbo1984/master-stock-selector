@@ -24,7 +24,7 @@
   </article>
   <article id="current-positions" class="panel review-panel">
     <div class="section-heading"><div><p class="eyebrow">待复盘持仓</p><h2>当前持仓</h2></div><span class="muted">不计入已实现统计</span></div>
-    {% if review.open_positions %}<div class="table-wrap review-table"><table><thead><tr><th>股票</th><th>方法</th><th>数量</th><th>剩余成本</th></tr></thead><tbody>{% for item in review.open_positions %}<tr><td><a class="stock-link" href="/a/stocks/{{ item.symbol }}/chart?date={{ query_date }}&amp;section=open-positions" title="打开 {{ item.stock_name }} K线图">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td><td>{{ item.setup_label }}</td><td>{{ item.quantity }}</td><td>{{ item.cost }} 元</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">当前没有待复盘持仓。</div>{% endif %}
+    {% if review.open_positions %}<div class="table-wrap review-table"><table><thead><tr><th>股票</th><th>方法</th><th>数量</th><th>剩余成本</th></tr></thead><tbody>{% for item in review.open_positions %}<tr><td><a class="stock-link" href="/a/stocks/{{ item.symbol }}/chart?date={{ query_date }}&amp;section=open-positions{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}" title="打开 {{ item.stock_name }} K线图">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td><td>{{ item.setup_label }}</td><td>{{ item.quantity }}</td><td>{{ item.cost }} 元</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">当前没有待复盘持仓。</div>{% endif %}
   </article>
 </section>
 

@@ -34,6 +34,12 @@
   const lowValue = root.querySelector("[data-chart-low]");
   const closeValue = root.querySelector("[data-chart-close]");
   const volumeValue = root.querySelector("[data-chart-volume]");
+  const anomalyRoot = root.querySelector("[data-chart-anomaly-evidence]");
+  const anomalyLabel = root.querySelector("[data-anomaly-label]");
+  const anomalyMetrics = root.querySelector("[data-anomaly-metrics]");
+  const anomalyConclusion = root.querySelector("[data-anomaly-conclusion]");
+  const anomalyDetails = root.querySelector("[data-anomaly-details]");
+  const anomalyPolicy = root.querySelector("[data-anomaly-policy]");
   const symbol = root.dataset.symbol;
   const date = root.dataset.date;
   const privateOverlayUrl = root.dataset.privateOverlayUrl || "";
@@ -432,9 +438,43 @@
       stateDetail.textContent = detail;
     }
   };
-  const withPrivateOverlay = async (publicPayload) => {
-    const combined = { ...publicPayload, drawings: [], trade_overlay: { executions: [], open_stops: [] } };
-    if (!privateOverlayUrl || publicPayload.status !== "OK") return combined;
+  const renderAnomalyEvidence = (evidence) => {
+    if (!anomalyRoot) return;
+    anomalyRoot.setAttribute("aria-busy", "false");
+    anomalyLabel.textContent = evidence.label || "数据不足";
+    anomalyLabel.className = `tag ${evidence.status === "REVIEW" ? "tag-risk" : evidence.status === "CLEAR" ? "tag-pass" : "tag-caution"}`;
+    anomalyConclusion.textContent = evidence.conclusion || "异常证据暂不可用。";
+    anomalyMetrics.replaceChildren(...(evidence.evidence || []).map((item) => {
+      const metric = document.createElement("span");
+      metric.title = item.detail || "";
+      const label = document.createElement("small"); label.textContent = item.label || "";
+      const value = document.createElement("b"); value.textContent = item.value === null || item.value === undefined ? "—" : `${item.value}${item.unit || ""}`;
+      const state = document.createElement("em"); state.className = `anomaly-state-${String(item.state || "insufficient").toLowerCase()}`; state.textContent = item.state_label || "数据不足";
+      metric.append(label, value, state);
+      return metric;
+    }));
+    anomalyDetails.replaceChildren(...(evidence.evidence || []).map((item) => {
+      const row = document.createElement("li");
+      const label = document.createElement("strong"); label.textContent = item.label || "";
+      const detail = document.createElement("span"); detail.textContent = item.detail || "";
+      row.append(label, detail);
+      return row;
+    }));
+    anomalyPolicy.textContent = `规则版本：${evidence.policy_version || "数据不足"}。只提供复核证据，不改变 Weinstein 或 Minervini 结论，不构成操纵认定或买卖指令。`;
+  };
+  const loadAnomalyEvidence = async () => {
+    if (!anomalyRoot?.dataset.anomalyUrl) return;
+    try {
+      const response = await fetch(anomalyRoot.dataset.anomalyUrl, { credentials: "same-origin" });
+      if (!response.ok) throw new Error("anomaly request failed");
+      renderAnomalyEvidence(await response.json());
+    } catch (_) {
+      renderAnomalyEvidence({ status: "DATA_INSUFFICIENT", label: "暂不可用", conclusion: "异常证据加载失败，不影响 K 线与大师方法事实。", evidence: [] });
+    }
+  };
+  const emptyPrivateOverlay = () => ({ drawings: [], trade_overlay: { executions: [], open_stops: [] } });
+  const loadPrivateOverlay = async (publicPayload) => {
+    if (!privateOverlayUrl || publicPayload.status !== "OK") return emptyPrivateOverlay();
     const query = new URLSearchParams({
       date,
       price_scale_id: publicPayload.price_scale_id,
@@ -442,12 +482,17 @@
     });
     try {
       const response = await fetch(`${privateOverlayUrl}?${query}`, { credentials: "same-origin" });
-      if (!response.ok) return combined;
-      return { ...combined, ...(await response.json()) };
+      if (!response.ok) return emptyPrivateOverlay();
+      return await response.json();
     } catch (_) {
-      return combined;
+      return emptyPrivateOverlay();
     }
   };
+  const withPrivateOverlay = (publicPayload, privateOverlay) => ({
+    ...publicPayload,
+    ...emptyPrivateOverlay(),
+    ...privateOverlay,
+  });
   const drawPayload = (nextPayload) => {
     payload = nextPayload;
     candles.setData(payload.bars.map(row => ({ time: row.trade_date, open: row.open, high: row.high, low: row.low, close: row.close })));
@@ -481,14 +526,16 @@
     requestController = controller;
     const url = chartRequest(symbol, date, settings());
     const cached = cachedPayload(url);
+    let overlayRequest = null;
     let freshPayloadDrawn = false;
     setChartState(cached?.status === "OK" ? "refreshing" : "loading");
     loadState.textContent = cached?.status === "OK" ? "正在检查更新…" : "";
     try {
       if (cached?.status === "OK") {
         drawPayload(cached);
-        void withPrivateOverlay(cached).then((combined) => {
-          if (version === requestVersion && !freshPayloadDrawn) drawPayload(combined);
+        overlayRequest = loadPrivateOverlay(cached);
+        void overlayRequest.then((privateOverlay) => {
+          if (version === requestVersion && !freshPayloadDrawn) drawPayload(withPrivateOverlay(cached, privateOverlay));
         });
       }
       const response = await fetch(url, { signal: controller.signal });
@@ -510,8 +557,11 @@
         drawPayload(nextPayload);
         setChartState("idle");
         scheduleAdjacentChartPrefetch();
-        const combined = await withPrivateOverlay(nextPayload);
-        if (version === requestVersion) drawPayload(combined);
+        const canReuseOverlay = overlayRequest
+          && cached?.price_scale_id === nextPayload.price_scale_id
+          && (cached.interval || interval) === (nextPayload.interval || interval);
+        const privateOverlay = await (canReuseOverlay ? overlayRequest : loadPrivateOverlay(nextPayload));
+        if (version === requestVersion) drawPayload(withPrivateOverlay(nextPayload, privateOverlay));
       }
     } catch (error) {
       if (error?.name === "AbortError") return;
@@ -761,5 +811,5 @@
   root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); syncChartViewControls(); storeChartView(); request(); }));
   root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
-  chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); request();
+  chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); void loadAnomalyEvidence(); request();
 })();
