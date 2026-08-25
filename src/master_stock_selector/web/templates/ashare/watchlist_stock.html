@@ -95,6 +95,27 @@
   </details>
 </section>
 
+{% set anomaly = stock.anomaly_evidence %}
+<details class="section stock-disclosure anomaly-review-card" open>
+  <summary>
+    <span><strong>异常交易复核</strong><small>日线描述性证据 · 不改变 Weinstein 或 Minervini 结论</small></span>
+    <span class="tag {{ 'tag-risk' if anomaly.status == 'REVIEW' else 'tag-caution' if anomaly.status == 'DATA_INSUFFICIENT' else 'tag-pass' }}">{{ anomaly.label }}</span>
+  </summary>
+  <div class="stock-disclosure-body">
+    <p class="reading-note">{{ anomaly.conclusion }}</p>
+    <dl class="ledger-metrics anomaly-evidence-grid">
+      {% for item in anomaly.evidence %}
+      <div>
+        <dt>{{ item.label }} · {{ item.state_label }}</dt>
+        <dd>{% if item.value is not none %}{{ item.value }}{{ item.unit }}{% else %}—{% endif %}</dd>
+        <small>{{ item.detail }}</small>
+      </div>
+      {% endfor %}
+    </dl>
+    <p class="muted">规则版本：{{ anomaly.policy_version }}。仅在“结构易感+至少两项交易异常”或“至少三项交易异常”时建议复核；单项不自动否决，不构成操纵认定或买卖指令。</p>
+  </div>
+</details>
+
 {% if private_workspace %}<section class="section panel manual-review-panel ledger-review-panel">
   <div class="ledger-review-heading"><div><p class="eyebrow">个人观察</p><h2>我的观察记录</h2></div><span class="manual-state manual-{{ stock.manual.manual_state|lower }}">{{ stock.manual_label }}</span></div>
   <div class="observation-detail-actions" aria-label="更改我的观察状态">

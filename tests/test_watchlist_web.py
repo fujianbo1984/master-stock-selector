@@ -1286,6 +1286,10 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
         "manual-review-panel"
     )
     assert "两种方法逐项对照" in detail.text
+    assert "异常交易复核" in detail.text
+    assert "日线描述性证据 · 不改变 Weinstein 或 Minervini 结论" in detail.text
+    assert "daily-anomaly-review-v1" in detail.text
+    assert "数据不足" in detail.text
     assert "不构成投资建议或自动买卖指令" in detail.text
     assert 'class="evidence-ledger-details"' in detail.text
     assert detail.text.index("当前判定") < detail.text.index("展开日期、指标与规则证据")
@@ -1909,6 +1913,10 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-chart-record' not in page.text
     assert "录入成交" not in page.text
     assert 'data-chart-method-timeline' in page.text
+    assert 'data-chart-anomaly-evidence' in page.text
+    assert "异常交易复核" in page.text
+    assert "daily-anomaly-review-v1" in page.text
+    assert "只提供复核证据，不改变 Weinstein 或 Minervini 结论" in page.text
     assert "状态事件可用区间" not in page.text
     assert "W/M 标志只表示规则观察状态变化" not in page.text
     assert "画线仅保存为个人观察标注" not in page.text

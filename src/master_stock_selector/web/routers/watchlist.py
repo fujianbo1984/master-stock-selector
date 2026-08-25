@@ -1184,6 +1184,9 @@ def build_watchlist_router(
             query_date,
             [symbol],
         ).get(symbol.upper(), {})
+        payload["anomaly_evidence"] = _stock_anomaly_evidence(
+            repository, market_reader, payload, query_date, symbol
+        )
         payload["external_urls"] = _stock_external_urls(symbol)
         return render(
             request,
@@ -1295,6 +1298,9 @@ def build_watchlist_router(
         market_metrics = market_reader.safe_stock_market_metrics(query_date, [symbol]).get(
             symbol.upper(), {}
         )
+        anomaly_evidence = _stock_anomaly_evidence(
+            repository, market_reader, payload, query_date, symbol
+        )
         return render(
             request,
             "ashare/watchlist_stock_chart.html",
@@ -1306,6 +1312,7 @@ def build_watchlist_router(
                 "stock_name": str(payload["identity"].get("name") or symbol.upper()),
                 "industry_name": str(payload["industry"].get("industry_name") or "行业待补"),
                 "market_metrics": market_metrics,
+                "anomaly_evidence": anomaly_evidence,
                 "external_urls": _stock_external_urls(symbol),
                 "stock": payload,
                 "manual_labels": MANUAL_LABELS,
@@ -2052,6 +2059,18 @@ def _attach_market_metrics(
         row.update(values)
         total_cap = row.get("total_market_cap_yi")
         row["small_cap"] = total_cap is not None and float(total_cap) < 50.0
+
+
+def _stock_anomaly_evidence(
+    repository: WatchlistRepository,
+    market_reader: MarketDataReader,
+    payload: dict[str, Any],
+    as_of_date: str,
+    symbol: str,
+) -> dict[str, Any]:
+    industry_code = str(payload.get("industry", {}).get("industry_code") or "")
+    peer_symbols = repository.industry_member_symbols(as_of_date, industry_code)
+    return market_reader.safe_stock_anomaly_evidence(as_of_date, symbol, peer_symbols)
 
 
 def _attach_quote_changes(

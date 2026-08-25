@@ -12,6 +12,7 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+from .anomaly import empty_daily_anomaly_evidence, evaluate_daily_anomaly_evidence
 from .industry import (
     INDUSTRY_LEVEL,
     INDUSTRY_SOURCE,
@@ -921,6 +922,111 @@ class MarketDataReader:
             )
         except (FileNotFoundError, sqlite3.Error):
             return {}
+
+    def stock_anomaly_evidence(
+        self,
+        as_of_date: str,
+        symbol: str,
+        peer_symbols: Sequence[str],
+    ) -> dict[str, Any]:
+        """Return a point-in-time descriptive anomaly review for one stock."""
+
+        requested = sorted(
+            {str(value).upper() for value in (*peer_symbols, symbol) if value}
+        )
+        if not requested:
+            return empty_daily_anomaly_evidence()
+        with self.connect() as connection:
+            bar_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()
+            }
+            if not {"symbol", "trade_date", "close", "adj_type"}.issubset(bar_columns):
+                return empty_daily_anomaly_evidence()
+            metric_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='daily_metrics'"
+            ).fetchone()
+            metric_columns = (
+                {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(daily_metrics)").fetchall()
+                }
+                if metric_table
+                else set()
+            )
+            has_metrics = {"market", "symbol", "trade_date"}.issubset(metric_columns)
+            metric_join = (
+                "LEFT JOIN daily_metrics AS metrics "
+                "ON metrics.market=bars.market AND metrics.symbol=bars.symbol "
+                "AND metrics.trade_date=bars.trade_date"
+                if has_metrics
+                else ""
+            )
+            volume_select = "bars.volume" if "volume" in bar_columns else "NULL"
+            turnover_select = (
+                "metrics.turnover_rate"
+                if has_metrics and "turnover_rate" in metric_columns
+                else "NULL"
+            )
+            cap_select = (
+                "metrics.circ_mv" if has_metrics and "circ_mv" in metric_columns else "NULL"
+            )
+            as_of_clause = (
+                "AND bars.data_as_of_date <= ?" if "data_as_of_date" in bar_columns else ""
+            )
+            date_parameters: tuple[Any, ...] = (symbol.upper(), as_of_date)
+            if as_of_clause:
+                date_parameters += (as_of_date,)
+            recent_dates = connection.execute(
+                f"""
+                SELECT bars.trade_date FROM daily_bars AS bars
+                WHERE bars.market='ashare' AND bars.adj_type='qfq'
+                  AND bars.symbol=? AND bars.trade_date <= ? {as_of_clause}
+                ORDER BY bars.trade_date DESC LIMIT 21
+                """,
+                date_parameters,
+            ).fetchall()
+            if not recent_dates:
+                return empty_daily_anomaly_evidence()
+            first_date = str(recent_dates[-1][0])
+            gathered: list[sqlite3.Row] = []
+            for start in range(0, len(requested), 700):
+                batch = requested[start : start + 700]
+                placeholders = ",".join("?" for _ in batch)
+                parameters: tuple[Any, ...] = (*batch, first_date, as_of_date)
+                if as_of_clause:
+                    parameters += (as_of_date,)
+                rows = connection.execute(
+                    f"""
+                    SELECT bars.symbol, bars.trade_date, bars.close,
+                           {volume_select} AS volume,
+                           {turnover_select} AS turnover_rate,
+                           {cap_select} AS circ_mv
+                    FROM daily_bars AS bars
+                    {metric_join}
+                    WHERE bars.market='ashare' AND bars.adj_type='qfq'
+                      AND bars.symbol IN ({placeholders})
+                      AND bars.trade_date BETWEEN ? AND ? {as_of_clause}
+                    ORDER BY bars.symbol, bars.trade_date
+                    """,
+                    parameters,
+                ).fetchall()
+                gathered.extend(rows)
+        series: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in gathered:
+            series[str(row["symbol"]).upper()].append(dict(row))
+        return evaluate_daily_anomaly_evidence(symbol, series)
+
+    def safe_stock_anomaly_evidence(
+        self,
+        as_of_date: str,
+        symbol: str,
+        peer_symbols: Sequence[str],
+    ) -> dict[str, Any]:
+        try:
+            return self.stock_anomaly_evidence(as_of_date, symbol, peer_symbols)
+        except (FileNotFoundError, sqlite3.Error, TypeError, ValueError):
+            return empty_daily_anomaly_evidence()
 
     def stock_quote_changes(
         self,
@@ -2900,6 +3006,30 @@ class WatchlistRepository:
             )
         )
         return {"observation": dict(observation), "members": members}
+
+    def industry_member_symbols(self, as_of_date: str, industry_code: str) -> list[str]:
+        """Return verified, non-ST point-in-time members without computing industry facts."""
+
+        self.initialize()
+        code = industry_code.upper()
+        if not code:
+            return []
+        with self.connect() as connection:
+            identities = {
+                str(row["symbol"]): row
+                for row in self._identity_rows_as_of(connection, as_of_date)
+            }
+            memberships = self._membership_rows_as_of(connection, as_of_date)
+        return sorted(
+            {
+                str(row.get("symbol") or "").upper()
+                for row in memberships
+                if str(row.get("industry_code") or "").upper() == code
+                and str(row.get("assignment_state") or "") == "VERIFIED"
+                and not bool(identities.get(str(row.get("symbol") or ""), {}).get("is_st"))
+            }
+            - {""}
+        )
 
     def index_facts(self, as_of_date: str) -> list[dict[str, Any]]:
         self.initialize()

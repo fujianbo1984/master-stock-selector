@@ -13,6 +13,7 @@ COMBINED_PULLBACK_ARTICLE_PATH = "/a/reading/adam-and-brooks-pullback-execution"
 SUPPORT_RESISTANCE_ARTICLE_PATH = "/a/reading/support-resistance-price-boundaries"
 BROOKS_BREAKOUT_ARTICLE_PATH = "/a/reading/al-brooks-breakout-trading"
 ADAM_BREAKOUT_ARTICLE_PATH = "/a/reading/adam-grimes-breakout-trading"
+MINERVINI_BREAKOUT_ARTICLE_PATH = "/a/reading/mark-minervini-breakout-trading"
 READING_ARCHIVE_PATH = "/a/reading"
 
 
@@ -73,6 +74,31 @@ def test_logged_in_user_can_read_al_brooks_breakout_article(tmp_path):
     assert article.text.count("<h2") == 9
     assert article.headers["cache-control"] == "private, no-store"
     assert article.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_logged_in_user_can_read_minervini_breakout_article_with_images(tmp_path):
+    client = TestClient(_app(tmp_path))
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    article = client.get(MINERVINI_BREAKOUT_ARTICLE_PATH)
+    assert article.status_code == 200
+    assert "从 VCP 收缩到枢轴点后的跟进" in article.text
+    assert "供给逐步枯竭以后" in article.text
+    assert article.text.count(
+        f'{MINERVINI_BREAKOUT_ARTICLE_PATH}/assets/images/'
+    ) == 9
+    image_path = (
+        f"{MINERVINI_BREAKOUT_ARTICLE_PATH}/assets/"
+        "images/workbook-figures/mtp-v1-p156-vcp-schema.jpeg"
+    )
+    assert image_path in article.text
+    image = client.get(image_path)
+    assert image.status_code == 200
+    assert image.headers["content-type"] == "image/jpeg"
 
 
 def test_logged_in_user_can_read_article_without_account_nav_entry(tmp_path):
@@ -151,7 +177,8 @@ def test_reading_archive_requires_login_and_lists_all_articles(tmp_path):
     ).status_code == 303
     archive = client.get(READING_ARCHIVE_PATH)
     assert archive.status_code == 200
-    assert archive.text.count('class="reading-tags"') == 10
+    assert archive.text.count('class="reading-tags"') == 11
+    assert f'href="{MINERVINI_BREAKOUT_ARTICLE_PATH}"' in archive.text
     assert f'href="{ADAM_BREAKOUT_ARTICLE_PATH}"' in archive.text
     assert f'href="{BROOKS_BREAKOUT_ARTICLE_PATH}"' in archive.text
     assert f'href="{SUPPORT_RESISTANCE_ARTICLE_PATH}"' in archive.text
@@ -282,9 +309,16 @@ def test_article_navigation_follows_publication_dates(tmp_path):
 
     newest = client.get(ADAM_BREAKOUT_ARTICLE_PATH)
     assert f'href="{BROOKS_BREAKOUT_ARTICLE_PATH}"' in newest.text
+    assert f'href="{MINERVINI_BREAKOUT_ARTICLE_PATH}"' in newest.text
+
+    newest = client.get(MINERVINI_BREAKOUT_ARTICLE_PATH)
+    assert f'href="{ADAM_BREAKOUT_ARTICLE_PATH}"' in newest.text
     assert "已经是最新一篇" in newest.text
-    assert "真正要交易的不是越线，而是失衡" in newest.text
-    assert f"{ADAM_BREAKOUT_ARTICLE_PATH}/assets/images/fig-5-1-drys-breakout.jpg" in newest.text
+    assert "供给逐步枯竭以后" in newest.text
+    assert (
+        f"{MINERVINI_BREAKOUT_ARTICLE_PATH}/assets/"
+        "images/workbook-figures/mtp-v2-p453-fwlt-breakout.jpeg"
+    ) in newest.text
 
 
 def test_adam_grimes_pullback_article_requires_login(tmp_path):
