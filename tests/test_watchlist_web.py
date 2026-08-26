@@ -1552,9 +1552,14 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert "industry-weinstein-confirmation-v1" in chart.text
     assert 'href="/a/daily?date=2026-07-31&industry=851911.SI"' in chart.text
     assert "lightweight-charts-5.1.0.js" in chart.text
-    assert "industry-chart.js?v=20260812-industry-tv-v1" in chart.text
+    assert "industry-chart.js?v=20260826-monochrome-candles-v1" in chart.text
     assert 'id="industry-chart-data"' in chart.text
     assert "data-industry-chart-canvas" in chart.text
+    assert "阳线空心" in chart.text
+    industry_controller = client.get("/static/industry-chart.js").text
+    assert 'upColor: "#fffdfa"' in industry_controller
+    assert 'downColor: "#202020"' in industry_controller
+    assert 'borderVisible: true' in industry_controller
     assert "方法宽度顺序 <b>1 / 1</b>" in chart.text
     assert "已是第一个行业" in chart.text
     assert "已是最后一个行业" in chart.text
@@ -1909,7 +1914,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260825-kline-latency-v1" in page.text
+    assert "stock-chart.js?v=20260826-monochrome-candles-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert 'data-chart-ohlcv' in page.text
@@ -1928,6 +1933,9 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-chart-limit="all"' in page.text
     assert 'data-chart-interval="day"' in page.text
     assert 'data-chart-interval="week"' in page.text
+    assert 'data-candle-style="monochrome" aria-pressed="true"' in page.text
+    assert 'data-candle-style="colored" aria-pressed="false"' in page.text
+    assert "黑白：阳线空心 · 阴线实心" in page.text
     assert "方法周期" not in page.text
     assert ">日线</button>" in page.text
     assert ">周线</button>" in page.text
@@ -1960,6 +1968,11 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     controller = client.get("/static/stock-chart.js").text
     assert 'chartViewStorageKey = "masterstock-chart:view"' in controller
     assert 'chartLayersStorageKey = "masterstock-chart:layers:v3"' in controller
+    assert 'chartAppearanceStorageKey = "masterstock-chart:appearance:v1"' in controller
+    assert 'let candleStyle = "monochrome";' in controller
+    assert 'upColor: "#fffdfa", downColor: "#202020", borderVisible: true' in controller
+    assert "restoreAppearance();" in controller
+    assert "storeAppearance();" in controller
     assert "restoreChartView();" in controller
     assert "storeChartView();" in controller
     assert 'const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";' in controller

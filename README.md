@@ -89,6 +89,32 @@ scripts/start_web.sh
 - `/a/observations`、`/a/review`：登录用户的观察与交易复盘
 - `/a/runs`：运行凭证
 
+本地或服务器排障时可执行只读诊断。`doctor` 检查三个数据库、结构兼容性、
+最近采集/计算凭证、市场日期与观察池日期，以及数据是否过期：
+
+```bash
+.venv/bin/masterstock doctor
+.venv/bin/masterstock doctor --deep
+```
+
+`--deep` 会对市场库和观察池库额外执行 SQLite `quick_check`，大库上耗时更长。
+诊断正常时退出码为 `0`，数据库缺失、结构不兼容、日期不一致或数据过期时为 `3`。
+无法从最近采集凭证取得本周权威交易日历时，默认以四个日历日为保守阈值；
+运维检查可传入 `--expected-date YYYY-MM-DD` 明确指定应完成的交易日。
+当日交易日在上海时间 17:30 后才进入默认应完成日期，避免收盘处理窗口内误报。
+
+采集与计算凭证也可以直接从 CLI 查看：
+
+```bash
+.venv/bin/masterstock runs latest
+.venv/bin/masterstock runs latest --expected-date 2026-08-25 --fail-if-stale
+.venv/bin/masterstock runs list --limit 20
+.venv/bin/masterstock runs show RUN_ID
+```
+
+`runs latest` 默认即使发现过期仍返回结果；增加 `--fail-if-stale` 后，过期、未知或
+市场/观察池日期不一致会返回退出码 `3`，便于 systemd 或监控脚本判断。
+
 ## 日常数据闭环
 
 收盘后执行：
@@ -201,3 +227,7 @@ git diff --check
 ```
 
 这些检查只验证代码与数据合同的机械正确性，不构成页面视觉验收、ECS 运行验收或投资建议。
+
+CLI 运行时错误以单个 JSON 对象写入标准错误并返回 `1`；参数错误返回 `2`；
+诊断降级返回 `3`。默认不输出 Python traceback，需要开发排障时可把全局
+`--debug` 放在子命令之前，例如 `.venv/bin/masterstock --debug doctor`。

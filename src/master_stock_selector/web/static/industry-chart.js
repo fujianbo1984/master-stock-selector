@@ -27,12 +27,13 @@
   });
 
   const candleSeries = chart.addSeries(charts.CandlestickSeries, {
-    upColor: "#c94e47",
-    downColor: "#258460",
-    borderUpColor: "#c94e47",
-    borderDownColor: "#258460",
-    wickUpColor: "#c94e47",
-    wickDownColor: "#258460",
+    upColor: "#fffdfa",
+    downColor: "#202020",
+    borderVisible: true,
+    borderUpColor: "#202020",
+    borderDownColor: "#202020",
+    wickUpColor: "#202020",
+    wickDownColor: "#202020",
   });
   const normalized = bars.map((bar) => ({
     time: String(bar.trade_date),

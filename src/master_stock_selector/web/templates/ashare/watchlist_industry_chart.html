@@ -35,14 +35,14 @@
 <section class="section panel industry-kline-panel" data-industry-chart>
   <div class="section-heading">
     <div><p class="eyebrow">日线价格</p><h2>全部 {{ bars|length }} 个交易日</h2></div>
-    <span class="chart-legend"><i class="legend-up"></i>上涨 <i class="legend-down"></i>下跌 <i class="legend-ma20"></i>20日均线 <i class="legend-ma50"></i>50日均线 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">开源图表组件</a>提供</span></span>
+    <span class="chart-legend"><i class="legend-up"></i>阳线空心 <i class="legend-down"></i>阴线实心 <i class="legend-ma20"></i>20日均线 <i class="legend-ma50"></i>50日均线 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">开源图表组件</a>提供</span></span>
   </div>
   <div class="industry-chart-readout" data-industry-chart-readout aria-live="polite">{{ chart.last_date }} · 开 {{ chart.latest.open }} · 高 {{ chart.latest.high }} · 低 {{ chart.latest.low }} · 收 {{ chart.latest.close }} · 有效成员 {{ chart.latest.member_count }}</div>
   <div class="industry-tradingview-chart" data-industry-chart-canvas role="img" aria-label="{{ observation.industry_name }}成分股等权代理日线，{{ chart.first_date }}至{{ chart.last_date }}"></div>
   <script id="industry-chart-data" type="application/json">{{ bars|tojson }}</script>
 </section>
 <script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-<script src="/static/industry-chart.js?v=20260812-industry-tv-v1"></script>
+<script src="/static/industry-chart.js?v=20260826-monochrome-candles-v1"></script>
 {% else %}
 <section class="section panel"><div class="empty">当前市场库没有足够的该行业成分股开盘、最高、最低、收盘日线，不生成代理日线。</div></section>
 {% endif %}

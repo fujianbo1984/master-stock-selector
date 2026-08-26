@@ -1184,8 +1184,8 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .negative { color: var(--danger); }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; padding: 0 2px 5px; color: var(--muted); font-size: 10px; }
 .chart-legend i { display: inline-block; width: 18px; height: 3px; margin-left: 5px; background: var(--line-strong); }
-.chart-legend .legend-up { height: 8px; background: #d4574e; }
-.chart-legend .legend-down { height: 8px; background: #2f936b; }
+.chart-legend .legend-up { box-sizing: border-box; height: 9px; border: 1px solid #202020; background: #fffdfa; }
+.chart-legend .legend-down { height: 9px; background: #202020; }
 .chart-legend .legend-ma20 { background: #d28b18; }
 .chart-legend .legend-ma50 { background: #5b6fc7; }
 .chart-legend .legend-kc { background: #a9b0b7; }

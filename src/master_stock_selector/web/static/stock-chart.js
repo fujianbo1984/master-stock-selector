@@ -61,6 +61,30 @@
   const canonicalDrawingAnchors = new Map();
   const chartViewStorageKey = "masterstock-chart:view";
   const chartLayersStorageKey = "masterstock-chart:layers:v3";
+  const chartAppearanceStorageKey = "masterstock-chart:appearance:v1";
+  const candleStyles = {
+    monochrome: {
+      label: "黑白：阳线空心 · 阴线实心",
+      candles: {
+        upColor: "#fffdfa", downColor: "#202020", borderVisible: true,
+        borderUpColor: "#202020", borderDownColor: "#202020",
+        wickUpColor: "#202020", wickDownColor: "#202020",
+      },
+      volumeUpColor: "rgba(90,90,90,.28)",
+      volumeDownColor: "rgba(32,32,32,.58)",
+    },
+    colored: {
+      label: "红绿：红涨 · 绿跌",
+      candles: {
+        upColor: "#c94e47", downColor: "#258460", borderVisible: false,
+        borderUpColor: "#c94e47", borderDownColor: "#258460",
+        wickUpColor: "#c94e47", wickDownColor: "#258460",
+      },
+      volumeUpColor: "rgba(201,78,71,.48)",
+      volumeDownColor: "rgba(37,132,96,.48)",
+    },
+  };
+  let candleStyle = "monochrome";
   const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";
   const frameworkLayerVisible = () => root.querySelector(`[data-framework-layer="${frameworkForInterval()}"]`)?.checked === true;
   const syncChartViewControls = () => {
@@ -102,9 +126,26 @@
     try { window.sessionStorage.setItem(chartLayersStorageKey, JSON.stringify(saved)); }
     catch (_) { /* Browser storage can be unavailable. */ }
   };
+  const restoreAppearance = () => {
+    try {
+      const saved = window.sessionStorage.getItem(chartAppearanceStorageKey);
+      if (saved && Object.hasOwn(candleStyles, saved)) candleStyle = saved;
+    } catch (_) { /* Browser storage can be unavailable. */ }
+  };
+  const storeAppearance = () => {
+    try { window.sessionStorage.setItem(chartAppearanceStorageKey, candleStyle); }
+    catch (_) { /* Browser storage can be unavailable. */ }
+  };
+  const syncAppearanceControls = () => {
+    root.querySelectorAll("[data-candle-style]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.candleStyle === candleStyle)));
+    const label = root.querySelector("[data-candle-style-label]");
+    if (label) label.textContent = candleStyles[candleStyle].label;
+  };
   restoreChartView();
   restoreLayerSettings();
+  restoreAppearance();
   syncChartViewControls();
+  syncAppearanceControls();
   const chart = LightweightCharts.createChart(chartNode, {
     layout: { background: { color: "#fffdfa" }, textColor: "#142d4c" },
     grid: { vertLines: { color: "#eee8de" }, horzLines: { color: "#eee8de" } },
@@ -112,9 +153,7 @@
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     localization: { locale: "zh-CN" },
   });
-  const candles = chart.addSeries(LightweightCharts.CandlestickSeries, {
-    upColor: "#c94e47", downColor: "#258460", borderVisible: false, wickUpColor: "#c94e47", wickDownColor: "#258460",
-  });
+  const candles = chart.addSeries(LightweightCharts.CandlestickSeries, candleStyles[candleStyle].candles);
   const upper = chart.addSeries(LightweightCharts.LineSeries, { color: "#a9b0b7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
   const basis = chart.addSeries(LightweightCharts.LineSeries, { color: "#b9bec4", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
   const lower = chart.addSeries(LightweightCharts.LineSeries, { color: "#a9b0b7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
@@ -507,7 +546,13 @@
     maM200.setData(framework === "minervini" && showFrameworkLayer ? movingAverage(200) : []);
     maW10.setData(framework === "weinstein" && showFrameworkLayer ? movingAverage(10) : []);
     maW30.setData(framework === "weinstein" && showFrameworkLayer ? movingAverage(30) : []);
-    volume.setData(payload.bars.map(row => ({ time: row.trade_date, value: row.volume || 0, color: row.close >= row.open ? "rgba(201,78,71,.48)" : "rgba(37,132,96,.48)" })));
+    const activeCandleStyle = candleStyles[candleStyle];
+    candles.applyOptions(activeCandleStyle.candles);
+    volume.setData(payload.bars.map(row => ({
+      time: row.trade_date,
+      value: row.volume || 0,
+      color: row.close >= row.open ? activeCandleStyle.volumeUpColor : activeCandleStyle.volumeDownColor,
+    })));
     if (tradeLegend) tradeLegend.hidden = !(payload.trade_overlay?.executions || []).length;
     syncVolumePane();
     renderMarkers();
@@ -810,6 +855,13 @@
   });
   root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); syncChartViewControls(); storeChartView(); request(); }));
   root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
+  root.querySelectorAll("[data-candle-style]").forEach(button => button.addEventListener("click", () => {
+    candleStyle = button.dataset.candleStyle;
+    syncAppearanceControls();
+    storeAppearance();
+    if (payload) drawPayload(payload);
+    else candles.applyOptions(candleStyles[candleStyle].candles);
+  }));
   root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
   chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); void loadAnomalyEvidence(); request();
 })();

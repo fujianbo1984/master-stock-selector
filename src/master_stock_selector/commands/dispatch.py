@@ -14,10 +14,12 @@ COMMAND_HANDLERS: dict[str, str] = {
     "agent": "agent",
     "database-optimize": "reference",
     "database-validate": "reference",
+    "doctor": "diagnostics",
     "daily": "daily",
     "market-backfill": "backfill",
     "reference-backfill": "reference",
     "reference-materialize": "reference",
+    "runs": "diagnostics",
     "watchlist": "watchlist",
     "web": "web",
 }
