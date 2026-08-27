@@ -10,7 +10,12 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from ...watchlist.charting import keltner_channels
+from ...watchlist.charting import (
+    KELTNER_PRESETS,
+    default_keltner_preset,
+    keltner_channels,
+    keltner_config_payload,
+)
 from ...watchlist.industry import INDUSTRY_POLICY_VERSION
 from ...watchlist.industry_confirmation import build_industry_weinstein_confirmation
 from ...watchlist.repository import MarketDataReader, WatchlistRepository
@@ -918,36 +923,11 @@ def build_watchlist_router(
         )
 
     @router.get("/a/indices", response_class=HTMLResponse)
-    def indices(request: Request, date: str | None = None) -> HTMLResponse:
-        query_date = date or repository.latest_fact_date() or _safe_market_date(market_reader)
-        rows = [_decorate_index(row) for row in repository.index_facts(query_date)]
-        return render(
-            request,
-            "ashare/watchlist_indices.html",
-            {
-                "active": "四指数判断",
-                "query_date": query_date,
-                "latest_date": repository.latest_fact_date(),
-                "indices": rows,
-                "weinstein_policy_version": (
-                    str(rows[0].get("policy_version") or "") if rows else "weinstein-stage-30w-v1"
-                ),
-                "minervini_policy_version": (
-                    str(rows[0].get("minervini", {}).get("policy_version") or "")
-                    if rows
-                    else "minervini-index-stage2-price-template-v1"
-                ),
-            },
-        )
-
-    @router.get("/a/breadth", response_class=HTMLResponse)
-    def market_breadth(
+    def indices(
         request: Request,
         date: str | None = None,
         benchmark: str = "000985.CSI",
-    ) -> Response:
-        if current_user(request) is None:
-            return RedirectResponse("/login?next=/a/breadth", status_code=303)
+    ) -> HTMLResponse:
         query_date = _selected_date(repository, date, market_reader)
         benchmark_symbol = (
             benchmark.upper() if benchmark.upper() in BREADTH_BENCHMARKS else "000985.CSI"
@@ -1014,11 +994,13 @@ def build_watchlist_router(
                     "summary": _relative_strength_summary(series),
                 }
             )
+        rows = [_decorate_index(row) for row in repository.index_facts(query_date)]
+        market_overview = _market_overview_summary(risk_context, rows)
         return render(
             request,
             "ashare/market_breadth.html",
             {
-                "active": "市场广度",
+                "active": "市场全景",
                 "query_date": query_date,
                 "latest_date": repository.latest_fact_date(),
                 "weinstein_history": weinstein_history,
@@ -1036,11 +1018,30 @@ def build_watchlist_router(
                 "style_relative_available": any(
                     item["series"] for item in style_relative
                 ),
-                "indices": [
-                    _decorate_index(row) for row in repository.index_facts(query_date)
-                ],
+                "indices": rows,
+                "market_overview": market_overview,
+                "weinstein_policy_version": (
+                    str(rows[0].get("policy_version") or "")
+                    if rows
+                    else "weinstein-stage-30w-v1"
+                ),
+                "minervini_policy_version": (
+                    str(rows[0].get("minervini", {}).get("policy_version") or "")
+                    if rows
+                    else "minervini-index-stage2-price-template-v1"
+                ),
             },
         )
+
+    @router.get("/a/breadth", response_class=HTMLResponse)
+    def market_breadth_legacy(
+        date: str | None = None,
+        benchmark: str = "000985.CSI",
+    ) -> RedirectResponse:
+        query = {"benchmark": benchmark}
+        if date:
+            query["date"] = date
+        return RedirectResponse(f"/a/indices?{urlencode(query)}", status_code=303)
 
     @router.get("/a/review", response_class=HTMLResponse)
     def trade_review(request: Request) -> Response:
@@ -1333,6 +1334,8 @@ def build_watchlist_router(
                 "back_url": f"/a/stocks/{symbol.upper()}?{navigation['query']}",
                 "navigation": navigation,
                 "private_workspace": user is not None,
+                "keltner_presets": KELTNER_PRESETS,
+                "daily_keltner": default_keltner_preset("day")[1],
             },
         )
 
@@ -1541,15 +1544,41 @@ def build_watchlist_router(
     def api_stock_chart(
         symbol: str,
         date: str,
-        length: int = Query(default=20, ge=1, le=250),
-        multiplier: float = Query(default=2.25, gt=0, le=20),
-        source: str = Query(default="close", pattern="^(close|open|high|low)$"),
-        use_ema: bool = True,
-        band_style: str = Query(default="atr", pattern="^(atr|tr|range)$"),
-        atr_length: int = Query(default=10, ge=1, le=250),
+        length: int | None = Query(default=None, ge=1, le=250),
+        multiplier: float | None = Query(default=None, gt=0, le=20),
+        source: str | None = Query(
+            default=None, pattern="^(close|open|high|low)$"
+        ),
+        use_ema: bool | None = None,
+        band_style: str | None = Query(
+            default=None, pattern="^(atr|tr|range)$"
+        ),
+        atr_length: int | None = Query(default=None, ge=1, le=250),
         limit: int | None = Query(default=None, ge=30),
         interval: str = Query(default="day", pattern="^(day|week)$"),
     ) -> dict[str, Any]:
+        _, defaults = default_keltner_preset(interval)
+        length = length if length is not None else int(defaults["length"])
+        multiplier = (
+            multiplier if multiplier is not None else float(defaults["multiplier"])
+        )
+        source = source if source is not None else str(defaults["source"])
+        use_ema = use_ema if use_ema is not None else bool(defaults["use_ema"])
+        band_style = (
+            band_style if band_style is not None else str(defaults["band_style"])
+        )
+        atr_length = (
+            atr_length if atr_length is not None else int(defaults["atr_length"])
+        )
+        actual_keltner_config = keltner_config_payload(
+            interval=interval,
+            length=length,
+            atr_length=atr_length,
+            multiplier=multiplier,
+            source=source,
+            use_ema=use_ema,
+            band_style=band_style,
+        )
         warmup_periods = max(200, length, atr_length)
         analysis_limit = (
             None
@@ -1569,11 +1598,21 @@ def build_watchlist_router(
             _weekly_bars(analysis_daily_bars) if interval == "week" else analysis_daily_bars
         )
         if len(bars) < 2:
-            return {"status": "DATA_GAP", "reason": "INSUFFICIENT_DAILY_OHLC", "bars": []}
+            return {
+                "status": "DATA_GAP",
+                "reason": "INSUFFICIENT_DAILY_OHLC",
+                "bars": [],
+                "keltner_config": actual_keltner_config,
+            }
         bars = _with_period_changes(bars)
         scale_ids = {str(row.get("price_scale_id") or "") for row in bars}
         if len(scale_ids) != 1 or not next(iter(scale_ids)):
-            return {"status": "DATA_GAP", "reason": "INCONSISTENT_PRICE_SCALE", "bars": []}
+            return {
+                "status": "DATA_GAP",
+                "reason": "INCONSISTENT_PRICE_SCALE",
+                "bars": [],
+                "keltner_config": actual_keltner_config,
+            }
         price_scale_id = next(iter(scale_ids))
         visible_dates = {str(row["trade_date"]) for row in bars}
         moving_average_lengths = (10, 30) if interval == "week" else (50, 150, 200)
@@ -1600,6 +1639,7 @@ def build_watchlist_router(
             "as_of_date": date,
             "adjustment": "qfq",
             "interval": interval,
+            "keltner_config": actual_keltner_config,
             "price_scale_id": price_scale_id,
             "bars": bars,
             "method_events": method_overlay["events"],
@@ -2862,6 +2902,47 @@ def _stock_navigation(
         "total": len(selected),
         "previous": item_at(index - 1),
         "next": item_at(index + 1),
+    }
+
+
+def _market_overview_summary(
+    risk_context: dict[str, Any],
+    indices: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Describe independent index and breadth evidence without making a score."""
+    if not indices:
+        headline = "市场内部与主要指数趋势独立呈现"
+    else:
+        weinstein_stage_2 = sum(
+            1 for row in indices if row.get("stage") == "STAGE_2"
+        )
+        minervini_stage_2 = sum(
+            1
+            for row in indices
+            if row.get("minervini", {}).get("result") == "PASS"
+        )
+        all_strong = (
+            weinstein_stage_2 == len(indices)
+            and minervini_stage_2 == len(indices)
+        )
+        none_strong = weinstein_stage_2 == 0 and minervini_stage_2 == 0
+        tone = str(risk_context.get("tone") or "mixed")
+        if tone == "positive" and none_strong:
+            headline = "市场内部正在改善，主要指数趋势尚未转强"
+        elif tone == "positive" and all_strong:
+            headline = "市场参与面与主要指数趋势同步改善"
+        elif tone == "negative" and none_strong:
+            headline = "市场参与面偏弱，主要指数趋势尚未转强"
+        elif tone == "negative":
+            headline = "主要指数仍有上升阶段，市场参与面正在收缩"
+        else:
+            headline = "市场参与面与主要指数趋势尚未同步"
+    return {
+        "headline": headline,
+        "detail": (
+            "四指数逐项展示 Weinstein 阶段与 Minervini 第二阶段结果；"
+            "不投票、不加权、不合成市场总分。"
+        ),
     }
 
 

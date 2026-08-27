@@ -8,6 +8,7 @@
 {% block subtitle %}{{ symbol }} · 前复权 · 数据截至 {{ query_date }}{% endblock %}
 {% block content %}
 <section id="stock-chart" class="section panel stock-chart-panel chart-workbench" data-stock-chart data-symbol="{{ symbol }}" data-date="{{ query_date }}"{% if private_workspace %} data-private-overlay-url="/api/me/stocks/{{ symbol }}/overlay" data-csrf-token="{{ csrf_token }}"{% endif %} tabindex="-1">
+  <script type="application/json" data-keltner-presets>{{ keltner_presets | tojson }}</script>
   <header class="chart-workbench-header">
   <div class="chart-workbench-title"><p class="eyebrow">站内K线图</p><h1>{% if external_urls.tradingview_url %}<a href="{{ external_urls.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在外部行情网站打开 {{ stock_name }}">{{ stock_name }}</a>{% else %}{{ stock_name }}{% endif %} <small>{% if external_urls.tonghuashun_url %}<a href="{{ external_urls.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ symbol }}">{{ symbol }}</a>{% else %}{{ symbol }}{% endif %}</small></h1><p class="chart-stock-summary">行业：{{ industry_name }}{% if market_metrics.total_market_cap_yi is not none %} · 总市值 {{ market_metrics.total_market_cap_yi }}亿{% endif %}{% if market_metrics.float_market_cap_yi is not none %} · 流通市值 {{ market_metrics.float_market_cap_yi }}亿{% endif %}</p></div>
   <div class="chart-hero-actions">
@@ -46,12 +47,13 @@
     <details class="kc-settings">
       <summary><span>通道设置</span></summary>
       <div class="kc-settings-panel">
-        <p class="kc-settings-current" data-kc-summary>肯特纳通道：20日指数移动平均 · 10日平均真实波幅 · 2.25倍 · 收盘价</p>
+        <p class="kc-settings-current" data-kc-summary>肯特纳通道：20日指数移动平均 · 20日平均真实波幅 · 2.35倍 · 收盘价</p>
+        <label>参数预设<select data-kc-preset>{% for preset_id, preset in keltner_presets.items() %}<option value="{{ preset_id }}"{% if preset_id == "ashare_daily_calibrated_v1" %} selected{% endif %}>{{ preset.label }}</option>{% endfor %}<option value="custom">手动设置</option></select></label>
         <label>通道基准<select data-kc-ma><option value="ema" selected>指数移动平均</option><option value="sma">简单移动平均</option></select></label>
         <label>波幅算法<select data-kc-style><option value="atr" selected>平均真实波幅</option><option value="tr">真实波幅</option><option value="range">最高最低价差</option></select></label>
-        <label>均线周期 <input data-kc-length type="number" min="1" max="250" value="20"></label>
-        <label>波幅周期 <input data-kc-atr-length type="number" min="1" max="250" value="10"></label>
-        <label>倍数 <input data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="2.25"></label>
+        <label>均线周期 <input data-kc-length type="number" min="1" max="250" value="{{ daily_keltner.length }}"></label>
+        <label>波幅周期 <input data-kc-atr-length type="number" min="1" max="250" value="{{ daily_keltner.atr_length }}"></label>
+        <label>倍数 <input data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="{{ daily_keltner.multiplier }}"></label>
         <label>来源<select data-kc-source><option value="close" selected>收盘价</option><option value="open">开盘价</option><option value="high">最高价</option><option value="low">最低价</option></select></label>
       </div>
     </details>
@@ -76,5 +78,5 @@
   <div class="chart-method-event-detail" data-method-event-detail aria-live="polite" hidden></div>
 </section>
 <script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-<script src="/static/stock-chart.js?v=20260826-monochrome-candles-v1"></script>
+<script src="/static/stock-chart.js?v=20260827-keltner-presets-v1"></script>
 {% endblock %}

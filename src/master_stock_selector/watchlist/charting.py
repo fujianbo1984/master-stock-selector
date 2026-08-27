@@ -3,16 +3,93 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+ASHARE_DAILY_KELTNER_PRESET = "ashare_daily_calibrated_v1"
+ADAM_ORIGINAL_KELTNER_PRESET = "adam_original_reference_v1"
+KELTNER_PRESETS: dict[str, dict[str, Any]] = {
+    ASHARE_DAILY_KELTNER_PRESET: {
+        "label": "A股日线校准：20 / 20 / 2.35",
+        "length": 20,
+        "atr_length": 20,
+        "multiplier": 2.35,
+        "source": "close",
+        "use_ema": True,
+        "band_style": "atr",
+    },
+    ADAM_ORIGINAL_KELTNER_PRESET: {
+        "label": "Adam原始参考：20 / 20 / 2.25",
+        "length": 20,
+        "atr_length": 20,
+        "multiplier": 2.25,
+        "source": "close",
+        "use_ema": True,
+        "band_style": "atr",
+    },
+}
+KELTNER_DEFAULT_PRESET_BY_INTERVAL = {
+    "day": ASHARE_DAILY_KELTNER_PRESET,
+    "week": ADAM_ORIGINAL_KELTNER_PRESET,
+}
+
+
+def keltner_preset(name: str) -> dict[str, Any]:
+    """Return a copy so callers cannot mutate the authoritative preset."""
+
+    return dict(KELTNER_PRESETS[name])
+
+
+def default_keltner_preset(interval: str) -> tuple[str, dict[str, Any]]:
+    name = KELTNER_DEFAULT_PRESET_BY_INTERVAL[interval]
+    return name, keltner_preset(name)
+
+
+def keltner_config_payload(
+    *,
+    interval: str,
+    length: int,
+    atr_length: int,
+    multiplier: float,
+    source: str,
+    use_ema: bool,
+    band_style: str,
+) -> dict[str, Any]:
+    values = {
+        "length": length,
+        "atr_length": atr_length,
+        "multiplier": multiplier,
+        "source": source,
+        "use_ema": use_ema,
+        "band_style": band_style,
+    }
+    preset_name = "custom"
+    for name, preset in KELTNER_PRESETS.items():
+        if all(values[key] == preset[key] for key in values):
+            preset_name = name
+            break
+    return {
+        "length": length,
+        "atr_length": atr_length,
+        "multiplier": multiplier,
+        "source": source,
+        "basis": "ema" if use_ema else "sma",
+        "band_style": {
+            "atr": "wilder_atr",
+            "tr": "true_range",
+            "range": "wilder_range",
+        }[band_style],
+        "interval": interval,
+        "preset": preset_name,
+    }
+
 
 def keltner_channels(
     bars: Sequence[dict[str, Any]],
     *,
-    length: int = 20,
-    multiplier: float = 2.0,
-    source: str = "close",
-    use_ema: bool = True,
-    band_style: str = "atr",
-    atr_length: int = 10,
+    length: int,
+    multiplier: float,
+    source: str,
+    use_ema: bool,
+    band_style: str,
+    atr_length: int,
 ) -> list[dict[str, float | str | None]]:
     """Match the TradingView KC built-in indicator's documented Pine formula."""
 

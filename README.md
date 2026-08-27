@@ -83,7 +83,7 @@ scripts/start_web.sh
 默认地址为 <http://127.0.0.1:8000/a/daily>。常用页面包括：
 
 - `/a/daily`：大师观察池
-- `/a/indices`：四指数方法事实
+- `/a/indices`：公开的市场全景（四指数方法事实、市场广度与风格背景）
 - `/a/industries`：行业聚集观察
 - `/a/stocks/{symbol}`：个股证据与 K 线
 - `/a/observations`、`/a/review`：登录用户的观察与交易复盘

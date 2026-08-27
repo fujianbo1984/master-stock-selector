@@ -1423,6 +1423,100 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .style-relative-legend i { width: 20px; height: 3px; background: var(--series-color); }
 .style-relative-chart { width: 100%; height: 340px; }
 
+/* Market overview: conclusion-first research ledger */
+.market-overview-hero {
+  display: grid;
+  grid-template-columns: 185px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 104px;
+  padding: 18px 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-strong);
+}
+.market-overview-title { padding-right: 22px; border-right: 1px solid var(--line); }
+.market-overview-title h1 { margin: 4px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 31px; line-height: 1.08; }
+.market-overview-conclusion { min-width: 0; padding: 2px 26px; }
+.market-overview-conclusion strong { display: block; color: var(--accent); font-family: "Songti SC", "STSong", serif; font-size: clamp(19px, 1.65vw, 25px); line-height: 1.35; }
+.market-overview-conclusion p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+.market-overview-conclusion-positive strong { color: var(--success); }
+.market-overview-conclusion-negative strong { color: var(--danger); }
+.market-overview-conclusion-mixed strong { color: var(--warning); }
+.market-overview-date { align-self: end; padding-bottom: 3px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.market-reading-path {
+  display: grid;
+  grid-template-columns: 145px minmax(0, 1fr);
+  align-items: stretch;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+.market-reading-path > strong { display: grid; place-items: center; border-right: 1px solid var(--line); color: var(--accent); font-family: "Songti SC", "STSong", serif; font-size: 17px; }
+.market-reading-path ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+.market-reading-path li + li { border-left: 1px solid var(--line); }
+.market-reading-path a { display: flex; min-height: 76px; align-items: center; gap: 13px; padding: 11px 20px; }
+.market-reading-path a:hover { background: color-mix(in srgb, var(--accent-soft) 32%, transparent); }
+.market-reading-path b { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: var(--accent); color: #fffdfa; font-family: Georgia, "Times New Roman", serif; font-size: 19px; }
+.market-reading-path span { display: grid; min-width: 0; gap: 2px; }
+.market-reading-path span strong { font-family: "Songti SC", "STSong", serif; font-size: 16px; }
+.market-reading-path small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+.market-overview-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 338px; gap: 14px; align-items: start; margin-bottom: 18px; }
+.market-overview-primary { display: grid; min-width: 0; gap: 14px; }
+.market-overview-primary > .panel, .market-evidence-ledger { margin: 0; }
+.market-index-matrix { padding: 0; overflow: hidden; }
+.market-workspace-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); }
+.market-workspace-heading h2 { margin: 1px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 20px; }
+.market-workspace-heading > p { margin: 0; color: var(--muted); font-size: 10px; text-align: right; }
+.market-index-matrix .index-overview-grid { display: block; margin: 0; padding: 0; border: 0; background: var(--panel-strong); }
+.market-index-table { width: 100%; border-collapse: collapse; table-layout: fixed; text-align: center; }
+.market-index-table th, .market-index-table td { height: 42px; padding: 8px 11px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.market-index-table tr > :last-child { border-right: 0; }
+.market-index-table tbody tr:last-child > * { border-bottom: 0; }
+.market-index-table thead th { height: 46px; background: color-mix(in srgb, var(--panel) 74%, var(--panel-strong)); }
+.market-index-table thead th:first-child, .market-index-table tbody th { width: 148px; color: var(--muted); font-size: 10px; font-weight: 600; text-align: left; }
+.market-index-table .index-instrument-links { flex-wrap: nowrap; }
+.market-index-table .index-instrument-links a:first-child { font-family: "Songti SC", "STSong", serif; font-size: 15px; }
+.market-index-table .market-stage-cell { border-top: 2px solid var(--line-strong); }
+.market-index-table .market-stage-cell.stage-stage_2 { border-top-color: var(--success); }
+.market-index-table .market-stage-cell.stage-stage_3, .market-index-table .market-stage-cell.stage-stage_4 { border-top-color: var(--danger); }
+.market-index-table .market-stage-cell.stage-transition { border-top-color: var(--warning); }
+.market-index-table .market-stage-cell strong { font-family: "Songti SC", "STSong", serif; font-size: 16px; }
+.market-index-table .market-stage-cell.stage-stage_2 strong { color: var(--success); }
+.market-index-table .market-stage-cell.stage-stage_3 strong, .market-index-table .market-stage-cell.stage-stage_4 strong { color: var(--danger); }
+.market-index-table .market-stage-cell.stage-transition strong { color: var(--warning); }
+.market-breadth-panel { min-width: 0; }
+.market-breadth-panel .breadth-chart-heading { padding: 13px 16px 10px; }
+.market-breadth-panel .breadth-chart-heading h2 { font-size: 20px; }
+.market-breadth-panel .breadth-overlay-chart { height: 410px; }
+
+.market-evidence-ledger { position: sticky; top: 12px; padding: 0; overflow: hidden; }
+.market-evidence-heading { padding: 14px 16px 11px; border-bottom: 1px solid var(--line); }
+.market-evidence-heading h2 { margin: 2px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 21px; }
+.market-evidence-ledger article { display: grid; gap: 3px; min-height: 124px; padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+.market-evidence-ledger article > span { color: var(--muted); font-size: 11px; }
+.market-evidence-ledger article > strong { font-family: Georgia, "Times New Roman", "Songti SC", serif; font-size: 25px; line-height: 1.25; }
+.market-evidence-ledger article > small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.market-evidence-ledger article > i { align-self: end; color: var(--muted); font-size: 9px; font-style: normal; font-variant-numeric: tabular-nums; }
+.market-evidence-context { min-height: 146px !important; border-left: 3px solid var(--line-strong); background: var(--panel-soft); }
+.market-evidence-context > strong { font-family: "Songti SC", "STSong", serif !important; font-size: 17px !important; }
+.market-evidence-context-positive { border-left-color: var(--success); background: var(--success-soft); }
+.market-evidence-context-negative { border-left-color: var(--danger); background: var(--danger-soft); }
+.market-evidence-context-mixed { border-left-color: var(--warning); background: var(--warning-soft); }
+.market-evidence-boundary { margin: 0; padding: 11px 16px 13px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+
+.overview-disclosure { border-radius: 2px; }
+.overview-disclosure > summary { min-height: 48px; padding: 8px 16px; }
+.overview-disclosure > summary > span:first-child { grid-template-columns: minmax(170px, auto) minmax(0, 1fr); }
+.overview-disclosure .style-relative-panel { border: 0; border-radius: 0; box-shadow: none; }
+.overview-method-body { display: grid; gap: 14px; padding: 14px; }
+.overview-method-body .index-evidence-disclosure { padding-top: 12px; }
+.overview-method-body .index-evidence-disclosure > .section-heading { margin: 0 14px 8px; }
+.overview-method-body .index-evidence-disclosure > .section-heading p { margin: 2px 0 0; color: var(--muted); font-size: 10px; }
+.overview-method-body .breadth-reading-grid { margin: 0; }
+.overview-method-body .method-boundary-copy { margin: 0; padding: 14px 16px; border: 1px solid var(--line); background: var(--panel); font-size: 11px; }
+.overview-method-body .method-boundary-copy h3 { margin: 0 0 7px; color: var(--text); font-family: "Songti SC", "STSong", serif; font-size: 17px; }
+.overview-method-body .method-boundary-copy p { margin: 5px 0; }
+
 @media (max-width: 1400px) {
   .research-header { grid-template-columns: auto minmax(0, 1fr) auto; }
   .research-context { display: none; }

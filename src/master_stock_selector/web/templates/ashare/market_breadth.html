@@ -1,161 +1,103 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
-{% block heading %}市场广度实验室{% endblock %}
-{% block subtitle %}完整周结构、日线趋势质量与全市场价格的风险背景{% endblock %}
+{% block heading %}市场全景{% endblock %}
+{% block subtitle %}Weinstein 完整阶段 + Minervini 第二阶段是/否 · 市场广度与风格背景{% endblock %}
 {% block content %}
-<section class="section daily-hero page-ledger-hero breadth-hero">
-  <div>
-    <p class="eyebrow">登录用户·实验性功能</p>
-    <h1>市场广度实验室</h1>
-    <p>Weinstein 只使用正式完整周，Minervini 使用日线，再由中证全指观察价格是否确认；只作人工研究背景，不改变个股入选。</p>
+<section class="section market-overview-hero" aria-labelledby="market-overview-title">
+  <div class="market-overview-title">
+    <p class="eyebrow">四指数判断 × 市场广度 · 公开研究</p>
+    <h1 id="market-overview-title">市场全景</h1>
   </div>
-  <div class="breadth-regime breadth-regime-{{ risk_context.tone }}">
-    <span>市场风险背景{% if risk_context.reconstructed %}·含历史重建{% endif %}</span>
-    <strong>{{ risk_context.label }}</strong>
-    <b>{{ risk_context.risk_tendency }}</b>
-    <small>{{ risk_context.explanation }}</small>
-    <div class="breadth-regime-dates">
-      <i>W完整周 {{ risk_context.weinstein_as_of or '—' }}</i>
-      <i>M日线 {{ risk_context.minervini_as_of or '—' }}</i>
-      <i>价格 {{ risk_context.price_as_of or '—' }}</i>
-    </div>
+  <div class="market-overview-conclusion market-overview-conclusion-{{ risk_context.tone }}">
+    <strong>{{ market_overview.headline }}</strong>
+    <p>{{ market_overview.detail }}</p>
   </div>
+  <span class="market-overview-date">数据截至 {{ query_date }} · 收盘后复盘</span>
 </section>
 
-<section class="section grid kpi-grid breadth-kpis" aria-label="市场广度摘要">
-  <article class="kpi">
-    <span>中证全指·20日</span>
-    <strong>{% if canonical_price_summary.return_20d_pct is not none %}{{ '%+.2f'|format(canonical_price_summary.return_20d_pct) }}%{% else %}数据不足{% endif %}</strong>
-    <small>000985.CSI·{{ canonical_price_summary.direction_label }}·{{ canonical_price_summary.as_of_date or '—' }}</small>
-  </article>
-  {% set summary = method_summaries.weinstein %}
-  <article class="kpi">
-    <span>Weinstein·完整周广度</span>
-    <strong>{% if summary.pass_rate is not none %}{{ '%.2f'|format(summary.pass_rate) }}%{% else %}数据不足{% endif %}</strong>
-    <small>{{ summary.pass_count }} / {{ summary.evaluable_count }} 只可判定·{% if summary.delta is not none %}4周 {{ '%+.2f'|format(summary.delta) }}pp{% else %}4周数据不足{% endif %}·{{ summary.as_of_date or '—' }}</small>
-  </article>
-  {% set summary = method_summaries.minervini %}
-  <article class="kpi">
-    <span>Minervini·日线广度</span>
-    <strong>{% if summary.pass_rate is not none %}{{ '%.2f'|format(summary.pass_rate) }}%{% else %}数据不足{% endif %}</strong>
-    <small>{{ summary.pass_count }} / {{ summary.evaluable_count }} 只可判定·{% if summary.delta is not none %}20日 {{ '%+.2f'|format(summary.delta) }}pp{% else %}20日数据不足{% endif %}·{{ summary.as_of_date or '—' }}</small>
-  </article>
-  <article class="kpi kpi-accent breadth-context-kpi">
-    <span>风险偏好倾向</span>
-    <strong>{{ risk_context.risk_tendency }}</strong>
-    <small>W {{ method_summaries.weinstein.direction_label }}·M {{ method_summaries.minervini.direction_label }}·不合成市场总分</small>
-  </article>
-</section>
+<nav class="section market-reading-path" aria-label="市场全景读图顺序">
+  <strong>读图顺序</strong>
+  <ol>
+    <li><a href="#index-trend"><b>1</b><span><strong>看四指数趋势</strong><small>判断主要指数所处阶段</small></span></a></li>
+    <li><a href="#market-participation"><b>2</b><span><strong>看市场参与面</strong><small>观察趋势是否扩散到更多股票</small></span></a></li>
+    <li><a href="#style-relative"><b>3</b><span><strong>看风格是否扩散</strong><small>确认改善是否扩散到不同风格</small></span></a></li>
+  </ol>
+</nav>
 
-<section class="section panel breadth-chart-panel" data-breadth-lab data-benchmark-name="{{ proxy_summary.name }}">
-  <div class="section-heading breadth-chart-heading">
-    <div><h2>价格路径与日 / 周趋势广度</h2><p>左轴为通过率，右轴为指数归一化路径；Weinstein 只绘制正式完整周点，Minervini 按日线绘制。</p></div>
-    <div class="breadth-chart-controls">
-      <form class="breadth-benchmark-form" method="get" action="/a/breadth">
-        <input type="hidden" name="date" value="{{ query_date }}">
-        <label for="breadth-benchmark">对照指数</label>
-        <select id="breadth-benchmark" name="benchmark" onchange="this.form.requestSubmit()" aria-label="选择后自动切换对照指数">
-          {% for symbol, name in benchmarks.items() %}<option value="{{ symbol }}" {% if symbol == proxy_summary.symbol %}selected{% endif %}>{{ name }}</option>{% endfor %}
-        </select>
-      </form>
-      <div class="breadth-legend" aria-label="图例">
-        <span><i class="legend-proxy"></i>{{ proxy_summary.name }}</span>
-        <span><i class="legend-weinstein"></i>Weinstein·完整周</span>
-        <span><i class="legend-minervini"></i>Minervini·日线</span>
+<div class="market-overview-workspace">
+  <div class="market-overview-primary">
+    <section class="panel market-index-matrix" id="index-trend" aria-labelledby="index-trend-title">
+      <div class="market-workspace-heading">
+        <div><p class="eyebrow">第一步</p><h2 id="index-trend-title">四指数趋势</h2></div>
+        <p>Weinstein 完整阶段与 Minervini 第二阶段独立呈现</p>
       </div>
-    </div>
-  </div>
-  {% if breadth_history_available %}
-  <div class="breadth-chart-block">
-    <div class="breadth-chart-label">
-      <strong>通过率 × {{ proxy_summary.name }}归一化路径</strong>
-      <span data-breadth-readout>左轴：通过率 · 右轴：{% if proxy %}窗口起点1000{% else %}指数数据不足{% endif %}</span>
-    </div>
-    <div class="breadth-chart-canvas breadth-overlay-chart" data-overlay-chart aria-label="Weinstein完整周广度、Minervini日线广度与{{ proxy_summary.name }}归一化路径叠加图"></div>
-  </div>
-  <script id="weinstein-breadth-data" type="application/json">{{ weinstein_history|tojson }}</script>
-  <script id="minervini-breadth-data" type="application/json">{{ minervini_history|tojson }}</script>
-  <script id="breadth-proxy-data" type="application/json">{{ proxy|tojson }}</script>
-  {% else %}<div class="empty">暂无足够的正式完整周或日线方法事实用于绘图。</div>{% endif %}
-</section>
+      {% if indices %}
+      <section class="section index-stage-grid index-overview-grid" aria-label="四指数阶段摘要">
+        <table class="market-index-table">
+          <thead><tr><th scope="col">方法</th>{% for row in indices %}<th scope="col"><span class="index-instrument-links"><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_name }}</a><a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_symbol }}</a></span></th>{% endfor %}</tr></thead>
+          <tbody>
+            <tr><th scope="row">Weinstein</th>{% for row in indices %}<td class="market-stage-cell stage-{{ row.stage|lower }}"><strong>{{ row.stage_label }}</strong></td>{% endfor %}</tr>
+            <tr><th scope="row">Minervini 第二阶段</th>{% for row in indices %}<td><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></td>{% endfor %}</tr>
+          </tbody>
+        </table>
+      </section>
+      {% else %}<div class="empty">暂无指数阶段事实。请先运行后台计算任务。</div>{% endif %}
+    </section>
 
-<section class="section panel style-relative-panel" data-style-relative-lab>
-  <div class="section-heading style-relative-heading">
-    <div>
-      <p class="eyebrow">四指数·风格背景</p>
-      <h2>风格相对强弱</h2>
-      <p>统一以沪深300为大盘基准，观察小盘、创业成长与科创成长的相对表现；只描述风格，不改变个股入选。</p>
-    </div>
-    <span class="style-relative-window">近20日 / 60日·最近260个共同交易日</span>
-  </div>
-
-  <div class="style-relative-cards">
-    {% for item in style_relative %}
-    {% set summary = item.summary %}
-    <article class="style-relative-card style-relative-{{ summary.state|lower }}">
-      <header><span>{{ item.label }}</span><small>{{ item.left_symbol }} ÷ {{ item.right_symbol }}</small></header>
-      <strong>{{ item.left_name }} <i>÷</i> {{ item.right_name }}</strong>
-      <dl>
-        <div><dt>20日</dt><dd>{% if summary.return_20d_pct is not none %}{{ '%+.2f'|format(summary.return_20d_pct) }}%{% else %}—{% endif %}</dd></div>
-        <div><dt>60日</dt><dd>{% if summary.return_60d_pct is not none %}{{ '%+.2f'|format(summary.return_60d_pct) }}%{% else %}—{% endif %}</dd></div>
-      </dl>
-      <p>{{ summary.state_label }}</p>
-      <small>{% if summary.as_of_date %}共同数据截止 {{ summary.as_of_date }}{% else %}无法对齐指数交易日{% endif %}</small>
-    </article>
-    {% endfor %}
+    <section class="panel breadth-chart-panel market-breadth-panel" id="market-participation" data-breadth-lab data-benchmark-name="{{ proxy_summary.name }}" aria-labelledby="market-participation-title">
+      <div class="section-heading breadth-chart-heading">
+        <div><p class="eyebrow">第二步</p><h2 id="market-participation-title">市场参与面（广度）</h2><p>左轴为通过率，右轴为指数归一化路径；Weinstein 只绘制正式完整周点，Minervini 按日线绘制。</p></div>
+        <div class="breadth-chart-controls">
+          <form class="breadth-benchmark-form" method="get" action="/a/indices">
+            <input type="hidden" name="date" value="{{ query_date }}">
+            <label for="breadth-benchmark">对照指数</label>
+            <select id="breadth-benchmark" name="benchmark" onchange="this.form.requestSubmit()" aria-label="选择后自动切换对照指数">
+              {% for symbol, name in benchmarks.items() %}<option value="{{ symbol }}" {% if symbol == proxy_summary.symbol %}selected{% endif %}>{{ name }}</option>{% endfor %}
+            </select>
+          </form>
+          <div class="breadth-legend" aria-label="图例"><span><i class="legend-proxy"></i>{{ proxy_summary.name }}</span><span><i class="legend-weinstein"></i>Weinstein·完整周</span><span><i class="legend-minervini"></i>Minervini·日线</span></div>
+        </div>
+      </div>
+      {% if breadth_history_available %}
+      <div class="breadth-chart-block">
+        <div class="breadth-chart-label"><strong>通过率 × {{ proxy_summary.name }}归一化路径</strong><span data-breadth-readout>左轴：通过率 · 右轴：{% if proxy %}窗口起点1000{% else %}指数数据不足{% endif %}</span></div>
+        <div class="breadth-chart-canvas breadth-overlay-chart" data-overlay-chart aria-label="Weinstein完整周广度、Minervini日线广度与{{ proxy_summary.name }}归一化路径叠加图"></div>
+      </div>
+      <script id="weinstein-breadth-data" type="application/json">{{ weinstein_history|tojson }}</script><script id="minervini-breadth-data" type="application/json">{{ minervini_history|tojson }}</script><script id="breadth-proxy-data" type="application/json">{{ proxy|tojson }}</script>
+      {% else %}<div class="empty">暂无足够的正式完整周或日线方法事实用于绘图。</div>{% endif %}
+    </section>
   </div>
 
-  {% if style_relative_available %}
-  <div class="style-relative-chart-block">
-    <div class="style-relative-chart-meta">
-      <strong>相对比率归一化路径</strong>
-      <span data-style-relative-readout>窗口起点1000；曲线上升表示分子指数相对占优</span>
-    </div>
-    <div class="style-relative-legend" aria-label="风格相对强弱图例">
-      {% for item in style_relative %}<span><i style="--series-color: {{ item.color }}"></i>{{ item.left_name }} / {{ item.right_name }}</span>{% endfor %}
-    </div>
-    <div class="style-relative-chart" data-style-relative-chart aria-label="三组四指数风格相对强弱归一化曲线"></div>
-  </div>
-  <script id="style-relative-data" type="application/json">{{ style_relative|tojson }}</script>
-  {% else %}
-  <div class="empty">四指数暂无可对齐的共同交易日数据。</div>
-  {% endif %}
-</section>
+  <aside class="panel market-evidence-ledger" aria-labelledby="today-evidence-title">
+    <div class="market-evidence-heading"><p class="eyebrow">当日快照</p><h2 id="today-evidence-title">今日证据</h2></div>
+    <article><span>中证全指·20日</span><strong>{% if canonical_price_summary.return_20d_pct is not none %}{{ '%+.2f'|format(canonical_price_summary.return_20d_pct) }}%{% else %}数据不足{% endif %}</strong><small>000985.CSI·{{ canonical_price_summary.direction_label }}</small><i>数据 {{ canonical_price_summary.as_of_date or '—' }}</i></article>
+    {% set summary = method_summaries.weinstein %}
+    <article><span>Weinstein·完整周广度</span><strong>{% if summary.pass_rate is not none %}{{ '%.2f'|format(summary.pass_rate) }}%{% else %}数据不足{% endif %}</strong><small>{{ summary.pass_count }} / {{ summary.evaluable_count }} 只可判定·{% if summary.delta is not none %}4周 {{ '%+.2f'|format(summary.delta) }}pp{% else %}4周数据不足{% endif %}</small><i>完整周 {{ summary.as_of_date or '—' }}</i></article>
+    {% set summary = method_summaries.minervini %}
+    <article><span>Minervini·日线广度</span><strong>{% if summary.pass_rate is not none %}{{ '%.2f'|format(summary.pass_rate) }}%{% else %}数据不足{% endif %}</strong><small>{{ summary.pass_count }} / {{ summary.evaluable_count }} 只可判定·{% if summary.delta is not none %}20日 {{ '%+.2f'|format(summary.delta) }}pp{% else %}20日数据不足{% endif %}</small><i>日线 {{ summary.as_of_date or '—' }}</i></article>
+    <article class="market-evidence-context market-evidence-context-{{ risk_context.tone }}"><span>市场风险背景{% if risk_context.reconstructed %}·含历史重建{% endif %}</span><strong>{{ risk_context.label }}</strong><small>{{ risk_context.explanation }}</small><i>W {{ method_summaries.weinstein.direction_label }}·M {{ method_summaries.minervini.direction_label }}</i></article>
+    <p class="market-evidence-boundary">证据逐项阅读，不投票、不加权、不合成市场总分。</p>
+  </aside>
+</div>
 
-{% if indices %}
-<section class="section index-stage-grid breadth-index-strip" aria-label="四指数当前参考">
-  {% for row in indices %}
-  <article class="index-stage-card stage-{{ row.stage|lower }}">
-    <span class="index-instrument-links"><b>{{ row.index_name }}</b><small>{{ row.index_symbol }}</small></span>
-    <div class="index-method-result"><span>Weinstein</span><strong>{{ row.stage_label }}</strong></div>
-    <div class="index-method-result index-minervini-result"><span>Minervini</span><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></div>
-  </article>
-  {% endfor %}
-</section>
-{% endif %}
-
-<section class="section breadth-reading-grid" aria-label="如何阅读市场广度">
-  <article class="panel"><span class="section-label">同步</span><h3>指数与广度同时上升</h3><p>趋势向更多股票扩散，市场参与面对价格走强形成确认。</p></article>
-  <article class="panel"><span class="section-label">负背离</span><h3>指数上涨、广度回落</h3><p>上涨可能集中在少数权重或领涨股，不等同于全市场趋势改善。</p></article>
-  <article class="panel"><span class="section-label">正背离</span><h3>指数尚弱、广度回升</h3><p>内部结构可能先于指数修复，只能作为后续跟踪线索。</p></article>
-</section>
-
-<details class="section stock-disclosure notes-panel">
-  <summary><span><strong>实验口径与边界</strong><small>代理指数、通过率分母与不可推导的结论</small></span><span class="disclosure-action">展开</span></summary>
-  <div class="stock-disclosure-body">
-    <p>指数仅使用本地已有的官方收盘序列，并将当前窗口起点归一化为1000以便比较路径。中证全指或上证综指若尚未完成本地采集，会明确显示数据不足；本页不使用自建慢速代理冒充正式指数。</p>
-    <p>Weinstein 只统计 as_of_date 与 effective_week_end 相同的正式完整周事实，以4个完整周观察方向；周内投影不进入广度。Minervini 按日线统计并20个交易日观察方向。</p>
-    <p>两种通过率均为 PASS 除以 PASS + FAIL；UNKNOWN 和 TRANSITION 不进入可判定分母。两种方法与中证全指价格独立呈现，不投票、不加权、不合成市场总分。</p>
-    {% if risk_context.reconstructed %}<p>当前背景包含 RECONSTRUCTED 方法事实，只作探索性历史背景，不冒充当时实时保存的 OBSERVED 证据。</p>{% endif %}
-    <p>图中同步或背离只是人工复盘线索，不能单独证明未来收益、底部、顶部或买卖时点。</p>
+<details class="section stock-disclosure overview-disclosure" id="style-relative">
+  <summary><span><strong>风格相对强弱</strong><small>观察小盘、创业成长与科创成长相对沪深300的扩散情况</small></span><span class="disclosure-action">展开</span></summary>
+  <div class="style-relative-panel" data-style-relative-lab>
+    <div class="section-heading style-relative-heading"><div><p class="eyebrow">第三步</p><h2>风格是否扩散</h2><p>统一以沪深300为大盘基准，观察小盘、创业成长与科创成长的相对表现；只描述风格，不改变个股入选。</p></div><span class="style-relative-window">近20日 / 60日·最近260个共同交易日</span></div>
+    <div class="style-relative-cards">{% for item in style_relative %}{% set summary = item.summary %}<article class="style-relative-card style-relative-{{ summary.state|lower }}"><header><span>{{ item.label }}</span><small>{{ item.left_symbol }} ÷ {{ item.right_symbol }}</small></header><strong>{{ item.left_name }} <i>÷</i> {{ item.right_name }}</strong><dl><div><dt>20日</dt><dd>{% if summary.return_20d_pct is not none %}{{ '%+.2f'|format(summary.return_20d_pct) }}%{% else %}—{% endif %}</dd></div><div><dt>60日</dt><dd>{% if summary.return_60d_pct is not none %}{{ '%+.2f'|format(summary.return_60d_pct) }}%{% else %}—{% endif %}</dd></div></dl><p>{{ summary.state_label }}</p><small>{% if summary.as_of_date %}共同数据截止 {{ summary.as_of_date }}{% else %}无法对齐指数交易日{% endif %}</small></article>{% endfor %}</div>
+    {% if style_relative_available %}<div class="style-relative-chart-block"><div class="style-relative-chart-meta"><strong>相对比率归一化路径</strong><span data-style-relative-readout>窗口起点1000；曲线上升表示分子指数相对占优</span></div><div class="style-relative-legend" aria-label="风格相对强弱图例">{% for item in style_relative %}<span><i style="--series-color: {{ item.color }}"></i>{{ item.left_name }} / {{ item.right_name }}</span>{% endfor %}</div><div class="style-relative-chart" data-style-relative-chart aria-label="三组四指数风格相对强弱归一化曲线"></div></div><script id="style-relative-data" type="application/json">{{ style_relative|tojson }}</script>{% else %}<div class="empty">四指数暂无可对齐的共同交易日数据。</div>{% endif %}
   </div>
 </details>
 
-{% if breadth_history_available %}
-<script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-<script src="/static/breadth-chart.js?v=20260823-weekly-risk-context-v5"></script>
-{% elif style_relative_available %}
-<script src="/static/vendor/lightweight-charts-5.1.0.js"></script>
-{% endif %}
-{% if style_relative_available %}<script src="/static/breadth-style-chart.js?v=20260823-style-relative-v1"></script>{% endif %}
+<details class="section stock-disclosure overview-disclosure" id="method-evidence">
+  <summary><span><strong>完整方法证据</strong><small>四指数阶段明细、广度阅读方法与口径边界</small></span><span class="disclosure-action">展开</span></summary>
+  <div class="stock-disclosure-body overview-method-body">
+    <section class="index-ledger-panel">{% if indices %}<div class="index-evidence-disclosure"><div class="section-heading"><div><h2>四指数完整指标证据</h2><p>有效周、均线、斜率、回报与价格位置</p></div></div><div class="index-detail-grid">{% for row in indices %}<article class="panel index-detail-card stage-{{ row.stage|lower }}"><div class="section-heading"><div><h3><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_name }}</a></h3><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_symbol }}</a></div><div class="index-stage-status"><small>Weinstein</small><span class="status-marker status-{{ 'pass' if row.stage == 'STAGE_2' else 'unknown' if row.stage in ['UNKNOWN','TRANSITION'] else 'fail' }}">{{ row.stage_label }}</span></div></div><dl class="evidence-grid"><div><dt>有效周结束</dt><dd>{{ row.effective_date }}</dd></div><div><dt>阶段开始</dt><dd>{{ row.stage_started_on }}</dd></div><div><dt>持续</dt><dd>{{ row.duration_weeks }} 周</dd></div><div><dt>周收盘</dt><dd>{{ row.metrics.close if row.metrics.close is not none else '暂无' }}</dd></div><div><dt>30周均线</dt><dd>{{ row.metrics.ma30 if row.metrics.ma30 is not none else '暂无' }}</dd></div><div><dt>30周线4周斜率</dt><dd>{{ row.metrics.ma30_slope_4w_pct if row.metrics.ma30_slope_4w_pct is not none else '暂无' }}{% if row.metrics.ma30_slope_4w_pct is not none %}%{% endif %}</dd></div><div><dt>近13周</dt><dd>{{ row.metrics.return_13w_pct if row.metrics.return_13w_pct is not none else '暂无' }}{% if row.metrics.return_13w_pct is not none %}%{% endif %}</dd></div><div><dt>价格位置</dt><dd>{{ '30周线上方' if row.metrics.close_above_ma30 else '30周线下方' if row.metrics.close_above_ma30 is not none else '暂无' }}</dd></div></dl><div class="index-minervini-panel"><div><span>Minervini 第二阶段</span><strong class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</strong></div><small>日线趋势模板 · {{ row.minervini.as_of_date }} · 不使用个股横截面相对强度排名</small>{% if row.minervini.result == 'FAIL' %}<small>未通过 {{ row.minervini.failed_check_count }} 项趋势条件。</small>{% elif row.minervini.result == 'UNKNOWN' %}<small>历史或当日指数数据不足，不强行判定。</small>{% endif %}</div></article>{% endfor %}</div></div>{% else %}<div class="empty">暂无指数阶段事实。</div>{% endif %}</section>
+    <section class="breadth-reading-grid" aria-label="如何阅读市场广度"><article class="panel"><span class="section-label">同步</span><h3>指数与广度同时上升</h3><p>趋势向更多股票扩散，市场参与面对价格走强形成确认。</p></article><article class="panel"><span class="section-label">负背离</span><h3>指数上涨、广度回落</h3><p>上涨可能集中在少数权重或领涨股，不等同于全市场趋势改善。</p></article><article class="panel"><span class="section-label">正背离</span><h3>指数尚弱、广度回升</h3><p>内部结构可能先于指数修复，只能作为后续跟踪线索。</p></article></section>
+    <div class="method-boundary-copy"><h3>方法口径与边界</h3><p>四指数的 Weinstein 判定使用完整交易周；Minervini 指数第二阶段使用50日、150日、200日均线关系、200日线方向与52周价格位置，不用四指数互相排名替代个股横截面相对强度条件。</p><p>Weinstein 广度只统计正式完整周事实，Minervini 广度按日线统计；PASS 除以 PASS + FAIL，UNKNOWN 和 TRANSITION 不进入可判定分母。各类证据独立呈现，不投票、不加权、不合成市场总分。</p>{% if risk_context.reconstructed %}<p>当前背景包含 RECONSTRUCTED 方法事实，只作探索性历史背景，不冒充当时实时保存的 OBSERVED 证据。</p>{% endif %}<p>图中同步或背离只是人工复盘线索，不能单独证明未来收益、底部、顶部或买卖时点。</p></div>
+  </div>
+</details>
+
+{% if breadth_history_available %}<script src="/static/vendor/lightweight-charts-5.1.0.js"></script><script src="/static/breadth-chart.js?v=20260827-market-overview-v1"></script>{% elif style_relative_available %}<script src="/static/vendor/lightweight-charts-5.1.0.js"></script>{% endif %}
+{% if style_relative_available %}<script src="/static/breadth-style-chart.js?v=20260827-market-overview-v1"></script>{% endif %}
 {% endblock %}

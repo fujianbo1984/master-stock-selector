@@ -173,12 +173,11 @@ def create_app(
         user = current_user(request)
         public_items = [
             ("大师观察池", "/a/daily"),
-            ("四指数判断", "/a/indices"),
+            ("市场全景", "/a/indices"),
             ("行业观察", "/a/industries"),
         ]
         private_items = (
             [
-                ("市场广度", "/a/breadth"),
                 ("我的观察", "/a/observations"),
                 ("交易计划", "/a/plan"),
                 ("交易复盘", "/a/review"),

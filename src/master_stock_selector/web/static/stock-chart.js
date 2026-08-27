@@ -13,6 +13,8 @@
   const volumeInput = root.querySelector("[data-volume]");
   const keltnerInput = root.querySelector("[data-keltner]");
   const kcSummary = root.querySelector("[data-kc-summary]");
+  const kcPresetInput = root.querySelector("[data-kc-preset]");
+  const kcPresets = JSON.parse(root.querySelector("[data-keltner-presets]").textContent);
   const changeReadout = root.querySelector("[data-chart-period-change]");
   const changeDate = root.querySelector("[data-chart-change-date]");
   const changeValue = root.querySelector("[data-chart-change-value]");
@@ -86,6 +88,18 @@
   };
   let candleStyle = "monochrome";
   const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";
+  const defaultKcPresetForInterval = () => interval === "week" ? "adam_original_reference_v1" : "ashare_daily_calibrated_v1";
+  const applyKcPreset = (name) => {
+    const preset = kcPresets[name];
+    if (!preset) return;
+    kcPresetInput.value = name;
+    root.querySelector("[data-kc-length]").value = preset.length;
+    root.querySelector("[data-kc-atr-length]").value = preset.atr_length;
+    root.querySelector("[data-kc-multiplier]").value = preset.multiplier;
+    root.querySelector("[data-kc-source]").value = preset.source;
+    root.querySelector("[data-kc-ma]").value = preset.use_ema ? "ema" : "sma";
+    root.querySelector("[data-kc-style]").value = preset.band_style;
+  };
   const frameworkLayerVisible = () => root.querySelector(`[data-framework-layer="${frameworkForInterval()}"]`)?.checked === true;
   const syncChartViewControls = () => {
     root.querySelectorAll("[data-chart-interval]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.chartInterval === interval)));
@@ -144,6 +158,7 @@
   restoreChartView();
   restoreLayerSettings();
   restoreAppearance();
+  applyKcPreset(defaultKcPresetForInterval());
   syncChartViewControls();
   syncAppearanceControls();
   const chart = LightweightCharts.createChart(chartNode, {
@@ -854,7 +869,7 @@
     window.location.assign(target.href);
   });
   root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); syncChartViewControls(); storeChartView(); request(); }));
-  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
+  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; applyKcPreset(defaultKcPresetForInterval()); syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
   root.querySelectorAll("[data-candle-style]").forEach(button => button.addEventListener("click", () => {
     candleStyle = button.dataset.candleStyle;
     syncAppearanceControls();
@@ -862,6 +877,7 @@
     if (payload) drawPayload(payload);
     else candles.applyOptions(candleStyles[candleStyle].candles);
   }));
-  root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { updateKcSummary(); request(); }));
+  kcPresetInput.addEventListener("change", () => { if (kcPresetInput.value !== "custom") applyKcPreset(kcPresetInput.value); updateKcSummary(); request(); });
+  root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { kcPresetInput.value = "custom"; updateKcSummary(); request(); }));
   chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); void loadAnomalyEvidence(); request();
 })();

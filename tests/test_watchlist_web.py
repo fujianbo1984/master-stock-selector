@@ -1079,7 +1079,7 @@ def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composit
     assert "000852.SH" in response.text
     assert "399006.SZ" in response.text
     assert "000688.SH" in response.text
-    assert "市场总分" not in response.text
+    assert "不合成市场总分" in response.text
     assert "不构成投资建议或自动买卖指令" in response.text
     assert 'class="section index-stage-grid index-overview-grid"' in response.text
     assert 'class="index-evidence-disclosure"' in response.text
@@ -1093,19 +1093,30 @@ def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composit
     assert {row["minervini"]["result_label"] for row in payload["rows"]} == {"是"}
 
 
-def test_logged_in_user_can_open_experimental_market_breadth_page(tmp_path):
-    client = _client(tmp_path)
+def test_anonymous_user_can_open_combined_indices_and_market_breadth_page(tmp_path):
+    watchlist_path = tmp_path / "master_watchlist.sqlite3"
+    _seed_watchlist(watchlist_path)
+    client = TestClient(
+        create_app(
+            market_database=tmp_path / "market.sqlite3",
+            watchlist_database=watchlist_path,
+            secure_cookies=False,
+        )
+    )
 
-    response = client.get("/a/breadth?date=2026-07-31")
+    response = client.get("/a/indices?date=2026-07-31")
 
     assert response.status_code == 200
-    assert "市场广度实验室" in response.text
-    assert "登录用户·实验性功能" in response.text
+    assert "市场全景" in response.text
+    assert "四指数判断 × 市场广度 · 公开研究" in response.text
     assert "对照指数" in response.text
     assert "中证全指·20日" in response.text
     assert "Weinstein·完整周广度" in response.text
     assert "Minervini·日线广度" in response.text
-    assert "价格路径与日 / 周趋势广度" in response.text
+    assert "读图顺序" in response.text
+    assert "四指数趋势" in response.text
+    assert "市场参与面（广度）" in response.text
+    assert "今日证据" in response.text
     assert "Weinstein 只绘制正式完整周点" in response.text
     assert "中证全指" in response.text
     assert "上证综指" in response.text
@@ -1118,7 +1129,17 @@ def test_logged_in_user_can_open_experimental_market_breadth_page(tmp_path):
     assert 'id="weinstein-breadth-data"' in response.text
     assert 'id="minervini-breadth-data"' in response.text
     assert "breadth-chart.js" in response.text
-    assert 'aria-current="page" href="/a/breadth?date=2026-07-31"' in response.text
+    assert 'aria-current="page" href="/a/indices?date=2026-07-31"' in response.text
+    assert '个人工作区</span>' not in response.text
+
+    legacy = client.get(
+        "/a/breadth?date=2026-07-31&benchmark=000300.SH",
+        follow_redirects=False,
+    )
+    assert legacy.status_code == 303
+    assert legacy.headers["location"] == (
+        "/a/indices?benchmark=000300.SH&date=2026-07-31"
+    )
 
 
 def test_market_risk_context_combines_weekly_daily_and_price_without_score():
@@ -1242,9 +1263,9 @@ def test_market_breadth_shows_three_independent_style_relative_pairs(tmp_path):
         )
     )
 
-    response = client.get("/a/breadth?date=2026-07-31")
+    response = client.get("/a/indices?date=2026-07-31")
     switched = client.get(
-        "/a/breadth?date=2026-07-31&benchmark=000300.SH"
+        "/a/indices?date=2026-07-31&benchmark=000300.SH"
     )
 
     assert response.status_code == 200
@@ -1256,7 +1277,7 @@ def test_market_breadth_shows_three_independent_style_relative_pairs(tmp_path):
     assert "60日" in response.text
     assert "共同数据截止 2026-07-31" in response.text
     assert 'id="style-relative-data"' in response.text
-    assert "breadth-style-chart.js?v=20260823-style-relative-v1" in response.text
+    assert "breadth-style-chart.js?v=20260827-market-overview-v1" in response.text
     assert "只描述风格，不改变个股入选" in response.text
     assert "不合成市场总分" in response.text
     assert 'value="000300.SH" selected' in switched.text
@@ -1914,7 +1935,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260826-monochrome-candles-v1" in page.text
+    assert "stock-chart.js?v=20260827-keltner-presets-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert 'data-chart-ohlcv' in page.text
@@ -1945,6 +1966,10 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-framework-layer="minervini"' in page.text
     assert 'data-framework-layer="weinstein" checked' in page.text
     assert 'data-keltner checked' in page.text
+    assert "A股日线校准：20 / 20 / 2.35" in page.text
+    assert "Adam原始参考：20 / 20 / 2.25" in page.text
+    assert 'data-kc-atr-length type="number" min="1" max="250" value="20"' in page.text
+    assert 'data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="2.35"' in page.text
     assert 'data-method-layer=' not in page.text
     assert 'data-chart-framework-panel' in page.text
     assert page.text.count("> 均线</label>") == 2
@@ -1998,6 +2023,16 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     payload = chart.json()
     assert payload["status"] == "OK"
     assert payload["adjustment"] == "qfq"
+    assert payload["keltner_config"] == {
+        "length": 20,
+        "atr_length": 20,
+        "multiplier": 2.35,
+        "source": "close",
+        "basis": "ema",
+        "band_style": "wilder_atr",
+        "interval": "day",
+        "preset": "ashare_daily_calibrated_v1",
+    }
     assert payload["price_scale_id"] == "qfq-scale-v1"
     assert "relative_strength" not in payload
     assert set(payload["moving_averages"]) == {"50", "150", "200"}
@@ -2044,6 +2079,16 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&interval=week"
     ).json()
     assert weekly["interval"] == "week"
+    assert weekly["keltner_config"] == {
+        "length": 20,
+        "atr_length": 20,
+        "multiplier": 2.25,
+        "source": "close",
+        "basis": "ema",
+        "band_style": "wilder_atr",
+        "interval": "week",
+        "preset": "adam_original_reference_v1",
+    }
     assert set(weekly["moving_averages"]) == {"10", "30"}
     assert len(weekly["bars"]) < len(payload["bars"])
     assert weekly["bars"][-1]["change_pct"] is not None
@@ -2258,8 +2303,11 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
     assert client.get("/a/review", follow_redirects=False).headers["location"].startswith(
         "/login"
     )
+    combined_market = client.get("/a/indices")
+    assert combined_market.status_code == 200
+    assert "市场全景" in combined_market.text
     assert client.get("/a/breadth", follow_redirects=False).headers["location"] == (
-        "/login?next=/a/breadth"
+        "/a/indices?benchmark=000985.CSI"
     )
     assert client.post(
         "/a/stocks/000001.SZ/review",
