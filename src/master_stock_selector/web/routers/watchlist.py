@@ -25,7 +25,14 @@ from ..owner import (
     build_owner_activity_feed,
     build_owner_trade_feed,
 )
-from ..users import OTHER_SETUP_ID, OTHER_SETUP_LABEL, AuthenticatedUser, UserRepository
+from ..users import (
+    C1_ENTRY_VARIANT_LABELS,
+    C1_STRUCTURE_STATE_LABELS,
+    OTHER_SETUP_ID,
+    OTHER_SETUP_LABEL,
+    AuthenticatedUser,
+    UserRepository,
+)
 from .auth import current_user, require_user
 
 METHOD_LABELS = {"minervini": "Minervini", "weinstein": "Weinstein"}
@@ -198,6 +205,7 @@ def build_watchlist_router(
             row["manual"] = {
                 "manual_state": "UNREVIEWED",
                 "note": "",
+                "c1_record": {},
                 "reviewed_at": "",
             }
         _attach_market_metrics(
@@ -1094,6 +1102,7 @@ def build_watchlist_router(
                 "symbol": symbol.upper(),
                 "manual_state": "UNREVIEWED",
                 "note": "",
+                "c1_record": {},
                 "reviewed_at": "",
             }
         )
@@ -1229,6 +1238,8 @@ def build_watchlist_router(
                 "default_plan_setup": OTHER_SETUP_ID,
                 "editing_trade": editing_trade,
                 "trade_prefill": trade_prefill,
+                "c1_structure_state_labels": C1_STRUCTURE_STATE_LABELS,
+                "c1_entry_variant_labels": C1_ENTRY_VARIANT_LABELS,
                 "navigation": navigation,
                 "private_workspace": user is not None,
             },
@@ -1263,6 +1274,7 @@ def build_watchlist_router(
                 "symbol": symbol.upper(),
                 "manual_state": "UNREVIEWED",
                 "note": "",
+                "c1_record": {},
                 "reviewed_at": "",
             }
         )
@@ -1459,6 +1471,42 @@ def build_watchlist_router(
         ):
             return RedirectResponse(return_to, status_code=303)
         return RedirectResponse(f"/a/stocks/{symbol.upper()}", status_code=303)
+
+    @router.post("/a/stocks/{symbol}/c1", response_class=RedirectResponse)
+    async def save_stock_c1_record(request: Request, symbol: str) -> RedirectResponse:
+        user = require_user(request)
+        values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+        require_csrf(request, user, str((values.get("csrf_token") or [""])[0]))
+        action = str((values.get("action") or ["save"])[0]).lower()
+        try:
+            if action == "clear":
+                users.clear_c1_record(user.user_id, symbol)
+            else:
+                users.save_c1_record(
+                    user.user_id,
+                    symbol,
+                    {
+                        key: str((values.get(key) or [""])[0])
+                        for key in (
+                            "as_of_date",
+                            "range_started_on",
+                            "lower_bound",
+                            "upper_bound",
+                            "atr14",
+                            "support_test_count",
+                            "structure_state",
+                            "entry_variant",
+                            "note",
+                        )
+                    },
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(
+            f"/a/stocks/{symbol.upper()}?date="
+            f"{str((values.get('as_of_date') or [''])[0])}#c1-structure",
+            status_code=303,
+        )
 
     @router.post("/a/stocks/{symbol}/trades", response_class=RedirectResponse)
     async def record_stock_trade(request: Request, symbol: str) -> RedirectResponse:

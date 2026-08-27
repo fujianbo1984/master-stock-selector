@@ -32,7 +32,7 @@
 <section class="section panel review-panel">
   <div class="section-heading"><div><p class="eyebrow">版本化评估</p><h2>按评估周期与形态</h2></div><span class="muted">轻微版本连续累计；每组 30 笔完整交易才达到初步评价门槛</span></div>
   <div class="table-wrap review-table"><table><thead><tr><th>涉及版本</th><th>形态</th><th>已完成</th><th>毛平均R</th><th>净收益</th><th>胜率</th><th>样本状态</th></tr></thead><tbody>
-  {% for item in review.by_plan_setup.values() %}<tr><td>{{ item.plan_versions|join('、') if item.plan_versions else '未绑定' }}</td><td>{{ item.setup_code }} · {{ item.setup_name }}</td><td>{{ item.summary.count }}</td><td>{{ item.summary.gross_avg_r if item.summary.gross_avg_r is not none else '—' }}</td><td>{{ item.summary.net_pnl }} 元</td><td>{{ item.summary.win_rate_pct if item.summary.win_rate_pct is not none else '—' }}{% if item.summary.win_rate_pct is not none %}%{% endif %}</td><td>{{ item.sample_state }}</td></tr>{% endfor %}
+  {% for item in review.by_plan_setup.values() %}<tr><td>{{ item.plan_versions|join('、') if item.plan_versions else '未绑定' }}</td><td>{{ item.setup_code }} · {{ item.setup_name }}{% if item.by_entry_variant %}{% for variant in item.by_entry_variant.values() %}<small>{{ variant.label }} {{ variant.summary.count }}笔 / 毛平均R {{ variant.summary.gross_avg_r if variant.summary.gross_avg_r is not none else '—' }}</small>{% endfor %}{% endif %}</td><td>{{ item.summary.count }}</td><td>{{ item.summary.gross_avg_r if item.summary.gross_avg_r is not none else '—' }}</td><td>{{ item.summary.net_pnl }} 元</td><td>{{ item.summary.win_rate_pct if item.summary.win_rate_pct is not none else '—' }}{% if item.summary.win_rate_pct is not none %}%{% endif %}</td><td>{{ item.sample_state }}</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 {% endif %}

@@ -28,6 +28,12 @@ from ..watchlist.repository import (
     _summarize_open_lots,
     _trade_statistics,
 )
+from .plan_setups import (
+    PLAN_SETUP_BY_TRADE_SETUP,
+    PLAN_SETUP_CODES,
+    TRADE_SETUP_BY_PLAN_SETUP,
+    plan_setup_choices_text,
+)
 
 SESSION_COOKIE = "masterstock_session"
 SESSION_IDLE_SECONDS = 7 * 24 * 60 * 60
@@ -46,17 +52,22 @@ API_TOKEN_SCOPES = frozenset(
         "reading:share",
     }
 )
-PLAN_SETUP_CODES = frozenset({"A1", "A3", "B1", "B2"})
-PLAN_SETUP_BY_TRADE_SETUP = {
-    "PRE_BREAKOUT_BASE": "A1",
-    "POST_BREAKOUT_FIRST_PULLBACK": "A3",
-    "PULLBACK_SUPPORT": "B1",
-    "COMPLEX_PULLBACK": "B2",
-}
-TRADE_SETUP_BY_PLAN_SETUP = {value: key for key, value in PLAN_SETUP_BY_TRADE_SETUP.items()}
 OTHER_SETUP_ID = "OTHER"
 OTHER_SETUP_LABEL = "其他（未归入交易计划）"
-USER_SCHEMA_VERSION = 10
+C1_STRUCTURE_STATES = frozenset(
+    {"RANGE", "NEAR_LOWER", "FAILED_TEST", "WAIT_SECOND", "READY", "INVALID"}
+)
+C1_ENTRY_VARIANTS = frozenset({"FIRST", "SECOND"})
+C1_STRUCTURE_STATE_LABELS = {
+    "RANGE": "区间观察",
+    "NEAR_LOWER": "接近下沿",
+    "FAILED_TEST": "首次失败测试",
+    "WAIT_SECOND": "等待二次测试",
+    "READY": "触发准备",
+    "INVALID": "结构失效",
+}
+C1_ENTRY_VARIANT_LABELS = {"FIRST": "首次入场", "SECOND": "二次入场"}
+USER_SCHEMA_VERSION = 11
 DEFAULT_ACCESS_LOG_RETENTION_DAYS = 90
 USER_REQUIRED_TABLES = frozenset(
     {
@@ -243,6 +254,7 @@ CREATE TABLE IF NOT EXISTS user_stock_review (
         manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
     ),
     note TEXT NOT NULL DEFAULT '',
+    c1_record_json TEXT NOT NULL DEFAULT '{}',
     reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, symbol),
     FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
@@ -538,6 +550,7 @@ class UserRepository:
                     "user_plan_grill_session.head_version_id_at_start",
                     "user_reading_note.assets_json",
                     "user_reading_note_version.assets_json",
+                    "user_stock_review.c1_record_json",
                 ],
                 "missing_indexes": sorted(USER_REQUIRED_INDEXES),
             }
@@ -582,6 +595,10 @@ class UserRepository:
                     "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
                 ).fetchone()
                 review_table_sql = str(review_row[0] if review_row is not None else "")
+                review_columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(user_stock_review)")
+                }
                 trade_row = connection.execute(
                     "SELECT sql FROM sqlite_master "
                     "WHERE type='table' AND name='user_trade_execution'"
@@ -623,6 +640,8 @@ class UserRepository:
             missing_columns.append("user_plan_grill_session.published_version_id")
         if "head_version_id_at_start" not in grill_columns:
             missing_columns.append("user_plan_grill_session.head_version_id_at_start")
+        if "user_stock_review" in tables and "c1_record_json" not in review_columns:
+            missing_columns.append("user_stock_review.c1_record_json")
         for column in {"content_text", "interval_scope"} - drawing_columns:
             missing_columns.append(f"user_chart_drawing.{column}")
         if "user_reading_note" in tables and "assets_json" not in reading_note_columns:
@@ -694,6 +713,10 @@ class UserRepository:
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
             ).fetchone()
             review_table_sql = str(review_row[0] if review_row is not None else "")
+            review_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(user_stock_review)")
+            }
             drawing_row = connection.execute(
                 "SELECT sql FROM sqlite_master "
                 "WHERE type='table' AND name='user_chart_drawing'"
@@ -708,6 +731,11 @@ class UserRepository:
                 for row in connection.execute("PRAGMA table_info(user_reading_note_version)")
             }
             migration_statements: list[str] = []
+            if review_columns and "c1_record_json" not in review_columns:
+                migration_statements.append(
+                    "ALTER TABLE user_stock_review "
+                    "ADD COLUMN c1_record_json TEXT NOT NULL DEFAULT '{}';"
+                )
             if reading_note_columns and "assets_json" not in reading_note_columns:
                 migration_statements.append(
                     "ALTER TABLE user_reading_note "
@@ -751,13 +779,13 @@ class UserRepository:
                         """UPDATE user_trade_execution
                         SET setup_kind=CASE
                                 WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                     AND setup_code IN ('A1','A3','B1','B2') THEN 'PLAN'
+                                     AND setup_code IN ('A1','A3','B1','B2','C1') THEN 'PLAN'
                                 WHEN side='BUY' THEN 'LEGACY'
                                 ELSE 'OTHER'
                             END,
                             plan_setup_id=CASE
                                 WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                     AND setup_code IN ('A1','A3','B1','B2') THEN setup_code
+                                     AND setup_code IN ('A1','A3','B1','B2','C1') THEN setup_code
                                 ELSE NULL
                             END,
                             setup_code_snapshot=CASE
@@ -769,6 +797,7 @@ class UserRepository:
                                         WHEN 'A3' THEN '首次回调'
                                         WHEN 'B1' THEN '简单回调'
                                         WHEN 'B2' THEN '复杂回调'
+                                        WHEN 'C1' THEN '区间失败测试'
                                         ELSE setup_method
                                     END
                                 ELSE CASE setup_method
@@ -847,20 +876,21 @@ class UserRepository:
                                 manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
                             ),
                             note TEXT NOT NULL DEFAULT '',
+                            c1_record_json TEXT NOT NULL DEFAULT '{}',
                             reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             PRIMARY KEY (user_id, symbol),
                             FOREIGN KEY (user_id) REFERENCES user_account(user_id)
                                 ON DELETE CASCADE
                         );""",
                         """INSERT INTO user_stock_review(
-                            user_id, symbol, manual_state, note, reviewed_at
+                            user_id, symbol, manual_state, note, c1_record_json, reviewed_at
                         )
                         SELECT user_id, symbol,
                                CASE manual_state
                                    WHEN 'DROPPED' THEN 'ARCHIVED'
                                    ELSE manual_state
                                END,
-                               note, reviewed_at
+                               note, c1_record_json, reviewed_at
                         FROM user_stock_review_legacy
                         WHERE manual_state IN ('WATCH', 'FOCUS', 'DROPPED');""",
                         "DROP TABLE user_stock_review_legacy;",
@@ -937,13 +967,13 @@ class UserRepository:
                                updated_at, revision,
                                CASE
                                    WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                        AND setup_code IN ('A1','A3','B1','B2') THEN 'PLAN'
+                                        AND setup_code IN ('A1','A3','B1','B2','C1') THEN 'PLAN'
                                    WHEN side='BUY' THEN 'LEGACY'
                                    ELSE 'OTHER'
                                END,
                                CASE
                                    WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                        AND setup_code IN ('A1','A3','B1','B2') THEN setup_code
+                                        AND setup_code IN ('A1','A3','B1','B2','C1') THEN setup_code
                                    ELSE NULL
                                END,
                                CASE WHEN side='BUY' THEN COALESCE(setup_code, '') ELSE '' END,
@@ -994,6 +1024,11 @@ class UserRepository:
         table_sql = str(row["sql"] if row is not None else "")
         if "'DROPPED'" not in table_sql and "'UNREVIEWED'" not in table_sql:
             return
+        columns = {
+            str(column[1])
+            for column in connection.execute("PRAGMA table_info(user_stock_review)")
+        }
+        c1_expression = "c1_record_json" if "c1_record_json" in columns else "'{}'"
         connection.execute("ALTER TABLE user_stock_review RENAME TO user_stock_review_legacy")
         connection.execute(
             """CREATE TABLE user_stock_review (
@@ -1003,16 +1038,19 @@ class UserRepository:
                     manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
                 ),
                 note TEXT NOT NULL DEFAULT '',
+                c1_record_json TEXT NOT NULL DEFAULT '{}',
                 reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (user_id, symbol),
                 FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
             )"""
         )
         connection.execute(
-            """INSERT INTO user_stock_review(user_id, symbol, manual_state, note, reviewed_at)
+            f"""INSERT INTO user_stock_review(
+                user_id, symbol, manual_state, note, c1_record_json, reviewed_at
+            )
             SELECT user_id, symbol,
                    CASE manual_state WHEN 'DROPPED' THEN 'ARCHIVED' ELSE manual_state END,
-                   note, reviewed_at
+                   note, {c1_expression}, reviewed_at
             FROM user_stock_review_legacy
             WHERE manual_state IN ('WATCH', 'FOCUS', 'DROPPED')
             """
@@ -1602,43 +1640,44 @@ class UserRepository:
         with self.connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT symbol, manual_state, note, reviewed_at
+                SELECT symbol, manual_state, note, c1_record_json, reviewed_at
                 FROM user_stock_review
                 WHERE user_id=? AND symbol IN ({placeholders})
                 """,
                 (user_id, *normalized),
             ).fetchall()
-        return {str(row["symbol"]): dict(row) for row in rows}
+        return {str(row["symbol"]): _review_value(row) for row in rows}
 
     def reviews_for_user(self, user_id: str) -> list[dict[str, Any]]:
         """Return the user's stocks that currently belong to their observation workspace."""
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT symbol, manual_state, note, reviewed_at
+                SELECT symbol, manual_state, note, c1_record_json, reviewed_at
                 FROM user_stock_review
                 WHERE user_id=?
                 ORDER BY reviewed_at DESC, symbol
                 """,
                 (user_id,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [_review_value(row) for row in rows]
 
     def review(self, user_id: str, symbol: str) -> dict[str, Any]:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT symbol, manual_state, note, reviewed_at
+                SELECT symbol, manual_state, note, c1_record_json, reviewed_at
                 FROM user_stock_review WHERE user_id=? AND symbol=?
                 """,
                 (user_id, symbol.upper()),
             ).fetchone()
         if row is not None:
-            return dict(row)
+            return _review_value(row)
         return {
             "symbol": symbol.upper(),
             "manual_state": "UNREVIEWED",
             "note": "",
+            "c1_record": {},
             "reviewed_at": "",
         }
 
@@ -1665,6 +1704,34 @@ class UserRepository:
                     reviewed_at=CURRENT_TIMESTAMP
                 """,
                 (user_id, symbol.upper(), state, note.strip()),
+            )
+
+    def save_c1_record(
+        self, user_id: str, symbol: str, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        record = _validated_c1_record(payload)
+        encoded = json.dumps(record, ensure_ascii=False, sort_keys=True)
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO user_stock_review(
+                    user_id, symbol, manual_state, note, c1_record_json, reviewed_at
+                ) VALUES (?, ?, 'WATCH', '', ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, symbol) DO UPDATE SET
+                    c1_record_json=excluded.c1_record_json,
+                    reviewed_at=CURRENT_TIMESTAMP
+                """,
+                (user_id, symbol.upper(), encoded),
+            )
+        return record
+
+    def clear_c1_record(self, user_id: str, symbol: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE user_stock_review
+                SET c1_record_json='{}', reviewed_at=CURRENT_TIMESTAMP
+                WHERE user_id=? AND symbol=?""",
+                (user_id, symbol.upper()),
             )
 
     def trade_setup_options(
@@ -1746,6 +1813,20 @@ class UserRepository:
                 other_setup_note=other_setup_note,
             )
             values["setup_method"] = assignment["setup_method"]
+            frozen_snapshot = dict(observation_snapshot or {})
+            if values["side"] == "BUY" and assignment["plan_setup_id"] == "C1":
+                review_row = connection.execute(
+                    """SELECT c1_record_json FROM user_stock_review
+                    WHERE user_id=? AND symbol=?""",
+                    (user_id, normalized_symbol),
+                ).fetchone()
+                if review_row is not None:
+                    try:
+                        c1_record = json.loads(str(review_row["c1_record_json"] or "{}"))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        c1_record = {}
+                    if isinstance(c1_record, dict) and c1_record:
+                        frozen_snapshot["c1_record"] = c1_record
             existing_rows = self._trade_rows(connection, user_id, normalized_symbol)
             candidate = {
                 "execution_id": execution_id,
@@ -1797,7 +1878,7 @@ class UserRepository:
                     invalidation.strip(),
                     exit_reason.strip(),
                     market_context.strip(),
-                    json.dumps(observation_snapshot or {}, ensure_ascii=False, sort_keys=True),
+                    json.dumps(frozen_snapshot, ensure_ascii=False, sort_keys=True),
                     plan["version_id"] if plan else None,
                     plan["evaluation_cycle_id"] if plan else None,
                     assignment["setup_code"] if values["side"] == "BUY" else None,
@@ -1861,7 +1942,27 @@ class UserRepository:
             version_ids = sorted(value.pop("plan_version_ids"))
             value["plan_version_ids"] = version_ids
             value["plan_versions"] = [version_labels.get(item, item) for item in version_ids]
-            value["summary"] = _trade_statistics(value.pop("trades"))
+            trades = value.pop("trades")
+            value["summary"] = _trade_statistics(trades)
+            value["by_entry_variant"] = {}
+            if str(value.get("setup_code") or "") == "C1":
+                for variant, label in C1_ENTRY_VARIANT_LABELS.items():
+                    matching = [
+                        item
+                        for item in trades
+                        if str(
+                            (item.get("snapshot", {}).get("c1_record") or {}).get(
+                                "entry_variant"
+                            )
+                            or ""
+                        )
+                        == variant
+                    ]
+                    if matching:
+                        value["by_entry_variant"][variant] = {
+                            "label": label,
+                            "summary": _trade_statistics(matching),
+                        }
             value["sample_state"] = (
                 "样本不足：少于 30 笔可计算R的完整交易。"
                 if value["summary"].get("r_count", 0) < 30
@@ -2676,7 +2777,7 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         raise ValueError("observation_snapshot 格式不正确")
     setup_code = str(payload.get("setup_code") or "").strip().upper() or None
     if setup_code is not None and setup_code not in PLAN_SETUP_CODES:
-        raise ValueError("计划形态必须为 A1、A3、B1 或 B2")
+        raise ValueError(f"计划形态必须为 {plan_setup_choices_text()}")
     return {
         "index": index,
         "client_id": client_id,
@@ -2702,6 +2803,88 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
         "market_context": str(payload.get("market_context") or "").strip(),
         "observation_snapshot": dict(snapshot),
     }
+
+
+def _review_value(row: Mapping[str, Any]) -> dict[str, Any]:
+    value = dict(row)
+    raw = value.pop("c1_record_json", "{}")
+    try:
+        record = json.loads(str(raw or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        record = {}
+    if not isinstance(record, dict):
+        record = {}
+    if record:
+        record["structure_state_label"] = C1_STRUCTURE_STATE_LABELS.get(
+            str(record.get("structure_state") or ""), "未知状态"
+        )
+        record["entry_variant_label"] = C1_ENTRY_VARIANT_LABELS.get(
+            str(record.get("entry_variant") or ""), "未指定"
+        )
+        try:
+            height = float(record["upper_bound"]) - float(record["lower_bound"])
+            atr14 = float(record["atr14"])
+            record["range_height_atr"] = round(height / atr14, 2) if atr14 > 0 else None
+        except (KeyError, TypeError, ValueError):
+            record["range_height_atr"] = None
+    value["c1_record"] = record
+    return value
+
+
+def _validated_c1_record(payload: Mapping[str, Any]) -> dict[str, Any]:
+    structure_state = str(payload.get("structure_state") or "").strip().upper()
+    entry_variant = str(payload.get("entry_variant") or "").strip().upper()
+    if structure_state not in C1_STRUCTURE_STATES:
+        raise ValueError("C1结构状态不正确")
+    if entry_variant not in C1_ENTRY_VARIANTS:
+        raise ValueError("C1入场类型必须为首次或二次")
+    as_of_date = _strict_iso_date(payload.get("as_of_date"), field="证据日期")
+    range_started_on = _strict_iso_date(payload.get("range_started_on"), field="区间起始日")
+    if range_started_on > as_of_date:
+        raise ValueError("区间起始日不能晚于证据日期")
+    lower_bound = _strict_positive_float(payload.get("lower_bound"), field="区间下沿")
+    upper_bound = _strict_positive_float(payload.get("upper_bound"), field="区间上沿")
+    atr14 = _strict_positive_float(payload.get("atr14"), field="ATR(14)")
+    if upper_bound <= lower_bound:
+        raise ValueError("区间上沿必须高于区间下沿")
+    try:
+        support_test_count = int(str(payload.get("support_test_count") or ""))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("历史下沿测试次数必须为整数") from exc
+    if support_test_count < 2:
+        raise ValueError("C1至少需要两个历史下沿测试点")
+    note = str(payload.get("note") or "").strip()
+    if len(note) > 500:
+        raise ValueError("C1结构说明不能超过500字")
+    return {
+        "as_of_date": as_of_date,
+        "range_started_on": range_started_on,
+        "lower_bound": round(lower_bound, 6),
+        "upper_bound": round(upper_bound, 6),
+        "atr14": round(atr14, 6),
+        "support_test_count": support_test_count,
+        "structure_state": structure_state,
+        "entry_variant": entry_variant,
+        "note": note,
+    }
+
+
+def _strict_iso_date(value: Any, *, field: str) -> str:
+    normalized = str(value or "").strip()
+    try:
+        return date.fromisoformat(normalized).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"{field}格式不正确") from exc
+
+
+def _strict_positive_float(value: Any, *, field: str) -> float:
+    try:
+        normalized = float(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field}格式不正确") from exc
+    if not math.isfinite(normalized) or normalized <= 0:
+        raise ValueError(f"{field}必须大于0")
+    return normalized
 
 
 def _trade_identity(row: Mapping[str, Any]) -> tuple[Any, ...]:

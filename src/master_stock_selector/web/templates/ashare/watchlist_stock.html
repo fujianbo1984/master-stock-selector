@@ -136,6 +136,34 @@
 </section>
 {% else %}<section class="section panel private-login-panel"><p class="eyebrow">个人工作区</p><h2>登录后记录个人观察</h2><p class="muted">观察状态、备注、价格图绘制、买卖点、成交和复盘仅你本人可见。</p><a class="button" href="/login?next=/a/stocks/{{ stock.symbol }}">登录</a></section>{% endif %}
 
+{% if private_workspace %}
+{% set c1 = stock.manual.c1_record or {} %}
+<details class="section stock-disclosure c1-structure-panel" id="c1-structure"{% if c1 %} open{% endif %}>
+  <summary>
+    <span><strong>C1 区间结构</strong><small>人工记录 · 不改变 Weinstein 或 Minervini 入池结论</small></span>
+    {% if c1 %}<span class="tag tag-caution">{{ c1.structure_state_label }} · {{ c1.entry_variant_label }}</span>{% else %}<span class="disclosure-action">展开</span>{% endif %}
+  </summary>
+  <div class="stock-disclosure-body">
+    <div class="section-heading"><div><p class="eyebrow">个人交易准备</p><h2>区间上下沿与失败测试</h2></div>{% if c1 %}<span class="muted">证据截至 {{ c1.as_of_date }}</span>{% endif %}</div>
+    <p class="reading-note">这里只保存人工结构判断。保存后若尚未加入个人观察，将自动加入“观察中”；C1仍只分析现有大师观察池，不构成第三种选股方法或自动买入指令。</p>
+    <form method="post" action="/a/stocks/{{ stock.symbol }}/c1" class="trade-form c1-structure-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>证据日期<input name="as_of_date" type="date" value="{{ c1.as_of_date or query_date }}" required></label>
+      <label>区间起始日<input name="range_started_on" type="date" value="{{ c1.range_started_on or '' }}" required></label>
+      <label>区间下沿<input name="lower_bound" type="number" min="0.001" step="0.001" value="{{ c1.lower_bound or '' }}" required></label>
+      <label>区间上沿<input name="upper_bound" type="number" min="0.001" step="0.001" value="{{ c1.upper_bound or '' }}" required></label>
+      <label>信号日 ATR(14)<input name="atr14" type="number" min="0.001" step="0.001" value="{{ c1.atr14 or '' }}" required></label>
+      <label>历史下沿测试次数<input name="support_test_count" type="number" min="2" step="1" value="{{ c1.support_test_count or 2 }}" required></label>
+      <label>结构状态<select name="structure_state" required>{% for value, label in c1_structure_state_labels.items() %}<option value="{{ value }}"{% if (c1.structure_state or 'RANGE') == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label>入场子类型<select name="entry_variant" required>{% for value, label in c1_entry_variant_labels.items() %}<option value="{{ value }}"{% if (c1.entry_variant or 'FIRST') == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label class="review-note">结构说明<textarea name="note" rows="2" maxlength="500" placeholder="记录支撑带、上下沿反应、强下跌或二次测试依据。">{{ c1.note or '' }}</textarea></label>
+      {% if c1 %}<div class="reading-note"><strong>结构高度</strong> {{ c1.range_height_atr }} ATR · 下沿 {{ c1.lower_bound }} · 上沿 {{ c1.upper_bound }} · 历史测试 {{ c1.support_test_count }} 次</div>{% endif %}
+      <div class="trade-form-actions"><button class="button" type="submit" name="action" value="save">保存 C1 结构</button>{% if c1 %}<button class="text-button" type="submit" name="action" value="clear" formnovalidate>清除 C1 结构</button>{% endif %}</div>
+    </form>
+  </div>
+</details>
+{% endif %}
+
 {% if stock.industry.industry_code %}
 <details class="section stock-disclosure industry-stock-context">
   <summary><span><strong>行业背景（仅人工参考）</strong><small>{{ stock.industry.industry_name }} · 需要时进入行业页计算技术确认</small></span><span class="disclosure-action">展开</span></summary>

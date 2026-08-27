@@ -3832,6 +3832,7 @@ def _match_trade_executions(
                     "setup_code_snapshot": row.get("setup_code_snapshot", ""),
                     "setup_name_snapshot": row.get("setup_name_snapshot", ""),
                     "other_setup_note": row.get("other_setup_note", ""),
+                    "snapshot": dict(row.get("snapshot") or {}),
                 }
             )
             continue
@@ -3861,6 +3862,7 @@ def _match_trade_executions(
                     "setup_code_snapshot": lot.get("setup_code_snapshot", ""),
                     "setup_name_snapshot": lot.get("setup_name_snapshot", ""),
                     "other_setup_note": lot.get("other_setup_note", ""),
+                    "snapshot": dict(lot.get("snapshot") or {}),
                     "buy_execution_id": str(lot["buy_execution_id"]),
                     "sell_execution_id": str(row["execution_id"]),
                     "buy_date": str(lot["buy_date"]),

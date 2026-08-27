@@ -1298,6 +1298,22 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
         },
         follow_redirects=True,
     )
+    c1_saved = client.post(
+        "/a/stocks/000001.SZ/c1",
+        data={
+            "csrf_token": _csrf(client),
+            "as_of_date": "2026-07-31",
+            "range_started_on": "2026-04-01",
+            "lower_bound": "9.5",
+            "upper_bound": "13.5",
+            "atr14": "0.8",
+            "support_test_count": "3",
+            "structure_state": "WAIT_SECOND",
+            "entry_variant": "SECOND",
+            "note": "等待二次测试",
+        },
+        follow_redirects=True,
+    )
 
     assert detail.status_code == 200
     assert "两种方法独立证据" in detail.text
@@ -1319,9 +1335,16 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert 'manual-focus">重点' in saved.text
     assert "等待年报后人工复核" in saved.text
     assert '<select name="manual_state">' not in saved.text
+    assert c1_saved.status_code == 200
+    assert "C1 区间结构" in c1_saved.text
+    assert "等待二次测试 · 二次入场" in c1_saved.text
+    assert "下沿 9.5 · 上沿 13.5 · 历史测试 3 次" in c1_saved.text
+    observations = client.get("/a/observations?state=FOCUS")
+    assert "C1 · 等待二次测试 · 二次入场" in observations.text
     api = client.get("/api/a/watchlist/2026-07-31?method=both&min_cap=0").json()
     assert len(api["rows"]) == 1
     assert api["rows"][0]["both_pass"] is True
+    assert "c1_record" not in api["rows"][0]
 
 
 def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tmp_path):
@@ -2359,6 +2382,22 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
         follow_redirects=False,
     ).status_code == 303
     assert alice.post(
+        "/a/stocks/000001.SZ/c1",
+        data={
+            "csrf_token": _csrf(alice),
+            "as_of_date": "2026-07-31",
+            "range_started_on": "2026-04-01",
+            "lower_bound": "9.5",
+            "upper_bound": "13.5",
+            "atr14": "0.8",
+            "support_test_count": "3",
+            "structure_state": "READY",
+            "entry_variant": "FIRST",
+            "note": "Alice C1私有结构",
+        },
+        follow_redirects=False,
+    ).status_code == 303
+    assert alice.post(
         "/a/stocks/000001.SZ/trades",
         data={
             "csrf_token": _csrf(alice),
@@ -2384,6 +2423,9 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
     assert "Alice 私有备注" in alice.get("/a/stocks/000001.SZ").text
     assert "Alice 私有备注" not in bob.get("/a/stocks/000001.SZ").text
     assert "Alice 私有备注" not in bob.get("/api/a/watchlist/2026-07-31?min_cap=0").text
+    assert "Alice C1私有结构" in alice.get("/a/stocks/000001.SZ").text
+    assert "Alice C1私有结构" not in bob.get("/a/stocks/000001.SZ").text
+    assert "Alice C1私有结构" not in bob.get("/api/a/watchlist/2026-07-31?min_cap=0").text
     assert bob.get("/a/daily?manual=FOCUS&min_cap=0").text.count("000001.SZ") == 0
     assert bob.post(
         f"/a/trades/{execution_id}",
@@ -2392,6 +2434,10 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
     assert alice.post(
         "/a/stocks/000001.SZ/review",
         data={"manual_state": "ARCHIVED"},
+    ).status_code == 403
+    assert alice.post(
+        "/a/stocks/000001.SZ/c1",
+        data={"action": "clear"},
     ).status_code == 403
 
     saved = alice.post(

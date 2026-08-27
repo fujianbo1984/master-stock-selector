@@ -10,12 +10,13 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from .display_time import sqlite_utc_to_shanghai
+from .plan_setups import PLAN_SETUP_DEFINITIONS, plan_setup_choices_text
 
 if TYPE_CHECKING:
     from .users import UserRepository
 
-GRILL_VERSION = "trading-plan-grill/1"
-SCHEMA_VERSION = "trading-plan/2"
+GRILL_VERSION = "trading-plan-grill/2"
+SCHEMA_VERSION = "trading-plan/3"
 ANSWER_STATES = {"CONFIRMED", "PROPOSED", "DEFERRED", "NOT_APPLICABLE"}
 
 ANSWER_VALUE_LABELS = {
@@ -34,14 +35,6 @@ PLAN_SECTIONS = (
     ("risk", "第二层", "类别、风险与目标"),
     ("setups", "第三层", "入场形态表"),
 )
-
-PLAN_SETUP_DEFINITIONS = {
-    "A1": {"name": "突破前入场", "rule_id": "A1.rules"},
-    "A3": {"name": "首次回调", "rule_id": "A3.rules"},
-    "B1": {"name": "简单回调", "rule_id": "B1.rules"},
-    "B2": {"name": "复杂回调", "rule_id": "B2.rules"},
-}
-
 
 def _question(
     section: str,
@@ -108,6 +101,12 @@ QUESTIONS = tuple(
         ("setups", "A3.rules", "A3 首次回调", "A3识别、初始止损和第一目标是什么？"),
         ("setups", "B1.rules", "B1 简单回调", "B1识别、初始止损和第一目标是什么？"),
         ("setups", "B2.rules", "B2 复杂回调", "B2识别、初始止损和第一目标是什么？"),
+        (
+            "setups",
+            "C1.rules",
+            "C1 区间失败测试",
+            "C1区间、失败测试、强下跌后二次入场、初始止损和第一目标是什么？",
+        ),
         ("setups", "setup.reentry", "重入与叠加", "止损后重入、A1+A3和B1转B2如何处理？"),
         ("setups", "setup.enabled", "启用形态", "启用哪些交易形态？"),
     )
@@ -116,9 +115,9 @@ QUESTIONS = tuple(
 DEMO_ANSWERS = {
     "scope.market": "沪深主板、科创板、创业板；只做多；日线分析、日线触发；平均持仓约20个交易日，但不设时间退出。",
     "scope.universe": "排除北交所、ST、*ST及以前一交易日收盘总市值计算低于50亿元的股票；不设置流动性过滤。",
-    "trend.background": "全部形态必须经软件筛选确认符合Minervini趋势模板或处于Weinstein第二阶段。黄金、白银板块个股仍须符合A股基础股票池规则，但不要求满足上述趋势模板，可由交易者主观参考COMEX黄金或白银日线多头背景。",
-    "workflow.daily": "每个交易日收盘后扫描全部A股；软件完成趋势模板筛选；人工判断A1、A3、B1、B2；计算触发价、止损、仓位和第一目标；设置仅下一交易日有效的条件单；周五工作可延迟至周日晚；盘中不临时增加候选或计划外交易；收盘后重新评估未触发候选并更新全部持仓止损。",
-    "review.recording": "每笔记录入场前截图、形态类别及版本、计划触发价和实际成交价、初始止损和股数、名义1R和成交后实际风险、盈亏R倍数、是否遵守计划及主观判断依据；每周按A1、A3、B1、B2分别复盘。每类至少30笔已平仓交易后，以毛平均R大于0作初步评价；不扣佣金、融资利息和滑点。实质修改入场、止损、仓位或退出规则后建立新版本并重新累计30笔，不因灾难性风险提前暂停。",
+    "trend.background": "全部形态必须先进入软件以Minervini趋势模板或Weinstein第二阶段形成的观察池。A1、A3、B1、B2使用趋势延续逻辑；C1只在该观察池内人工识别长期横向区间，不作为第三种选股方法。黄金、白银板块个股仍须符合A股基础股票池规则，但不要求满足上述趋势模板，可由交易者主观参考COMEX黄金或白银日线多头背景。",
+    "workflow.daily": "每个交易日收盘后扫描全部A股；软件完成趋势模板筛选；人工判断A1、A3、B1、B2，并在现有观察池内判断C1；计算触发价、止损、仓位和第一目标；设置仅下一交易日有效的条件单；周五工作可延迟至周日晚；盘中不临时增加候选或计划外交易；收盘后重新评估未触发候选并更新全部持仓止损。C1人工记录区间上下沿、ATR(14)、区间起始日、证据日期及首次/二次入场类型。",
+    "review.recording": "每笔记录入场前截图、形态类别及版本、计划触发价和实际成交价、初始止损和股数、名义1R和成交后实际风险、盈亏R倍数、是否遵守计划及主观判断依据；每周按A1、A3、B1、B2、C1分别复盘。C1总体使用独立30笔口径，首次与二次入场保留子类型并分别展示描述统计。每类至少30笔已平仓交易后，以毛平均R大于0作初步评价；不扣佣金、融资利息和滑点。实质修改入场、止损、仓位或退出规则后建立新版本并重新累计30笔，不因灾难性风险提前暂停。",
     "event.filter": "不设置财报、业绩预告、解禁、除权、复牌等事件过滤；公司行动和条件单价格调整按东方财富规则处理。",
     "risk.risk_percent": "重设时1R=账户净权益×2%，计算结果按千元四舍五入；接受实际风险比例约1%—4%漂移。",
     "risk.position_sizing": "FULL_R",
@@ -137,8 +136,9 @@ DEMO_ANSWERS = {
     "A3.rules": "已经成功突破重要阻力，突破后有良好参与意愿和上行动量，首次上冲结束后出现第一次受控回调，按简单回调处理。成交前日线收盘重新跌回原突破位下方则取消；成交后不再以突破位得失退出。初始止损=回调最低点－入场前一交易日TradingView ATR(14)；第一目标为实际1R并卖出一半。",
     "B1.rules": "既有上升趋势中的一段受控逆势回调，没有明显强劲下行动量，以高1等简单回调转强；不要求前高至少提供1R空间。初始止损=回调最低点－入场前一交易日TradingView ATR(14)；第一目标为实际1R并卖出一半。",
     "B2.rules": "两段清晰逆势运动的高2、楔形或显性/隐藏ABCD复杂回调；计划触发价至前高空间至少为计划1R；初始止损=第二腿最低点－0.01元；第一目标=前一摆动高点并卖出一半。高开后即使到前高不足1R仍交易并以前高为目标；若成交价已超前高，T+1次日仍在前高上方立即卖一半，否则等待重回前高。",
-    "setup.reentry": "同一形态止损后，重新评估合格可完整1R重入并独立统计；持有A1后形成A3可再加完整1R并分别管理统计；B1止损后形成B2可重新完整1R入场；B1未止损但演化B2则不增加B2仓位。同一股票A1和A3双仓，行业集中度仍按1只股票计算。",
-    "setup.enabled": "A1,A3,B1,B2",
+    "C1.rules": "C1只分析当日Minervini或Weinstein观察池内股票。以信号日可见数据人工确认至少60个交易日的横向区间；本次测试前至少有两个相隔不少于10个交易日、落在同一支撑带的历史摆动低点，并有可辨认上沿。盘中跌破支撑带下沿、收盘重新进入带内后，下一交易日突破失败测试K线最高价0.01元买入。初始止损=本次失败测试最低价－信号日TradingView ATR(14)；实际1R卖出一半，剩余仓位按公共移动止损规则处理。若测试前连续至少3根阴线且累计下跌不少于2 ATR，不做首次承接；等待至少反弹1 ATR后再次下探，第二次测试低点不低于首次低点0.25 ATR以上且收盘重新进入支撑带，下一交易日突破第二次测试K线最高价0.01元买入；止损=两次测试最低价－第二次信号日ATR(14)。首次与二次均归入C1，但分别记录子类型。区间有效向下破位、向上突破或公司行动造成价格尺度不连续时取消观察。",
+    "setup.reentry": "同一形态止损后，重新评估合格可完整1R重入并独立统计；持有A1后形成A3可再加完整1R并分别管理统计；B1止损后形成B2可重新完整1R入场；B1未止损但演化B2则不增加B2仓位。C1强下跌后的二次测试不是新方案，按C1二次入场子类型记录；C1止损后只有重新形成完整合格结构才可重入。同一股票多方案持仓时，行业集中度仍按1只股票计算。",
+    "setup.enabled": "A1,A3,B1,B2,C1",
 }
 
 
@@ -344,9 +344,10 @@ class TradingPlanService:
                 except ValueError:
                     legacy = answers.get("setup.enabled", {})
                     raw_enabled = str(legacy.get("value") or "").upper()
+                    code_pattern = "|".join(map(re.escape, PLAN_SETUP_DEFINITIONS))
                     legacy_codes = set(
                         re.findall(
-                            r"(?<![A-Z0-9])(A1|A3|B1|B2)(?![A-Z0-9])",
+                            rf"(?<![A-Z0-9])({code_pattern})(?![A-Z0-9])",
                             raw_enabled,
                         )
                     )
@@ -704,7 +705,7 @@ class TradingPlanService:
         unknown = [token for token in tokens if token not in PLAN_SETUP_DEFINITIONS]
         if unknown:
             raise ValueError(
-                "启用形态只能填写 A1、A3、B1、B2，以逗号分隔；无法识别："
+                f"启用形态只能填写 {plan_setup_choices_text()}，以逗号分隔；无法识别："
                 + "、".join(unknown)
             )
         enabled = set(tokens)
@@ -831,8 +832,12 @@ class TradingPlanService:
                 # Read-only compatibility for older frozen versions.  Never infer
                 # anything except the four explicit, recognizable setup codes.
                 raw = str(answers.get("setup.enabled", {}).get("value") or "").upper()
+                code_pattern = "|".join(map(re.escape, PLAN_SETUP_DEFINITIONS))
                 codes = set(
-                    re.findall(r"(?<![A-Z0-9])(A1|A3|B1|B2)(?![A-Z0-9])", raw)
+                    re.findall(
+                        rf"(?<![A-Z0-9])({code_pattern})(?![A-Z0-9])",
+                        raw,
+                    )
                 )
                 compatible_answers = dict(answers)
                 compatible_answers["setup.enabled"] = {

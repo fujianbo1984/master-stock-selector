@@ -30,6 +30,7 @@
         {% else %}<span class="muted">当前日期不在公开观察池，个人记录仍保留</span>{% endif %}
       </div>
       <p class="observation-note">{{ item.manual.note or '尚未记录个人分析备注。' }}</p>
+      {% if item.manual.c1_record %}<p class="reading-note"><strong>C1 · {{ item.manual.c1_record.structure_state_label }} · {{ item.manual.c1_record.entry_variant_label }}</strong><br>下沿 {{ item.manual.c1_record.lower_bound }} / 上沿 {{ item.manual.c1_record.upper_bound }} / ATR(14) {{ item.manual.c1_record.atr14 }} / {{ item.manual.c1_record.range_height_atr }} ATR</p>{% endif %}
       <div class="observation-item-actions">
         {% set return_path = '/a/observations?state=' ~ selected_state ~ '&date=' ~ query_date %}
         {% if selected_state == 'WATCH' %}

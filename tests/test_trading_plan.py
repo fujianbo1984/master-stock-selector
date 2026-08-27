@@ -69,9 +69,13 @@ def test_demo_grill_publishes_frozen_private_version(tmp_path: Path) -> None:
     frozen = json.dumps(current["content"], ensure_ascii=False, sort_keys=True)
     assert hashlib.sha256(frozen.encode()).hexdigest() == current["content_hash"]
     setup_layer = current["content"]["layers"]["setups"]
-    assert {"A1.rules", "A3.rules", "B1.rules", "B2.rules"} <= set(setup_layer)
+    assert {"A1.rules", "A3.rules", "B1.rules", "B2.rules", "C1.rules"} <= set(
+        setup_layer
+    )
+    assert "至少60个交易日" in setup_layer["C1.rules"]["value"]
+    assert "分别记录子类型" in setup_layer["C1.rules"]["value"]
     assert [item["setup_id"] for item in current["setup_catalog"] if item["enabled"]] == [
-        "A1", "A3", "B1", "B2"
+        "A1", "A3", "B1", "B2", "C1"
     ]
     setup_section = next(
         section for section in current["display_sections"] if section["key"] == "setups"
@@ -81,6 +85,7 @@ def test_demo_grill_publishes_frozen_private_version(tmp_path: Path) -> None:
         "A3 首次回调",
         "B1 简单回调",
         "B2 复杂回调",
+        "C1 区间失败测试",
         "重入与叠加",
         "启用形态",
     ]
@@ -424,6 +429,65 @@ def test_personal_plan_controls_trade_setup_options_and_other_is_default(tmp_pat
             alice, traded_on="2026-08-01", symbol="000002.SZ", side="BUY",
             quantity=100, price=10, fee=0, method="MANUAL", plan_setup_id="A3",
         )
+
+
+def test_c1_trade_freezes_manual_structure_and_reviews_variants_separately(tmp_path: Path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    plan = _published_demo(repository, user_id)
+    repository.save_c1_record(
+        user_id,
+        "000001.SZ",
+        {
+            "as_of_date": "2026-08-01",
+            "range_started_on": "2026-04-01",
+            "lower_bound": "9",
+            "upper_bound": "13",
+            "atr14": "1",
+            "support_test_count": "2",
+            "structure_state": "READY",
+            "entry_variant": "SECOND",
+            "note": "强下跌后等待二次测试",
+        },
+    )
+    buy_id = repository.record_trade(
+        user_id,
+        traded_on="2026-08-01",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=0,
+        method="MANUAL",
+        plan_setup_id="C1",
+        stop_price=9,
+    )
+    repository.clear_c1_record(user_id, "000001.SZ")
+    repository.record_trade(
+        user_id,
+        traded_on="2026-08-02",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=100,
+        price=11,
+        fee=0,
+        method="MANUAL",
+    )
+
+    buy = repository.trade_execution(user_id, buy_id)
+    assert buy is not None
+    assert buy["setup_method"] == "FAILED_TEST"
+    assert buy["setup_kind"] == "PLAN"
+    assert buy["plan_setup_id"] == "C1"
+    assert buy["setup_name_snapshot"] == "区间失败测试"
+    assert buy["snapshot"]["c1_record"]["entry_variant"] == "SECOND"
+    group = repository.trade_review(user_id, {"000001.SZ": "平安银行"})[
+        "by_plan_setup"
+    ][f"{plan['evaluation_cycle']}:C1"]
+    assert group["summary"]["count"] == 1
+    assert group["summary"]["gross_avg_r"] == 1.0
+    assert group["by_entry_variant"]["SECOND"]["summary"]["count"] == 1
 
 
 def test_plan_api_scopes_freeze_and_web_isolation(tmp_path: Path) -> None:

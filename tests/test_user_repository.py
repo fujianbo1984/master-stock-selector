@@ -116,7 +116,7 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
     assert user_id
 
 
@@ -483,6 +483,47 @@ def test_legacy_setup_inputs_are_preserved_but_not_treated_as_plan_setups(tmp_pa
     } == {key: f"历史：{label}" for key, label in setups.items()}
     assert all(row["setup_kind"] == "LEGACY" for row in review["executions"])
     assert review["by_plan_setup"] == {}
+
+
+def test_c1_structure_record_is_validated_scoped_and_preserved_by_review_updates(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    alice = repository.create_user("alice-c1", "Secure-password-123")
+    bob = repository.create_user("bob-c1", "Secure-password-123")
+    payload = {
+        "as_of_date": "2026-08-01",
+        "range_started_on": "2026-04-01",
+        "lower_bound": "9.5",
+        "upper_bound": "13.5",
+        "atr14": "0.8",
+        "support_test_count": "3",
+        "structure_state": "WAIT_SECOND",
+        "entry_variant": "SECOND",
+        "note": "连续阴线后等待二次测试",
+    }
+
+    repository.save_c1_record(alice, "000001.SZ", payload)
+    alice_review = repository.review(alice, "000001.SZ")
+    assert alice_review["manual_state"] == "WATCH"
+    assert alice_review["c1_record"]["lower_bound"] == 9.5
+    assert alice_review["c1_record"]["range_height_atr"] == 5.0
+    assert alice_review["c1_record"]["entry_variant_label"] == "二次入场"
+    assert repository.review(bob, "000001.SZ")["c1_record"] == {}
+
+    repository.save_review(alice, "000001.SZ", "FOCUS", "继续观察")
+    assert repository.review(alice, "000001.SZ")["c1_record"]["atr14"] == 0.8
+    with pytest.raises(ValueError, match="上沿必须高于"):
+        repository.save_c1_record(alice, "000002.SZ", {**payload, "upper_bound": "9"})
+    with pytest.raises(ValueError, match="至少需要两个"):
+        repository.save_c1_record(
+            alice, "000002.SZ", {**payload, "support_test_count": "1"}
+        )
+
+    repository.clear_c1_record(alice, "000001.SZ")
+    cleared = repository.review(alice, "000001.SZ")
+    assert cleared["manual_state"] == "FOCUS"
+    assert cleared["note"] == "继续观察"
+    assert cleared["c1_record"] == {}
 
 
 def test_new_trade_without_plan_defaults_to_other(tmp_path):
