@@ -55,6 +55,7 @@ class ReleaseError(RuntimeError):
 @dataclass(frozen=True)
 class ReleaseConfig:
     apply: bool
+    migrate_users: bool
     confirm_commit: str
     profile: str
     region: str
@@ -100,6 +101,11 @@ def parse_args(argv: Sequence[str] | None = None) -> ReleaseConfig:
         help="备份用户库并原子切换正式代码",
     )
     parser.add_argument(
+        "--migrate-users",
+        action="store_true",
+        help="仅与 --apply 同用：显式迁移用户库后再原子切换，并在失败时恢复备份",
+    )
+    parser.add_argument(
         "--confirm-commit",
         default="",
         help="--apply 时必须等于当前完整或短提交哈希",
@@ -131,6 +137,8 @@ def parse_args(argv: Sequence[str] | None = None) -> ReleaseConfig:
 
     if args.apply and not args.confirm_commit:
         parser.error("--apply 必须同时提供 --confirm-commit")
+    if args.migrate_users and not args.apply:
+        parser.error("--migrate-users 只能与 --apply 同时使用")
     if args.apply and args.skip_tests:
         parser.error("--apply 不允许 --skip-tests")
     if args.apply and args.allow_dirty_worktree:
@@ -149,6 +157,7 @@ def parse_args(argv: Sequence[str] | None = None) -> ReleaseConfig:
 
     return ReleaseConfig(
         apply=bool(args.apply),
+        migrate_users=bool(args.migrate_users),
         confirm_commit=str(args.confirm_commit),
         profile=str(args.profile),
         region=str(args.region),
@@ -710,17 +719,34 @@ def apply_script(context: ReleaseContext) -> str:
     candidate = context.candidate_dir
     before = f"/opt/masterstock.before-{context.short_commit}"
     failed = f"/opt/masterstock.failed-{context.short_commit}"
-    backup = f"/var/backups/masterstock/users-release-{context.release_id}.sqlite3"
-    return f"""set -eu
-candidate={shell_quote(candidate)}
-before={shell_quote(before)}
-failed={shell_quote(failed)}
-backup={shell_quote(backup)}
-test -d "$candidate"
-test ! -e "$before"
-test ! -e "$failed"
-test ! -e "$backup"
-sudo -u masterstock env MASTERSTOCK_USER_DATABASE=/var/lib/masterstock/users.sqlite3 "$candidate/scripts/manage_users.sh" schema-check >/dev/null
+    backup = (
+        f"/var/backups/masterstock/users-v10-before-v11-{context.release_id}.sqlite3"
+        if context.config.migrate_users
+        else f"/var/backups/masterstock/users-release-{context.release_id}.sqlite3"
+    )
+    failed_user = f"/var/backups/masterstock/users-failed-{context.release_id}.sqlite3"
+    migration_preflight = ""
+    regular_preflight = ""
+    if context.config.migrate_users:
+        migration_preflight = """"$candidate/.venv/bin/python" - <<'PY'
+from pathlib import Path
+from master_stock_selector.web.users import USER_SCHEMA_VERSION, UserRepository
+
+assert USER_SCHEMA_VERSION == 11
+status = UserRepository(Path("/var/lib/masterstock/users.sqlite3")).schema_status()
+assert status["quick_check"] == "ok"
+assert status["schema_version"] == 10
+assert status["required_version"] == 11
+assert status["missing_tables"] == []
+assert status["missing_columns"] == ["user_stock_review.c1_record_json"]
+assert status["missing_indexes"] == []
+assert not status["legacy_observation_states"]
+assert not status["legacy_trade_setups"]
+assert not status["legacy_chart_drawings"]
+PY
+"""
+    else:
+        regular_preflight = """sudo -u masterstock env MASTERSTOCK_USER_DATABASE=/var/lib/masterstock/users.sqlite3 "$candidate/scripts/manage_users.sh" schema-check >/dev/null
 "$candidate/.venv/bin/python" - "$backup" <<'PY'
 import sqlite3, sys
 from master_stock_selector.web.users import USER_SCHEMA_VERSION
@@ -737,6 +763,53 @@ finally:
 PY
 chown masterstock:masterstock "$backup"
 chmod 600 "$backup"
+"""
+    migration_step = ""
+    if context.config.migrate_users:
+        migration_step = f"""sudo -u masterstock env MASTERSTOCK_USER_DATABASE=/var/lib/masterstock/users.sqlite3 "$candidate/scripts/manage_users.sh" schema-migrate --apply --backup "$backup" > {shell_quote(context.staging_dir + '/user-migration-result.json')}
+"$candidate/.venv/bin/python" - {shell_quote(context.staging_dir + '/user-migration-result.json')} "$backup" <<'PY'
+import json, sqlite3, sys
+from pathlib import Path
+from master_stock_selector.web.users import USER_SCHEMA_VERSION, UserRepository
+
+result = json.loads(Path(sys.argv[1]).read_text())
+assert result["status"] == "migrated"
+assert result["existing_row_counts_preserved"] is True
+assert result["backup"]["path"] == sys.argv[2]
+assert result["backup"]["quick_check"] == "ok"
+with sqlite3.connect(f"file:{{sys.argv[2]}}?mode=ro", uri=True) as source:
+    assert source.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    assert source.execute("PRAGMA user_version").fetchone()[0] == 10
+status = UserRepository(Path("/var/lib/masterstock/users.sqlite3")).schema_status()
+assert USER_SCHEMA_VERSION == 11
+assert status["compatible"] is True
+assert status["quick_check"] == "ok"
+assert status["schema_version"] == 11
+PY
+migration_completed=1
+"""
+    user_fingerprint_check = (
+        'test "$(stat -c \'%i|%d\' /var/lib/masterstock/users.sqlite3)" = "$users_identity_before"'
+        if context.config.migrate_users
+        else 'test "$(stat -c \'%s|%Y|%i|%d\' /var/lib/masterstock/users.sqlite3)" = "$users_before"'
+    )
+    return f"""set -eu
+candidate={shell_quote(candidate)}
+before={shell_quote(before)}
+failed={shell_quote(failed)}
+backup={shell_quote(backup)}
+failed_user={shell_quote(failed_user)}
+migrate_users={1 if context.config.migrate_users else 0}
+migration_completed=0
+test -d "$candidate"
+test ! -e "$before"
+test ! -e "$failed"
+test ! -e "$backup"
+test ! -e "$failed_user"
+{migration_preflight}{regular_preflight}market_before=$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/market.sqlite3)
+watchlist_before=$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/master_watchlist.sqlite3)
+users_before=$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/users.sqlite3)
+users_identity_before=$(stat -c '%i|%d' /var/lib/masterstock/users.sqlite3)
 completed=0
 rollback() {{
   exit_code=$?
@@ -746,6 +819,34 @@ rollback() {{
     if [ -d "$before" ]; then
       if [ -e /opt/masterstock ]; then mv /opt/masterstock "$failed"; fi
       mv "$before" /opt/masterstock
+    fi
+    if [ "$migrate_users" -eq 1 ] && [ -f "$backup" ]; then
+      /opt/masterstock/.venv/bin/python - "$backup" "$failed_user" <<'PY'
+import sqlite3, sys
+
+backup_path, failed_path = sys.argv[1:]
+current = sqlite3.connect("/var/lib/masterstock/users.sqlite3")
+failed = sqlite3.connect(failed_path)
+try:
+    current.backup(failed)
+    assert failed.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+finally:
+    failed.close()
+    current.close()
+source = sqlite3.connect(f"file:{{backup_path}}?mode=ro", uri=True)
+target = sqlite3.connect("/var/lib/masterstock/users.sqlite3")
+try:
+    assert source.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    assert source.execute("PRAGMA user_version").fetchone()[0] == 10
+    source.backup(target)
+    assert target.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    assert target.execute("PRAGMA user_version").fetchone()[0] == 10
+finally:
+    target.close()
+    source.close()
+PY
+      chown masterstock:masterstock /var/lib/masterstock/users.sqlite3 "$failed_user"
+      chmod 600 /var/lib/masterstock/users.sqlite3 "$failed_user"
     fi
     systemctl start masterstock-web.service
     for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
@@ -758,10 +859,7 @@ rollback() {{
 trap rollback EXIT INT TERM
 systemctl stop masterstock-web.service
 test "$(systemctl is-active masterstock-web.service || true)" = inactive
-market_before=$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/market.sqlite3)
-watchlist_before=$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/master_watchlist.sqlite3)
-users_before=$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/users.sqlite3)
-mv /opt/masterstock "$before"
+{migration_step}mv /opt/masterstock "$before"
 mv "$candidate" /opt/masterstock
 systemctl start masterstock-web.service
 http_code=000
@@ -774,7 +872,7 @@ test "$http_code" = 200
 test "$(cat /opt/masterstock/.deployed-commit)" = {shell_quote(context.commit)}
 test "$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/market.sqlite3)" = "$market_before"
 test "$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/master_watchlist.sqlite3)" = "$watchlist_before"
-test "$(stat -c '%s|%Y|%i|%d' /var/lib/masterstock/users.sqlite3)" = "$users_before"
+{user_fingerprint_check}
 completed=1
 trap - EXIT INT TERM
 rm -f /tmp/masterstock-release-health-{context.release_id}.json

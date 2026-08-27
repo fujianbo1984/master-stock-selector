@@ -20,6 +20,7 @@ def test_default_mode_is_safe_rehearsal() -> None:
     config = release_ecs.parse_args([])
 
     assert config.apply is False
+    assert config.migrate_users is False
     assert config.smoke_paths == ("/a/daily",)
     assert config.chunk_bytes == 24_000
 
@@ -27,6 +28,17 @@ def test_default_mode_is_safe_rehearsal() -> None:
 def test_apply_requires_commit_confirmation() -> None:
     with pytest.raises(SystemExit):
         release_ecs.parse_args(["--apply"])
+
+
+def test_user_migration_requires_apply() -> None:
+    with pytest.raises(SystemExit):
+        release_ecs.parse_args(["--migrate-users"])
+
+    config = release_ecs.parse_args(
+        ["--apply", "--migrate-users", "--confirm-commit", "abcdef0"]
+    )
+    assert config.apply is True
+    assert config.migrate_users is True
 
 
 def test_apply_refuses_test_and_worktree_bypasses() -> None:
@@ -75,6 +87,7 @@ def test_required_wheel_resources_include_nested_reading_assets() -> None:
 def test_baseline_and_apply_scripts_keep_safety_contract() -> None:
     config = release_ecs.ReleaseConfig(
         apply=True,
+        migrate_users=False,
         confirm_commit="a" * 40,
         profile="codex-aliyun",
         region="cn-hangzhou",
@@ -112,6 +125,40 @@ def test_baseline_and_apply_scripts_keep_safety_contract() -> None:
     assert "mv \"$before\" /opt/masterstock" in apply
     assert "market_before" in apply
     assert "users_before" in apply
+
+
+def test_migration_apply_script_freezes_v10_to_v11_contract(tmp_path: Path) -> None:
+    config = release_ecs.parse_args(
+        ["--apply", "--migrate-users", "--confirm-commit", "a" * 40]
+    )
+    context = release_ecs.ReleaseContext(
+        config=config,
+        commit="a" * 40,
+        short_commit="aaaaaaa",
+        release_id="aaaaaaa-20260827t000000z",
+        archive=tmp_path / "archive.tar.gz",
+        archive_sha256="b" * 64,
+        css_sha256="c" * 64,
+        candidate_dir="/opt/masterstock.next-aaaaaaa",
+        staging_dir="/tmp/masterstock-release-aaaaaaa-20260827t000000z",
+        unit_name="masterstock-candidate-aaaaaaa-20260827t000000z",
+    )
+
+    script = release_ecs.apply_script(context)
+
+    assert "users-v10-before-v11-" in script
+    assert "assert USER_SCHEMA_VERSION == 11" in script
+    assert 'assert status["schema_version"] == 10' in script
+    assert 'schema-migrate --apply --backup "$backup"' in script
+    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 10' in script
+    assert 'assert status["schema_version"] == 11' in script
+    assert "source.backup(target)" in script
+    assert "systemctl stop masterstock-web.service" in script
+    assert "systemctl start masterstock-web.service" in script
+    syntax = subprocess.run(
+        ["sh", "-n"], input=script, text=True, capture_output=True, check=False
+    )
+    assert syntax.returncode == 0, syntax.stderr
 
 
 def test_rehearsal_cleanup_is_exact_and_checks_live_health() -> None:

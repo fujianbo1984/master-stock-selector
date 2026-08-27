@@ -16,6 +16,18 @@ scripts/release_ecs.sh --rehearse \
 scripts/release_ecs.sh --apply --confirm-commit "$(git rev-parse HEAD)"
 ```
 
+用户库 schema 升级必须先获得单独授权。只有已冻结并核对当前/目标版本、备份与回滚
+方案后，才可使用显式迁移发布模式；普通 `--apply` 仍会拒绝不兼容的用户库：
+
+```bash
+scripts/release_ecs.sh --apply --migrate-users \
+  --confirm-commit "$(git rev-parse HEAD)"
+```
+
+该模式目前只接受 v10→v11 的已知迁移合同，先停止 Web，在
+`/var/backups/masterstock` 创建 v10 备份并核验，再迁移和原子切换。新服务启动或终验
+失败时，同时恢复旧代码和 v10 用户库。行情库与观察池库只核对指纹，不迁移或替换。
+
 发布器只归档已提交的 `HEAD`，禁止数据库、`.env`、日志、备份和个人数据进入归档。
 默认使用 Cloud Assistant，不修改 SSH、UFW 或安全组。远端候选使用
 `/etc/uv/uv.toml` 和持久化 `/var/cache/masterstock/uv`，依赖来自
