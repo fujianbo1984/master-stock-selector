@@ -4,42 +4,42 @@
 {% block subtitle %}实际成交的描述统计，不生成买卖指令{% endblock %}
 {% block content %}
 <section class="section panel review-hero">
-  <div><p class="eyebrow">个人工作区 · {{ current_user.display_name or current_user.username }}</p><h1>结果、持仓与成交明细</h1><p>{{ review.sample_state }}</p></div>
+  <div><p class="eyebrow">个人工作区 · {{ current_user.display_name or current_user.username }}</p><h1>结果、持仓与成交明细</h1><p>{{ review.completed_lot_sample_state }}</p></div>
   <div class="review-hero-note"><strong>个人数据 · 仅你可见</strong><span>仅用于复盘，不构成买卖建议</span></div>
 </section>
 
-<section class="section review-kpis" aria-label="已完成交易统计">
-  <article class="kpi"><span>已完成交易</span><strong>{{ review.summary.count }}</strong><small>先进先出配对</small></article>
-  <article class="kpi"><span>已实现净收益</span><strong>{{ '%.2f'|format(review.summary.net_pnl) }} 元</strong><small>已扣录入费用</small></article>
-  <article class="kpi"><span>胜率</span><strong>{% if review.summary.win_rate_pct is not none %}{{ review.summary.win_rate_pct }}%{% else %}—{% endif %}</strong><small>仅已完成交易</small></article>
-  <article class="kpi"><span>单笔期望</span><strong>{% if review.summary.expectancy is not none %}{{ review.summary.expectancy }} 元{% else %}—{% endif %}</strong><small>不代表未来</small></article>
+<section class="section review-kpis" aria-label="交易复盘统计">
+  <article class="kpi"><span>完整买入批次</span><strong>{{ review.completed_lot_summary.count }}</strong><small>一次买入执行全部卖完才计入</small></article>
+  <article class="kpi"><span>已实现净收益</span><strong>{{ '%.2f'|format(review.realized_summary.net_pnl) }} 元</strong><small>所有已配对卖出·含未清仓批次的已卖部分</small></article>
+  <article class="kpi"><span>完整批次胜率</span><strong>{% if review.completed_lot_summary.win_rate_pct is not none %}{{ review.completed_lot_summary.win_rate_pct }}%{% else %}—{% endif %}</strong><small>不把部分卖出当成完整样本</small></article>
+  <article class="kpi"><span>完整批次期望</span><strong>{% if review.completed_lot_summary.expectancy is not none %}{{ review.completed_lot_summary.expectancy }} 元{% else %}—{% endif %}</strong><small>每个完整买入批次·不代表未来</small></article>
 </section>
 
 <section class="section review-overview-grid">
   <article class="panel review-panel">
     <div class="section-heading"><div><p class="eyebrow">方案拆分</p><h2>复盘概览</h2></div></div>
-    <div class="table-wrap review-table"><table><thead><tr><th>交易方案</th><th>已完成</th><th>净收益</th><th>胜率</th><th>盈亏比</th><th>平均持仓日</th></tr></thead><tbody>
-    {% for setup, stats in review.get('by_setup', {}).items() %}<tr><td>{{ setup }}</td><td>{{ stats.count }}</td><td>{{ stats.net_pnl }} 元</td><td>{% if stats.win_rate_pct is not none %}{{ stats.win_rate_pct }}%{% else %}—{% endif %}</td><td>{{ stats.profit_loss_ratio if stats.profit_loss_ratio is not none else '—' }}</td><td>{{ stats.avg_holding_days if stats.avg_holding_days is not none else '—' }}</td></tr>{% endfor %}
+    <div class="table-wrap review-table"><table><thead><tr><th>交易方案</th><th>已完成买入批次</th><th>完整买入批次净收益</th><th>胜率</th><th>盈亏比</th><th>平均持仓日</th></tr></thead><tbody>
+    {% for setup, stats in review.completed_lots_by_setup.items() %}<tr><td>{{ setup }}</td><td>{{ stats.count }}</td><td>{{ stats.net_pnl }} 元</td><td>{% if stats.win_rate_pct is not none %}{{ stats.win_rate_pct }}%{% else %}—{% endif %}</td><td>{{ stats.profit_loss_ratio if stats.profit_loss_ratio is not none else '—' }}</td><td>{{ stats.avg_holding_days if stats.avg_holding_days is not none else '—' }}</td></tr>{% endfor %}
     </tbody></table></div>
   </article>
   <article id="current-positions" class="panel review-panel">
-    <div class="section-heading"><div><p class="eyebrow">待复盘持仓</p><h2>当前持仓</h2></div><span class="muted">不计入已实现统计</span></div>
+    <div class="section-heading"><div><p class="eyebrow">待复盘持仓</p><h2>当前持仓</h2></div><span class="muted">仅列剩余未卖部分</span></div>
     {% if review.open_positions %}<div class="table-wrap review-table"><table><thead><tr><th>股票</th><th>方法</th><th>数量</th><th>剩余成本</th></tr></thead><tbody>{% for item in review.open_positions %}<tr><td><a class="stock-link" href="/a/stocks/{{ item.symbol }}/chart?date={{ query_date }}&amp;section=open-positions{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}" title="打开 {{ item.stock_name }} K线图">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td><td>{{ item.setup_label }}</td><td>{{ item.quantity }}</td><td>{{ item.cost }} 元</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">当前没有待复盘持仓。</div>{% endif %}
   </article>
 </section>
 
 {% if review.by_plan_setup %}
 <section class="section panel review-panel">
-  <div class="section-heading"><div><p class="eyebrow">版本化评估</p><h2>按评估周期与形态</h2></div><span class="muted">轻微版本连续累计；每组 30 笔完整交易才达到初步评价门槛</span></div>
-  <div class="table-wrap review-table"><table><thead><tr><th>涉及版本</th><th>形态</th><th>已完成</th><th>毛平均R</th><th>净收益</th><th>胜率</th><th>样本状态</th></tr></thead><tbody>
-  {% for item in review.by_plan_setup.values() %}<tr><td>{{ item.plan_versions|join('、') if item.plan_versions else '未绑定' }}</td><td>{{ item.setup_code }} · {{ item.setup_name }}{% if item.by_entry_variant %}{% for variant in item.by_entry_variant.values() %}<small>{{ variant.label }} {{ variant.summary.count }}笔 / 毛平均R {{ variant.summary.gross_avg_r if variant.summary.gross_avg_r is not none else '—' }}</small>{% endfor %}{% endif %}</td><td>{{ item.summary.count }}</td><td>{{ item.summary.gross_avg_r if item.summary.gross_avg_r is not none else '—' }}</td><td>{{ item.summary.net_pnl }} 元</td><td>{{ item.summary.win_rate_pct if item.summary.win_rate_pct is not none else '—' }}{% if item.summary.win_rate_pct is not none %}%{% endif %}</td><td>{{ item.sample_state }}</td></tr>{% endfor %}
+  <div class="section-heading"><div><p class="eyebrow">版本化评估</p><h2>按评估周期与形态</h2></div><span class="muted">轻微版本连续累计；每组 30 个可计算R完整买入批次才达到初步评价门槛</span></div>
+  <div class="table-wrap review-table"><table><thead><tr><th>涉及版本</th><th>形态</th><th>已完成买入批次</th><th>毛平均R</th><th>完整买入批次净收益</th><th>胜率</th><th>样本状态</th></tr></thead><tbody>
+  {% for item in review.by_plan_setup.values() %}<tr><td>{{ item.plan_versions|join('、') if item.plan_versions else '未绑定' }}</td><td>{{ item.setup_code }} · {{ item.setup_name }}{% if item.by_entry_variant %}{% for variant in item.by_entry_variant.values() %}<small>{{ variant.label }} {{ variant.summary.count }}个 / 毛平均R {{ variant.summary.gross_avg_r if variant.summary.gross_avg_r is not none else '—' }}（{{ variant.summary.r_count }}/{{ variant.summary.count }}个可计算）</small>{% endfor %}{% endif %}</td><td>{{ item.summary.count }}</td><td>{{ item.summary.gross_avg_r if item.summary.gross_avg_r is not none else '—' }}<small>{{ item.summary.r_count }}/{{ item.summary.count }}个可计算</small></td><td>{{ item.summary.net_pnl }} 元</td><td>{{ item.summary.win_rate_pct if item.summary.win_rate_pct is not none else '—' }}{% if item.summary.win_rate_pct is not none %}%{% endif %}</td><td>{{ item.sample_state }}</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 {% endif %}
 
 <section class="section panel review-panel">
-  <div class="section-heading"><div><p class="eyebrow">已完成交易</p><h2>已完成交易</h2></div><span class="muted">卖出按先进先出与历史买入配对</span></div>
-  {% if review.closed %}<div class="table-wrap review-table"><table data-sortable="true"><thead><tr><th>股票</th><th>方法</th><th>买入</th><th>卖出</th><th>数量</th><th>净收益</th><th>收益率</th><th>计划盈亏比</th><th>实际盈亏比</th><th>持仓日</th><th>卖出原因</th></tr></thead><tbody>{% for item in review.closed %}<tr><td><a class="stock-link" href="/a/stocks/{{ item.symbol }}">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td><td>{{ item.setup_label }}</td><td>{{ item.buy_date }}</td><td>{{ item.sell_date }}</td><td>{{ item.quantity }}</td><td data-sort="{{ item.pnl }}">{{ item.pnl }} 元</td><td data-sort="{{ item.return_pct }}">{{ item.return_pct }}%</td><td data-sort="{{ item.planned_r_multiple if item.planned_r_multiple is not none else '' }}">{% if item.planned_r_multiple is not none %}{{ item.planned_r_multiple }}{% else %}—{% endif %}</td><td data-sort="{{ item.actual_r_multiple if item.actual_r_multiple is not none else '' }}" title="按买入日至卖出日的日线最低价计算；未跌破买入价不计算">{% if item.actual_r_multiple is not none %}{{ item.actual_r_multiple }}{% else %}—{% endif %}</td><td>{{ item.holding_days }}</td><td>{{ item.exit_reason or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">尚无已完成交易；请先在个股页记录实际买入和卖出。</div>{% endif %}
+  <div class="section-heading"><div><p class="eyebrow">完整买入批次</p><h2>完整买入批次</h2></div><span class="muted">卖出按先进先出配对；一次买入执行全部卖完后形成一个样本</span></div>
+  {% if review.completed_lots %}<div class="table-wrap review-table"><table data-sortable="true"><thead><tr><th>股票</th><th>方法</th><th>买入</th><th>卖出</th><th>数量</th><th>净收益</th><th>收益率</th><th>毛收益R</th><th>盈利/最大回撤</th><th>持仓日</th><th>卖出原因</th></tr></thead><tbody>{% for item in review.completed_lots %}<tr><td><a class="stock-link" href="/a/stocks/{{ item.symbol }}">{{ item.stock_name }}<small>{{ item.symbol }}</small></a></td><td>{{ item.setup_label }}</td><td>{{ item.buy_date }}</td><td>{{ item.sell_date }}</td><td>{{ item.quantity }}</td><td data-sort="{{ item.pnl }}">{{ item.pnl }} 元</td><td data-sort="{{ item.return_pct }}">{{ item.return_pct }}%</td><td data-sort="{{ item.planned_r_multiple if item.planned_r_multiple is not none else '' }}" title="不扣费用的毛盈亏 ÷ 买入时初始风险；缺少初始止损时不计算">{% if item.planned_r_multiple is not none %}{{ item.planned_r_multiple }}{% else %}—{% endif %}</td><td data-sort="{{ item.actual_r_multiple if item.actual_r_multiple is not none else '' }}" title="仅对盈利批次，按买入日至卖出日的日线最低价计算；未跌破买入价不计算">{% if item.actual_r_multiple is not none %}{{ item.actual_r_multiple }}{% else %}—{% endif %}</td><td>{{ item.holding_days }}</td><td>{{ item.exit_reason or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">尚无完整买入批次；部分卖出的已实现盈亏仍会计入顶部统计。</div>{% endif %}
 </section>
 
 {% if review.unmatched_sells %}<section class="section panel review-panel">

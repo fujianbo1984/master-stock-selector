@@ -1909,15 +1909,15 @@ class UserRepository:
         closed, open_lots, unmatched_sells = _match_trade_executions(
             rows, permit_unmatched_sells=True
         )
-        completed_trades = _aggregate_completed_trades(closed, open_lots)
+        completed_lots = _aggregate_completed_trades(closed, open_lots)
         open_positions = _summarize_open_lots(open_lots)
-        for collection in (rows, completed_trades, open_positions, unmatched_sells):
+        for collection in (rows, completed_lots, open_positions, unmatched_sells):
             for item in collection:
                 symbol = str(item["symbol"])
                 item["stock_name"] = names.get(symbol, "名称待补")
                 _decorate_setup(item)
         by_plan_setup: dict[str, dict[str, Any]] = {}
-        for item in completed_trades:
+        for item in completed_lots:
             if item.get("setup_kind") != "PLAN" or not item.get("plan_setup_id"):
                 continue
             cycle_id = str(item.get("evaluation_cycle_id") or "UNBOUND")
@@ -1964,34 +1964,48 @@ class UserRepository:
                             "summary": _trade_statistics(matching),
                         }
             value["sample_state"] = (
-                "样本不足：少于 30 笔可计算R的完整交易。"
+                "样本不足：少于 30 个可计算R的完整买入批次。"
                 if value["summary"].get("r_count", 0) < 30
-                else "样本达到本计划的 30 笔可计算R交易初步评价门槛。"
+                else "样本达到本计划的 30 个可计算R完整买入批次初步评价门槛。"
             )
+        completed_lot_summary = _trade_statistics(completed_lots)
+        realized_summary = {
+            "net_pnl": sum(
+                int(item.get("pnl_cents", round(float(item["pnl"]) * 100)))
+                for item in closed
+            )
+            / 100,
+            "matched_quantity": sum(int(item["quantity"]) for item in closed),
+            "fifo_fragment_count": len(closed),
+            "sell_execution_count": len(
+                {str(item["sell_execution_id"]) for item in closed}
+            ),
+        }
         return {
             "executions": list(reversed(rows)),
-            "closed": list(reversed(completed_trades)),
+            "completed_lots": list(reversed(completed_lots)),
             "closed_fragments": list(reversed(closed)),
             "open_positions": open_positions,
             "unmatched_sells": list(reversed(unmatched_sells)),
-            "summary": _trade_statistics(completed_trades),
-            "by_setup": {
+            "realized_summary": realized_summary,
+            "completed_lot_summary": completed_lot_summary,
+            "completed_lots_by_setup": {
                 label: _trade_statistics(
-                    [item for item in completed_trades if item["setup_label"] == label]
+                    [item for item in completed_lots if item["setup_label"] == label]
                 )
-                for label in dict.fromkeys(item["setup_label"] for item in completed_trades)
+                for label in dict.fromkeys(item["setup_label"] for item in completed_lots)
             },
             "other_count": sum(
-                1 for item in completed_trades if item.get("setup_kind") == "OTHER"
+                1 for item in completed_lots if item.get("setup_kind") == "OTHER"
             ),
             "legacy_count": sum(
-                1 for item in completed_trades if item.get("setup_kind") == "LEGACY"
+                1 for item in completed_lots if item.get("setup_kind") == "LEGACY"
             ),
             "by_plan_setup": by_plan_setup,
-            "sample_state": (
-                "样本不足：少于 20 笔已完成交易，仅展示描述统计。"
-                if len(completed_trades) < 20
-                else "样本达到基础复盘门槛；仍不构成策略有效性或买卖建议。"
+            "completed_lot_sample_state": (
+                "样本不足：少于 20 个完整买入批次，仅展示描述统计。"
+                if len(completed_lots) < 20
+                else "完整买入批次达到基础复盘门槛；仍不构成策略有效性或买卖建议。"
             ),
         }
 

@@ -351,7 +351,11 @@ def test_minor_versions_reuse_cycle_and_trades_bind_to_active_version(
         fee=0,
         method="MANUAL",
     )
-    assert repository.trade_review(alice, {"000001.SZ": "平安银行"})["by_plan_setup"] == {}
+    partial_review = repository.trade_review(alice, {"000001.SZ": "平安银行"})
+    assert partial_review["by_plan_setup"] == {}
+    assert partial_review["completed_lot_summary"]["count"] == 0
+    assert partial_review["completed_lot_summary"]["net_pnl"] == 0
+    assert partial_review["realized_summary"]["net_pnl"] == 50.0
     repository.record_trade(
         alice,
         traded_on="2026-08-03",
@@ -367,6 +371,8 @@ def test_minor_versions_reuse_cycle_and_trades_bind_to_active_version(
     assert group["plan_versions"] == ["v0.2"]
     assert group["summary"]["count"] == 1
     assert group["summary"]["gross_avg_r"] == 1.0
+    assert group["summary"]["r_count"] == 1
+    assert review["realized_summary"]["net_pnl"] == 100.0
     with pytest.raises(ValueError, match="不属于当前用户"):
         repository.record_trade(
             bob,
@@ -379,6 +385,99 @@ def test_minor_versions_reuse_cycle_and_trades_bind_to_active_version(
             method="MANUAL",
             plan_version_id=minor["version_id"],
         )
+
+
+def test_trade_review_reconciles_fifo_fragments_fees_and_completed_buy_lots(
+    tmp_path: Path,
+) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+
+    repository.record_trade(
+        user_id,
+        traded_on="2026-08-01",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=10,
+        fee=1,
+        method="MANUAL",
+    )
+    repository.record_trade(
+        user_id,
+        traded_on="2026-08-02",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=20,
+        fee=1,
+        method="MANUAL",
+    )
+    repository.record_trade(
+        user_id,
+        traded_on="2026-08-03",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=150,
+        price=30,
+        fee=3,
+        method="MANUAL",
+    )
+
+    partial = repository.trade_review(user_id, {"000001.SZ": "平安银行"})
+    assert partial["realized_summary"] == {
+        "net_pnl": 2495.5,
+        "matched_quantity": 150,
+        "fifo_fragment_count": 2,
+        "sell_execution_count": 1,
+    }
+    assert partial["completed_lot_summary"]["count"] == 1
+    assert partial["completed_lot_summary"]["net_pnl"] == 1997.0
+    assert partial["open_positions"][0]["quantity"] == 50
+    assert partial["open_positions"][0]["cost"] == 1000.5
+    assert sum(item["pnl_cents"] for item in partial["closed_fragments"]) == 249_550
+
+    repository.record_trade(
+        user_id,
+        traded_on="2026-08-04",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=50,
+        price=25,
+        fee=1,
+        method="MANUAL",
+    )
+    complete = repository.trade_review(user_id, {"000001.SZ": "平安银行"})
+    assert complete["realized_summary"]["net_pnl"] == 2744.0
+    assert complete["completed_lot_summary"]["count"] == 2
+    assert complete["completed_lot_summary"]["net_pnl"] == 2744.0
+    assert complete["open_positions"] == []
+    assert sum(item["pnl_cents"] for item in complete["completed_lots"]) == 274_400
+
+
+def test_trade_review_excludes_unmatched_sell_from_realized_summary(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    repository.record_trade(
+        user_id,
+        traded_on="2026-08-01",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=100,
+        price=10,
+        fee=2,
+        method="MANUAL",
+        permit_unmatched_sell=True,
+    )
+
+    review = repository.trade_review(user_id, {"000001.SZ": "平安银行"})
+
+    assert review["realized_summary"]["net_pnl"] == 0
+    assert review["realized_summary"]["matched_quantity"] == 0
+    assert review["completed_lot_summary"]["count"] == 0
+    assert review["unmatched_sells"][0]["fee"] == 2.0
 
 
 def test_personal_plan_controls_trade_setup_options_and_other_is_default(tmp_path: Path) -> None:

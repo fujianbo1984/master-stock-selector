@@ -6,6 +6,7 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from statistics import fmean, median
 from threading import Lock
@@ -3806,6 +3807,9 @@ def _match_trade_executions(
     for row in rows:
         if str(row["side"]) == "BUY":
             quantity = int(row["quantity"])
+            total_cost_cents = _money_cents(
+                Decimal(str(row["price"])) * quantity + Decimal(str(row["fee"]))
+            )
             lots.append(
                 {
                     "symbol": str(row["symbol"]),
@@ -3820,7 +3824,8 @@ def _match_trade_executions(
                     "stop_price": row.get("stop_price"),
                     "initial_stop_price": row.get("initial_stop_price", row.get("stop_price")),
                     "remaining_quantity": quantity,
-                    "unit_cost": (float(row["price"]) * quantity + float(row["fee"])) / quantity,
+                    "unit_cost": total_cost_cents / 100 / quantity,
+                    "remaining_cost_cents": total_cost_cents,
                     "rationale": str(row.get("rationale") or ""),
                     "invalidation": str(row.get("invalidation") or ""),
                     "market_context": str(row.get("market_context") or ""),
@@ -3838,16 +3843,28 @@ def _match_trade_executions(
             continue
 
         remaining_to_sell = int(row["quantity"])
+        remaining_gross_proceeds_cents = _money_cents(
+            Decimal(str(row["price"])) * remaining_to_sell
+        )
+        remaining_sell_fee_cents = _money_cents(row["fee"])
         matching_lots = [lot for lot in lots if lot["symbol"] == str(row["symbol"])]
         for lot in matching_lots:
             if remaining_to_sell <= 0:
                 break
             matched_quantity = min(remaining_to_sell, int(lot["remaining_quantity"]))
-            sale_proceeds = float(row["price"]) * matched_quantity - (
-                float(row["fee"]) * matched_quantity / int(row["quantity"])
+            gross_proceeds_cents = _allocate_cents(
+                remaining_gross_proceeds_cents, matched_quantity, remaining_to_sell
             )
-            cost = float(lot["unit_cost"]) * matched_quantity
-            pnl = sale_proceeds - cost
+            sell_fee_cents = _allocate_cents(
+                remaining_sell_fee_cents, matched_quantity, remaining_to_sell
+            )
+            proceeds_cents = gross_proceeds_cents - sell_fee_cents
+            cost_cents = _allocate_cents(
+                int(lot["remaining_cost_cents"]),
+                matched_quantity,
+                int(lot["remaining_quantity"]),
+            )
+            pnl_cents = proceeds_cents - cost_cents
             gross_pnl = (float(row["price"]) - float(lot["entry_price"])) * matched_quantity
             closed.append(
                 {
@@ -3868,15 +3885,20 @@ def _match_trade_executions(
                     "buy_date": str(lot["buy_date"]),
                     "sell_date": str(row["traded_on"]),
                     "quantity": matched_quantity,
-                    "cost": round(cost, 2),
-                    "proceeds": round(sale_proceeds, 2),
-                    "pnl": round(pnl, 2),
+                    "cost": cost_cents / 100,
+                    "cost_cents": cost_cents,
+                    "proceeds": proceeds_cents / 100,
+                    "proceeds_cents": proceeds_cents,
+                    "pnl": pnl_cents / 100,
+                    "pnl_cents": pnl_cents,
                     "gross_pnl": round(gross_pnl, 2),
                     "entry_price": float(lot["entry_price"]),
                     "exit_price": float(row["price"]),
                     "stop_price": lot.get("stop_price"),
                     "initial_stop_price": lot.get("initial_stop_price"),
-                    "return_pct": round(pnl / cost * 100, 2) if cost else None,
+                    "return_pct": round(pnl_cents / cost_cents * 100, 2)
+                    if cost_cents
+                    else None,
                     "holding_days": (
                         date.fromisoformat(str(row["traded_on"]))
                         - date.fromisoformat(str(lot["buy_date"]))
@@ -3888,7 +3910,10 @@ def _match_trade_executions(
                 }
             )
             lot["remaining_quantity"] = int(lot["remaining_quantity"]) - matched_quantity
+            lot["remaining_cost_cents"] = int(lot["remaining_cost_cents"]) - cost_cents
             remaining_to_sell -= matched_quantity
+            remaining_gross_proceeds_cents -= gross_proceeds_cents
+            remaining_sell_fee_cents -= sell_fee_cents
         if remaining_to_sell:
             if not permit_unmatched_sells:
                 raise ValueError("卖出记录无法由已有买入记录配对")
@@ -3898,7 +3923,7 @@ def _match_trade_executions(
                     "sell_date": str(row["traded_on"]),
                     "quantity": remaining_to_sell,
                     "price": float(row["price"]),
-                    "fee": round(float(row["fee"]) * remaining_to_sell / int(row["quantity"]), 2),
+                    "fee": remaining_sell_fee_cents / 100,
                     "exit_reason": str(row.get("exit_reason") or ""),
                 }
             )
@@ -3921,10 +3946,13 @@ def _aggregate_completed_trades(
         ordered = sorted(fragments, key=lambda item: (str(item["sell_date"]), str(item["sell_execution_id"])))
         first = dict(ordered[0])
         quantity = sum(int(item["quantity"]) for item in ordered)
-        pnl = sum(float(item["pnl"]) for item in ordered)
+        pnl_cents = sum(int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in ordered)
         gross_pnl = sum(float(item.get("gross_pnl") or 0) for item in ordered)
-        cost = sum(float(item["cost"]) for item in ordered)
-        proceeds = sum(float(item["proceeds"]) for item in ordered)
+        cost_cents = sum(int(item.get("cost_cents", round(float(item["cost"]) * 100))) for item in ordered)
+        proceeds_cents = sum(
+            int(item.get("proceeds_cents", round(float(item["proceeds"]) * 100)))
+            for item in ordered
+        )
         last = ordered[-1]
         stop_price = first.get("initial_stop_price")
         actual_risk = (
@@ -3937,16 +3965,21 @@ def _aggregate_completed_trades(
                 "sell_execution_id": ",".join(str(item["sell_execution_id"]) for item in ordered),
                 "sell_date": str(last["sell_date"]),
                 "quantity": quantity,
-                "cost": round(cost, 2),
-                "proceeds": round(proceeds, 2),
-                "pnl": round(pnl, 2),
+                "cost": cost_cents / 100,
+                "cost_cents": cost_cents,
+                "proceeds": proceeds_cents / 100,
+                "proceeds_cents": proceeds_cents,
+                "pnl": pnl_cents / 100,
+                "pnl_cents": pnl_cents,
                 "gross_pnl": round(gross_pnl, 2),
                 "exit_price": round(
                     sum(float(item["exit_price"]) * int(item["quantity"]) for item in ordered)
                     / quantity,
                     6,
                 ),
-                "return_pct": round(pnl / cost * 100, 2) if cost else None,
+                "return_pct": round(pnl_cents / cost_cents * 100, 2)
+                if cost_cents
+                else None,
                 "holding_days": int(last["holding_days"]),
                 "exit_reason": "；".join(
                     dict.fromkeys(str(item.get("exit_reason") or "") for item in ordered)
@@ -3984,13 +4017,17 @@ def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, An
                 "other_setup_note": lot.get("other_setup_note", ""),
                 "quantity": 0,
                 "cost": 0.0,
+                "cost_cents": 0,
             },
         )
         quantity = int(lot["remaining_quantity"])
         item["quantity"] += quantity
-        item["cost"] += float(lot["unit_cost"]) * quantity
+        item["cost_cents"] += int(lot["remaining_cost_cents"])
     return [
-        {**item, "cost": round(float(item["cost"]), 2)}
+        {
+            **item,
+            "cost": int(item["cost_cents"]) / 100,
+        }
         for item in sorted(
             grouped.values(),
             key=lambda item: (
@@ -4004,15 +4041,22 @@ def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, An
 
 def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     count = len(trades)
-    pnl_values = [float(item["pnl"]) for item in trades]
+    pnl_cents = [
+        int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in trades
+    ]
+    pnl_values = [value / 100 for value in pnl_cents]
     gains = [value for value in pnl_values if value > 0]
     losses = [value for value in pnl_values if value < 0]
-    total_cost = sum(float(item["cost"]) for item in trades)
+    total_cost_cents = sum(
+        int(item.get("cost_cents", round(float(item["cost"]) * 100))) for item in trades
+    )
     r_values = [float(item["r_multiple"]) for item in trades if item.get("r_multiple") is not None]
     return {
         "count": count,
-        "net_pnl": round(sum(pnl_values), 2),
-        "return_pct": round(sum(pnl_values) / total_cost * 100, 2) if total_cost else None,
+        "net_pnl": sum(pnl_cents) / 100,
+        "return_pct": round(sum(pnl_cents) / total_cost_cents * 100, 2)
+        if total_cost_cents
+        else None,
         "win_rate_pct": round(len(gains) / count * 100, 1) if count else None,
         "avg_gain": round(sum(gains) / len(gains), 2) if gains else None,
         "avg_loss": round(sum(losses) / len(losses), 2) if losses else None,
@@ -4026,6 +4070,24 @@ def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if count
         else None,
     }
+
+
+def _money_cents(value: Any) -> int:
+    """Convert one monetary amount to integer fen using financial half-up rounding."""
+    return int(
+        (Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+
+
+def _allocate_cents(total_cents: int, quantity: int, remaining_quantity: int) -> int:
+    """Allocate integer fen proportionally and leave any remainder for the final fragment."""
+    if quantity == remaining_quantity:
+        return total_cents
+    return int(
+        (Decimal(total_cents) * quantity / remaining_quantity).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
 
 
 def _chart_event_label(method: str, state: str) -> str:

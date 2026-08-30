@@ -1716,16 +1716,46 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
     assert bought.status_code == sold.status_code == 303
     assert page.status_code == 200
     assert "实际成交的描述统计，不生成买卖指令" in page.text
-    assert "已完成交易" in page.text
+    assert "完整买入批次" in page.text
     assert "其他（未归入交易计划）" in page.text
     assert "平安银行" in page.text
     assert "000001.SZ" in page.text
     assert "部分止盈" in page.text
-    assert "计划盈亏比" in page.text
+    assert "毛收益R" in page.text
     assert ">1.0</td>" in page.text
     assert "倍初始风险" not in page.text
     assert ">修改</a>" in page.text
     assert "2026-07-31" in page.text
+
+
+def test_trade_review_counts_partial_sell_in_realized_pnl_only(tmp_path):
+    client = _client(tmp_path)
+    client.post(
+        "/a/stocks/000001.SZ/trades",
+        data={
+            "csrf_token": _csrf(client),
+            "traded_on": "2026-07-31", "side": "BUY", "quantity": "100",
+            "price": "10", "fee": "0", "plan_setup_id": "OTHER",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/a/stocks/000001.SZ/trades",
+        data={
+            "csrf_token": _csrf(client),
+            "traded_on": "2026-08-03", "side": "SELL", "quantity": "40",
+            "price": "12", "fee": "0",
+        },
+        follow_redirects=False,
+    )
+
+    page = client.get("/a/review")
+
+    assert page.status_code == 200
+    assert "<span>完整买入批次</span><strong>0</strong>" in page.text
+    assert "<span>已实现净收益</span><strong>80.00 元</strong>" in page.text
+    assert "含未清仓批次的已卖部分" in page.text
+    assert "仅列剩余未卖部分" in page.text
 
 
 def test_web_exit_reason_supports_optional_other_and_legacy_values():
