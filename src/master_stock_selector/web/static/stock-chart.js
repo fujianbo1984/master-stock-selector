@@ -11,6 +11,7 @@
   const textSaveButton = root.querySelector("[data-drawing-text-save]");
   const textCancelButton = root.querySelector("[data-drawing-text-cancel]");
   const volumeInput = root.querySelector("[data-volume]");
+  const tradeInfoInput = root.querySelector("[data-trade-info]");
   const keltnerInput = root.querySelector("[data-keltner]");
   const kcSummary = root.querySelector("[data-kc-summary]");
   const kcPresetInput = root.querySelector("[data-kc-preset]");
@@ -291,7 +292,7 @@
   const renderMarkers = () => {
     if (!payload) return;
     methodEventsById = new Map((payload.method_events || []).map(item => [item.id, item]));
-    const trades = (payload.trade_overlay?.executions || []).map(item => ({
+    const trades = (tradeInfoInput?.checked ? payload.trade_overlay?.executions || [] : []).map(item => ({
       priority: 0,
       marker: {
         id: `trade:${item.execution_id}`, time: item.traded_on,
@@ -568,7 +569,7 @@
       value: row.volume || 0,
       color: row.close >= row.open ? activeCandleStyle.volumeUpColor : activeCandleStyle.volumeDownColor,
     })));
-    if (tradeLegend) tradeLegend.hidden = !(payload.trade_overlay?.executions || []).length;
+    if (tradeLegend) tradeLegend.hidden = !tradeInfoInput?.checked || !(payload.trade_overlay?.executions || []).length;
     syncVolumePane();
     renderMarkers();
     renderFrameworkPanel();
@@ -837,6 +838,9 @@
     if (payload) drawPayload(payload);
     else resize();
   });
+  tradeInfoInput?.addEventListener("change", () => {
+    if (payload) drawPayload(payload);
+  });
   keltnerInput.addEventListener("change", () => { storeLayerSettings(); if (payload) drawPayload(payload); });
   root.querySelectorAll("[data-framework-layer]").forEach(input => input.addEventListener("change", () => {
     storeLayerSettings();
@@ -848,7 +852,7 @@
     const methodEvent = methodEventsById.get(param.hoveredObjectId || "");
     if (methodEvent) { renderMethodEventDetail(methodEvent); return; }
     const selectedDate = chartDate(param.time);
-    const matches = (payload.trade_overlay?.executions || []).filter(item => item.traded_on === selectedDate);
+    const matches = (tradeInfoInput?.checked ? payload.trade_overlay?.executions || [] : []).filter(item => item.traded_on === selectedDate);
     if (matches.length) window.location.assign(`/a/stocks/${encodeURIComponent(symbol)}?edit_trade=${encodeURIComponent(matches[0].execution_id)}#trade-journal`);
   });
   chart.subscribeCrosshairMove((param) => {

@@ -1347,6 +1347,68 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "c1_record" not in api["rows"][0]
 
 
+def test_watch_observation_tags_can_be_added_filtered_and_edited(tmp_path):
+    client = _client(tmp_path)
+    user = client.app.state.user_repository.session_user(
+        client.cookies.get(SESSION_COOKIE)
+    )
+    assert user is not None
+    detail_before = client.get("/a/stocks/000001.SZ?date=2026-07-31")
+    daily_before = client.get("/a/daily?date=2026-07-31&min_cap=0")
+    chart_before = client.get("/a/stocks/000001.SZ/chart?date=2026-07-31")
+    assert '观察标签<input name="tags"' in detail_before.text
+    assert '标签（可选）' in daily_before.text
+    assert 'class="chart-review-tag-input" name="tags"' in chart_before.text
+
+    added = client.post(
+        "/a/stocks/000001.SZ/review",
+        data={
+            "csrf_token": _csrf(client),
+            "manual_state": "WATCH",
+            "tags": "杯柄，等待突破",
+            "note": "等待成交量确认",
+        },
+        follow_redirects=True,
+    )
+    client.app.state.user_repository.save_review(
+        user.user_id, "000002.SZ", "WATCH", "另一只", "低位"
+    )
+
+    filtered = client.get(
+        "/a/observations?date=2026-07-31&state=WATCH&tag=等待突破"
+    )
+    assert added.status_code == 200
+    assert '观察标签<input name="tags" value="杯柄，等待突破"' in added.text
+    assert filtered.status_code == 200
+    assert "等待突破（1）" in filtered.text
+    assert "000001.SZ" in filtered.text
+    assert "000002.SZ" not in filtered.text
+    assert 'name="tags" value="杯柄，等待突破"' in filtered.text
+    assert "保存标签" in filtered.text
+
+    edited = client.post(
+        "/a/stocks/000001.SZ/review",
+        data={
+            "csrf_token": _csrf(client),
+            "manual_state": "WATCH",
+            "tags": "突破后回踩",
+            "return_to": "/a/observations?state=WATCH&date=2026-07-31",
+        },
+        follow_redirects=True,
+    )
+    assert edited.status_code == 200
+    assert client.app.state.user_repository.review(user.user_id, "000001.SZ")["tags"] == [
+        "突破后回踩"
+    ]
+
+    client.app.state.user_repository.save_review(
+        user.user_id, "000001.SZ", "FOCUS", "转为重点"
+    )
+    focus = client.get("/a/observations?date=2026-07-31&state=FOCUS")
+    assert '按标签查询' not in focus.text
+    assert '保存标签' not in focus.text
+
+
 def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tmp_path):
     watchlist_path = tmp_path / "master_watchlist.sqlite3"
     market_path = tmp_path / "market.sqlite3"
@@ -1988,7 +2050,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert 'data-chart-source=' not in page.text
     assert 'data-chart-pane=' not in page.text
-    assert "stock-chart.js?v=20260827-keltner-presets-v1" in page.text
+    assert "stock-chart.js?v=20260831-trade-info-toggle-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert 'data-chart-period-change' in page.text
     assert 'data-chart-ohlcv' in page.text
@@ -2019,6 +2081,8 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-framework-layer="minervini"' in page.text
     assert 'data-framework-layer="weinstein" checked' in page.text
     assert 'data-keltner checked' in page.text
+    assert 'data-trade-info checked' in page.text
+    assert '> 成交信息</label>' in page.text
     assert "A股日线校准：20 / 20 / 2.35" in page.text
     assert "Adam原始参考：20 / 20 / 2.25" in page.text
     assert 'data-kc-atr-length type="number" min="1" max="250" value="20"' in page.text
@@ -2046,6 +2110,12 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     controller = client.get("/static/stock-chart.js").text
     assert 'chartViewStorageKey = "masterstock-chart:view"' in controller
     assert 'chartLayersStorageKey = "masterstock-chart:layers:v3"' in controller
+    assert 'const tradeInfoInput = root.querySelector("[data-trade-info]");' in controller
+    assert "tradeInfoInput?.addEventListener" in controller
+    stored_layer_settings = controller.split("const storeLayerSettings = () =>", 1)[1].split(
+        "const restoreAppearance = () =>", 1
+    )[0]
+    assert "tradeInfoInput.checked" not in stored_layer_settings
     assert 'chartAppearanceStorageKey = "masterstock-chart:appearance:v1"' in controller
     assert 'let candleStyle = "monochrome";' in controller
     assert 'upColor: "#fffdfa", downColor: "#202020", borderVisible: true' in controller

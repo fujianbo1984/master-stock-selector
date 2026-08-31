@@ -116,7 +116,7 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
     assert user_id
 
 
@@ -526,6 +526,67 @@ def test_c1_structure_record_is_validated_scoped_and_preserved_by_review_updates
     assert cleared["c1_record"] == {}
 
 
+def test_observation_tags_are_normalized_validated_and_preserved_across_states(tmp_path):
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("tag-owner", "Secure-password-123")
+
+    repository.save_review(
+        user_id,
+        "000001.SZ",
+        "WATCH",
+        "等待触发",
+        " #杯柄，等待突破,杯柄 ",
+    )
+    assert repository.review(user_id, "000001.SZ")["tags"] == ["杯柄", "等待突破"]
+
+    repository.save_review(user_id, "000001.SZ", "FOCUS", "转为重点")
+    focused = repository.review(user_id, "000001.SZ")
+    assert focused["manual_state"] == "FOCUS"
+    assert focused["tags"] == ["杯柄", "等待突破"]
+
+    with pytest.raises(ValueError, match="20"):
+        repository.save_review(user_id, "000002.SZ", "WATCH", "", "过" * 21)
+    with pytest.raises(ValueError, match="8"):
+        repository.save_review(
+            user_id,
+            "000002.SZ",
+            "WATCH",
+            "",
+            [f"标签{index}" for index in range(9)],
+        )
+
+
+def test_observation_add_cli_writes_watch_tags_for_named_user(tmp_path):
+    path = tmp_path / "users.sqlite3"
+    repository = UserRepository(path)
+    repository.initialize()
+    user_id = repository.create_user("cli-owner", "Secure-password-123")
+
+    command = [
+        sys.executable,
+        "-m",
+        "master_stock_selector.web.users_cli",
+        "--database",
+        str(path),
+        "observation-add",
+        "cli-owner",
+        "000001.sz",
+        "--tag",
+        "杯柄",
+        "--tag",
+        "等待突破",
+        "--note",
+        "CLI 加入",
+    ]
+    completed = subprocess.run(command, check=True, capture_output=True, text=True)
+
+    result = json.loads(completed.stdout)
+    assert result["status"] == "observation-saved"
+    assert result["observation"]["tags"] == ["杯柄", "等待突破"]
+    assert repository.review(user_id, "000001.SZ") == result["observation"]
+
+
 def test_new_trade_without_plan_defaults_to_other(tmp_path):
     repository = UserRepository(tmp_path / "users.sqlite3")
     repository.initialize()
@@ -687,6 +748,29 @@ def test_observation_states_are_compact_and_legacy_rows_migrate_in_place(tmp_pat
         ).fetchone()[0]
     assert "ARCHIVED" in table_sql
     assert "DROPPED" not in table_sql
+
+
+def test_v11_observation_rows_gain_empty_tags_without_data_loss(tmp_path):
+    path = tmp_path / "users.sqlite3"
+    repository = UserRepository(path)
+    repository.initialize()
+    user_id = repository.create_user("v11-owner", "Secure-password-123")
+    repository.save_review(user_id, "000001.SZ", "WATCH", "旧版备注")
+    with repository.connect() as connection:
+        connection.execute("ALTER TABLE user_stock_review DROP COLUMN tags_json")
+        connection.execute("PRAGMA user_version=11")
+
+    status = repository.schema_status()
+    assert status["missing_columns"] == ["user_stock_review.tags_json"]
+    backup = tmp_path / "users-v11.sqlite3"
+    migrated = migrate_user_schema(repository, apply=True, backup=backup)
+
+    assert migrated["status"] == "migrated"
+    review = repository.review(user_id, "000001.SZ")
+    assert review["manual_state"] == "WATCH"
+    assert review["note"] == "旧版备注"
+    assert review["tags"] == []
+    assert repository.schema_status()["schema_version"] == 12
 
 
 def test_legacy_private_data_migration_requires_apply_and_preserves_source(tmp_path):

@@ -53,6 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     reading_import.add_argument("--username", required=True)
     reading_import.add_argument("--apply", action="store_true")
     reading_import.add_argument("--backup", default="")
+    observation_add = subparsers.add_parser(
+        "observation-add", help="为指定账号新增或更新一只“观察中”股票"
+    )
+    observation_add.add_argument("username")
+    observation_add.add_argument("symbol")
+    observation_add.add_argument("--tag", action="append", default=[])
+    observation_add.add_argument("--note", default="")
     return parser
 
 
@@ -105,6 +112,30 @@ def main(argv: list[str] | None = None) -> int:
     if args.action == "reset-password":
         repository.reset_password(args.username, _confirmed_password())
         print(json.dumps({"status": "password-reset", "username": args.username}))
+        return 0
+    if args.action == "observation-add":
+        account = repository.active_user_by_username(args.username)
+        if account is None:
+            raise ValueError("目标账号不存在或已停用")
+        repository.save_review(
+            str(account["user_id"]),
+            args.symbol,
+            "WATCH",
+            args.note,
+            args.tag,
+        )
+        review = repository.review(str(account["user_id"]), args.symbol)
+        print(
+            json.dumps(
+                {
+                    "status": "observation-saved",
+                    "username": str(account["username"]),
+                    "observation": review,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     if args.action == "migrate-legacy":
         result = migrate_legacy_private_data(

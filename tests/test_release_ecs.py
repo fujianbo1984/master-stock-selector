@@ -127,7 +127,7 @@ def test_baseline_and_apply_scripts_keep_safety_contract() -> None:
     assert "users_before" in apply
 
 
-def test_migration_apply_script_freezes_v10_to_v11_contract(tmp_path: Path) -> None:
+def test_migration_apply_script_freezes_v11_to_v12_contract(tmp_path: Path) -> None:
     config = release_ecs.parse_args(
         ["--apply", "--migrate-users", "--confirm-commit", "a" * 40]
     )
@@ -146,12 +146,12 @@ def test_migration_apply_script_freezes_v10_to_v11_contract(tmp_path: Path) -> N
 
     script = release_ecs.apply_script(context)
 
-    assert "users-v10-before-v11-" in script
-    assert "assert USER_SCHEMA_VERSION == 11" in script
-    assert 'assert status["schema_version"] == 10' in script
-    assert 'schema-migrate --apply --backup "$backup"' in script
-    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 10' in script
+    assert "users-v11-before-v12-" in script
+    assert "assert USER_SCHEMA_VERSION == 12" in script
     assert 'assert status["schema_version"] == 11' in script
+    assert 'schema-migrate --apply --backup "$backup"' in script
+    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 11' in script
+    assert 'assert status["schema_version"] == 12' in script
     assert "source.backup(target)" in script
     assert "systemctl stop masterstock-web.service" in script
     assert "systemctl start masterstock-web.service" in script

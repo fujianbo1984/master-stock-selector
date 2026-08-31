@@ -60,6 +60,7 @@ scripts/manage_users.sh schema-check
 scripts/manage_users.sh schema-migrate
 scripts/manage_users.sh schema-migrate --apply --backup /path/to/users-before-migration.sqlite3
 scripts/manage_users.sh create your-name --display-name "显示名称"
+scripts/manage_users.sh observation-add your-name 000001.SZ --tag "等待突破" --tag "杯柄"
 ```
 
 将历史仓库文章迁入站长的私有草稿、冻结版本与共享记录时，必须先预览，

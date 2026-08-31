@@ -39,6 +39,7 @@
           <form method="post" action="/a/stocks/{{ row.symbol }}/review" class="inline-observation-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="manual_state" value="WATCH">
             <input type="hidden" name="return_to" value="/a/daily?{{ filters.query }}#{{ navigation_section }}">
+            <input class="inline-observation-tags" name="tags" maxlength="175" aria-label="{{ row.name }} 观察标签" placeholder="标签（可选）">
             <button class="button button-secondary button-compact" type="submit">+加入观察</button>
           </form>
           {% else %}<span class="manual-state manual-{{ row.manual.manual_state|lower }}">{{ row.manual_label }}</span><a class="text-link" href="/a/observations?state={{ row.manual.manual_state }}">管理</a>{% endif %}

@@ -720,7 +720,7 @@ def apply_script(context: ReleaseContext) -> str:
     before = f"/opt/masterstock.before-{context.short_commit}"
     failed = f"/opt/masterstock.failed-{context.short_commit}"
     backup = (
-        f"/var/backups/masterstock/users-v10-before-v11-{context.release_id}.sqlite3"
+        f"/var/backups/masterstock/users-v11-before-v12-{context.release_id}.sqlite3"
         if context.config.migrate_users
         else f"/var/backups/masterstock/users-release-{context.release_id}.sqlite3"
     )
@@ -732,13 +732,13 @@ def apply_script(context: ReleaseContext) -> str:
 from pathlib import Path
 from master_stock_selector.web.users import USER_SCHEMA_VERSION, UserRepository
 
-assert USER_SCHEMA_VERSION == 11
+assert USER_SCHEMA_VERSION == 12
 status = UserRepository(Path("/var/lib/masterstock/users.sqlite3")).schema_status()
 assert status["quick_check"] == "ok"
-assert status["schema_version"] == 10
-assert status["required_version"] == 11
+assert status["schema_version"] == 11
+assert status["required_version"] == 12
 assert status["missing_tables"] == []
-assert status["missing_columns"] == ["user_stock_review.c1_record_json"]
+assert status["missing_columns"] == ["user_stock_review.tags_json"]
 assert status["missing_indexes"] == []
 assert not status["legacy_observation_states"]
 assert not status["legacy_trade_setups"]
@@ -779,12 +779,12 @@ assert result["backup"]["path"] == sys.argv[2]
 assert result["backup"]["quick_check"] == "ok"
 with sqlite3.connect(f"file:{{sys.argv[2]}}?mode=ro", uri=True) as source:
     assert source.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-    assert source.execute("PRAGMA user_version").fetchone()[0] == 10
+    assert source.execute("PRAGMA user_version").fetchone()[0] == 11
 status = UserRepository(Path("/var/lib/masterstock/users.sqlite3")).schema_status()
-assert USER_SCHEMA_VERSION == 11
+assert USER_SCHEMA_VERSION == 12
 assert status["compatible"] is True
 assert status["quick_check"] == "ok"
-assert status["schema_version"] == 11
+assert status["schema_version"] == 12
 PY
 migration_completed=1
 """

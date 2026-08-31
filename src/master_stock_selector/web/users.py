@@ -67,7 +67,9 @@ C1_STRUCTURE_STATE_LABELS = {
     "INVALID": "结构失效",
 }
 C1_ENTRY_VARIANT_LABELS = {"FIRST": "首次入场", "SECOND": "二次入场"}
-USER_SCHEMA_VERSION = 11
+USER_SCHEMA_VERSION = 12
+OBSERVATION_TAG_MAX_COUNT = 8
+OBSERVATION_TAG_MAX_LENGTH = 20
 DEFAULT_ACCESS_LOG_RETENTION_DAYS = 90
 USER_REQUIRED_TABLES = frozenset(
     {
@@ -254,6 +256,7 @@ CREATE TABLE IF NOT EXISTS user_stock_review (
         manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
     ),
     note TEXT NOT NULL DEFAULT '',
+    tags_json TEXT NOT NULL DEFAULT '[]',
     c1_record_json TEXT NOT NULL DEFAULT '{}',
     reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, symbol),
@@ -551,6 +554,7 @@ class UserRepository:
                     "user_reading_note.assets_json",
                     "user_reading_note_version.assets_json",
                     "user_stock_review.c1_record_json",
+                    "user_stock_review.tags_json",
                 ],
                 "missing_indexes": sorted(USER_REQUIRED_INDEXES),
             }
@@ -642,6 +646,8 @@ class UserRepository:
             missing_columns.append("user_plan_grill_session.head_version_id_at_start")
         if "user_stock_review" in tables and "c1_record_json" not in review_columns:
             missing_columns.append("user_stock_review.c1_record_json")
+        if "user_stock_review" in tables and "tags_json" not in review_columns:
+            missing_columns.append("user_stock_review.tags_json")
         for column in {"content_text", "interval_scope"} - drawing_columns:
             missing_columns.append(f"user_chart_drawing.{column}")
         if "user_reading_note" in tables and "assets_json" not in reading_note_columns:
@@ -735,6 +741,11 @@ class UserRepository:
                 migration_statements.append(
                     "ALTER TABLE user_stock_review "
                     "ADD COLUMN c1_record_json TEXT NOT NULL DEFAULT '{}';"
+                )
+            if review_columns and "tags_json" not in review_columns:
+                migration_statements.append(
+                    "ALTER TABLE user_stock_review "
+                    "ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]';"
                 )
             if reading_note_columns and "assets_json" not in reading_note_columns:
                 migration_statements.append(
@@ -876,6 +887,7 @@ class UserRepository:
                                 manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
                             ),
                             note TEXT NOT NULL DEFAULT '',
+                            tags_json TEXT NOT NULL DEFAULT '[]',
                             c1_record_json TEXT NOT NULL DEFAULT '{}',
                             reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             PRIMARY KEY (user_id, symbol),
@@ -883,14 +895,15 @@ class UserRepository:
                                 ON DELETE CASCADE
                         );""",
                         """INSERT INTO user_stock_review(
-                            user_id, symbol, manual_state, note, c1_record_json, reviewed_at
+                            user_id, symbol, manual_state, note, tags_json,
+                            c1_record_json, reviewed_at
                         )
                         SELECT user_id, symbol,
                                CASE manual_state
                                    WHEN 'DROPPED' THEN 'ARCHIVED'
                                    ELSE manual_state
                                END,
-                               note, c1_record_json, reviewed_at
+                               note, tags_json, c1_record_json, reviewed_at
                         FROM user_stock_review_legacy
                         WHERE manual_state IN ('WATCH', 'FOCUS', 'DROPPED');""",
                         "DROP TABLE user_stock_review_legacy;",
@@ -1029,6 +1042,7 @@ class UserRepository:
             for column in connection.execute("PRAGMA table_info(user_stock_review)")
         }
         c1_expression = "c1_record_json" if "c1_record_json" in columns else "'{}'"
+        tags_expression = "tags_json" if "tags_json" in columns else "'[]'"
         connection.execute("ALTER TABLE user_stock_review RENAME TO user_stock_review_legacy")
         connection.execute(
             """CREATE TABLE user_stock_review (
@@ -1038,6 +1052,7 @@ class UserRepository:
                     manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
                 ),
                 note TEXT NOT NULL DEFAULT '',
+                tags_json TEXT NOT NULL DEFAULT '[]',
                 c1_record_json TEXT NOT NULL DEFAULT '{}',
                 reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (user_id, symbol),
@@ -1046,11 +1061,11 @@ class UserRepository:
         )
         connection.execute(
             f"""INSERT INTO user_stock_review(
-                user_id, symbol, manual_state, note, c1_record_json, reviewed_at
+                user_id, symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
             )
             SELECT user_id, symbol,
                    CASE manual_state WHEN 'DROPPED' THEN 'ARCHIVED' ELSE manual_state END,
-                   note, {c1_expression}, reviewed_at
+                   note, {tags_expression}, {c1_expression}, reviewed_at
             FROM user_stock_review_legacy
             WHERE manual_state IN ('WATCH', 'FOCUS', 'DROPPED')
             """
@@ -1640,7 +1655,7 @@ class UserRepository:
         with self.connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT symbol, manual_state, note, c1_record_json, reviewed_at
+                SELECT symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
                 FROM user_stock_review
                 WHERE user_id=? AND symbol IN ({placeholders})
                 """,
@@ -1653,7 +1668,7 @@ class UserRepository:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT symbol, manual_state, note, c1_record_json, reviewed_at
+                SELECT symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
                 FROM user_stock_review
                 WHERE user_id=?
                 ORDER BY reviewed_at DESC, symbol
@@ -1666,7 +1681,7 @@ class UserRepository:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT symbol, manual_state, note, c1_record_json, reviewed_at
+                SELECT symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
                 FROM user_stock_review WHERE user_id=? AND symbol=?
                 """,
                 (user_id, symbol.upper()),
@@ -1677,11 +1692,19 @@ class UserRepository:
             "symbol": symbol.upper(),
             "manual_state": "UNREVIEWED",
             "note": "",
+            "tags": [],
             "c1_record": {},
             "reviewed_at": "",
         }
 
-    def save_review(self, user_id: str, symbol: str, manual_state: str, note: str) -> None:
+    def save_review(
+        self,
+        user_id: str,
+        symbol: str,
+        manual_state: str,
+        note: str,
+        tags: str | Sequence[str] | None = None,
+    ) -> None:
         state = manual_state.upper()
         if state == "UNREVIEWED":
             with self.connect() as connection:
@@ -1692,19 +1715,41 @@ class UserRepository:
             return
         if state not in {"WATCH", "FOCUS", "ARCHIVED"}:
             raise ValueError(f"unsupported manual state: {manual_state}")
+        normalized_tags = normalize_observation_tags(tags) if tags is not None else None
         with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO user_stock_review(
-                    user_id, symbol, manual_state, note, reviewed_at
-                ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(user_id, symbol) DO UPDATE SET
-                    manual_state=excluded.manual_state,
-                    note=excluded.note,
-                    reviewed_at=CURRENT_TIMESTAMP
-                """,
-                (user_id, symbol.upper(), state, note.strip()),
-            )
+            if normalized_tags is None:
+                connection.execute(
+                    """
+                    INSERT INTO user_stock_review(
+                        user_id, symbol, manual_state, note, reviewed_at
+                    ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id, symbol) DO UPDATE SET
+                        manual_state=excluded.manual_state,
+                        note=excluded.note,
+                        reviewed_at=CURRENT_TIMESTAMP
+                    """,
+                    (user_id, symbol.upper(), state, note.strip()),
+                )
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO user_stock_review(
+                        user_id, symbol, manual_state, note, tags_json, reviewed_at
+                    ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id, symbol) DO UPDATE SET
+                        manual_state=excluded.manual_state,
+                        note=excluded.note,
+                        tags_json=excluded.tags_json,
+                        reviewed_at=CURRENT_TIMESTAMP
+                    """,
+                    (
+                        user_id,
+                        symbol.upper(),
+                        state,
+                        note.strip(),
+                        json.dumps(normalized_tags, ensure_ascii=False),
+                    ),
+                )
 
     def save_c1_record(
         self, user_id: str, symbol: str, payload: Mapping[str, Any]
@@ -2821,6 +2866,16 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
 
 def _review_value(row: Mapping[str, Any]) -> dict[str, Any]:
     value = dict(row)
+    raw_tags = value.pop("tags_json", "[]")
+    try:
+        tags = json.loads(str(raw_tags or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        tags = []
+    value["tags"] = (
+        [str(tag) for tag in tags if isinstance(tag, str)]
+        if isinstance(tags, list)
+        else []
+    )
     raw = value.pop("c1_record_json", "{}")
     try:
         record = json.loads(str(raw or "{}"))
@@ -2843,6 +2898,29 @@ def _review_value(row: Mapping[str, Any]) -> dict[str, Any]:
             record["range_height_atr"] = None
     value["c1_record"] = record
     return value
+
+
+def normalize_observation_tags(tags: str | Sequence[str]) -> list[str]:
+    values = [tags] if isinstance(tags, str) else list(tags)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for candidate in str(value).replace("，", ",").split(","):
+            tag = candidate.strip().lstrip("#").strip()
+            if not tag:
+                continue
+            if len(tag) > OBSERVATION_TAG_MAX_LENGTH:
+                raise ValueError(
+                    f"单个观察标签不能超过 {OBSERVATION_TAG_MAX_LENGTH} 个字符"
+                )
+            key = tag.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(tag)
+    if len(normalized) > OBSERVATION_TAG_MAX_COUNT:
+        raise ValueError(f"每只股票最多保存 {OBSERVATION_TAG_MAX_COUNT} 个观察标签")
+    return normalized
 
 
 def _validated_c1_record(payload: Mapping[str, Any]) -> dict[str, Any]:

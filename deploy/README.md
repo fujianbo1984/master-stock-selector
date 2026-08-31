@@ -24,9 +24,9 @@ scripts/release_ecs.sh --apply --migrate-users \
   --confirm-commit "$(git rev-parse HEAD)"
 ```
 
-该模式目前只接受 v10→v11 的已知迁移合同，先停止 Web，在
-`/var/backups/masterstock` 创建 v10 备份并核验，再迁移和原子切换。新服务启动或终验
-失败时，同时恢复旧代码和 v10 用户库。行情库与观察池库只核对指纹，不迁移或替换。
+该模式目前只接受 v11→v12 的已知迁移合同，先停止 Web，在
+`/var/backups/masterstock` 创建 v11 备份并核验，再迁移和原子切换。新服务启动或终验
+失败时，同时恢复旧代码和 v11 用户库。行情库与观察池库只核对指纹，不迁移或替换。
 
 发布器只归档已提交的 `HEAD`，禁止数据库、`.env`、日志、备份和个人数据进入归档。
 默认使用 Cloud Assistant，不修改 SSH、UFW 或安全组。远端候选使用
@@ -61,7 +61,7 @@ HTTPS 模板对动态请求设置了按来源 IP 的限速和并发上限，静�
   HTTPS 登录后改为 `1`。Agent CLI 使用 Bearer Token，通过 SSH 隧道访问回环 HTTP
   不依赖会话 Cookie，仍可继续使用。
 
-个人交易方案归属快照、阅读感想版本与共享记录，以及访问日志匿名汇总与保留期使用用户库 schema v10。上线前先停止 Web，用
+个人交易方案归属快照、阅读感想版本与共享记录，以及访问日志匿名汇总、保留期与观察标签使用用户库 schema v12。上线前先停止 Web，用
 `scripts/manage_users.sh schema-migrate --apply --backup <未存在的备份路径>` 在 ECS
 权威用户库上显式迁移，不得上传本地数据库覆盖。随后先预览
 `scripts/manage_users.sh reading-import-static --username <站长用户名>`，再使用新的未存在

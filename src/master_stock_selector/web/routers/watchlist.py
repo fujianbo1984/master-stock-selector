@@ -32,6 +32,7 @@ from ..users import (
     OTHER_SETUP_LABEL,
     AuthenticatedUser,
     UserRepository,
+    normalize_observation_tags,
 )
 from .auth import current_user, require_user
 
@@ -547,6 +548,7 @@ def build_watchlist_router(
         request: Request,
         date: str | None = None,
         state: str = "WATCH",
+        tag: str = "",
     ) -> Response:
         user = current_user(request)
         if user is None:
@@ -556,6 +558,12 @@ def build_watchlist_router(
             selected_state = "WATCH"
         query_date = _selected_date(repository, date, market_reader)
         reviews = users.reviews_for_user(user.user_id)
+        selected_tag = ""
+        if selected_state == "WATCH" and tag.strip():
+            try:
+                selected_tag = (normalize_observation_tags(tag) or [""])[0]
+            except ValueError:
+                selected_tag = ""
         reviews_by_symbol = {str(row["symbol"]): row for row in reviews}
         public_by_symbol = {
             str(row.get("symbol") or ""): row
@@ -583,6 +591,22 @@ def build_watchlist_router(
         visible_items = [
             item for item in items if item["manual"]["manual_state"] == selected_state
         ]
+        watch_tags: dict[str, int] = {}
+        for item in items:
+            if item["manual"]["manual_state"] != "WATCH":
+                continue
+            for item_tag in item["manual"].get("tags", []):
+                watch_tags[item_tag] = watch_tags.get(item_tag, 0) + 1
+        if selected_tag:
+            visible_items = [
+                item
+                for item in visible_items
+                if selected_tag.casefold()
+                in {str(item_tag).casefold() for item_tag in item["manual"].get("tags", [])}
+            ]
+        observation_query = {"state": selected_state, "date": query_date}
+        if selected_state == "WATCH" and selected_tag:
+            observation_query["tag"] = selected_tag
         return render(
             request,
             "ashare/personal_observations.html",
@@ -591,6 +615,19 @@ def build_watchlist_router(
                 "query_date": query_date,
                 "latest_date": repository.latest_fact_date(),
                 "selected_state": selected_state,
+                "selected_tag": selected_tag,
+                "watch_tags": [
+                    {"label": label, "count": count}
+                    for label, count in sorted(watch_tags.items())
+                ],
+                "state_urls": {
+                    value: f"/a/observations?{urlencode({'state': value, 'date': query_date})}"
+                    for value in ("WATCH", "FOCUS", "ARCHIVED")
+                },
+                "watch_list_path": (
+                    f"/a/observations?{urlencode({'state': 'WATCH', 'date': query_date})}"
+                ),
+                "return_path": f"/a/observations?{urlencode(observation_query)}",
                 "counts": counts,
                 "items": visible_items,
                 "manual_labels": MANUAL_LABELS,
@@ -1437,6 +1474,7 @@ def build_watchlist_router(
         require_csrf(request, user, str((values.get("csrf_token") or [""])[0]))
         state = str((values.get("manual_state") or ["UNREVIEWED"])[0])
         note_values = values.get("note")
+        tag_values = values.get("tags")
         note = (
             str(note_values[0])
             if note_values is not None
@@ -1444,7 +1482,13 @@ def build_watchlist_router(
         )
         return_to = str((values.get("return_to") or [""])[0])
         try:
-            users.save_review(user.user_id, symbol, state, note)
+            users.save_review(
+                user.user_id,
+                symbol,
+                state,
+                note,
+                str(tag_values[0]) if tag_values is not None else None,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         chart_prefix = f"/a/stocks/{symbol.upper()}/chart"
