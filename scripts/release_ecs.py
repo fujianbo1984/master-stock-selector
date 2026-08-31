@@ -837,10 +837,10 @@ source = sqlite3.connect(f"file:{{backup_path}}?mode=ro", uri=True)
 target = sqlite3.connect("/var/lib/masterstock/users.sqlite3")
 try:
     assert source.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-    assert source.execute("PRAGMA user_version").fetchone()[0] == 10
+    assert source.execute("PRAGMA user_version").fetchone()[0] == 11
     source.backup(target)
     assert target.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-    assert target.execute("PRAGMA user_version").fetchone()[0] == 10
+    assert target.execute("PRAGMA user_version").fetchone()[0] == 11
 finally:
     target.close()
     source.close()

@@ -151,6 +151,9 @@ def test_migration_apply_script_freezes_v11_to_v12_contract(tmp_path: Path) -> N
     assert 'assert status["schema_version"] == 11' in script
     assert 'schema-migrate --apply --backup "$backup"' in script
     assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 11' in script
+    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 10' not in script
+    assert 'assert target.execute("PRAGMA user_version").fetchone()[0] == 11' in script
+    assert 'assert target.execute("PRAGMA user_version").fetchone()[0] == 10' not in script
     assert 'assert status["schema_version"] == 12' in script
     assert "source.backup(target)" in script
     assert "systemctl stop masterstock-web.service" in script
