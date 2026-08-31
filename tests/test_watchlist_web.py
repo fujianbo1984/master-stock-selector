@@ -1384,6 +1384,9 @@ def test_watch_observation_tags_can_be_added_filtered_and_edited(tmp_path):
     assert "000001.SZ" in filtered.text
     assert "000002.SZ" not in filtered.text
     assert 'name="tags" value="杯柄，等待突破"' in filtered.text
+    assert '<details class="observation-tag-editor">' in filtered.text
+    assert '<summary class="text-link">修改标签</summary>' in filtered.text
+    assert '<form class="observation-tag-editor"' not in filtered.text
     assert "保存标签" in filtered.text
 
     edited = client.post(
@@ -1406,6 +1409,7 @@ def test_watch_observation_tags_can_be_added_filtered_and_edited(tmp_path):
     )
     focus = client.get("/a/observations?date=2026-07-31&state=FOCUS")
     assert '按标签查询' not in focus.text
+    assert '修改标签' not in focus.text
     assert '保存标签' not in focus.text
 
 
@@ -2059,7 +2063,14 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-draw-tool="trendline" aria-label="趋势线"' in page.text
     assert 'data-draw-tool="horizontal" aria-label="水平线"' in page.text
     assert 'data-draw-tool="text" aria-label="文字标记"' in page.text
-    assert "lucide-trending-up.svg" in page.text
+    assert "lucide-trend-line.svg" in page.text
+    assert "lucide-trending-up.svg" not in page.text
+    trendline_icon = (
+        PROJECT_ROOT
+        / "src/master_stock_selector/web/static/vendor/lucide-trend-line.svg"
+    ).read_text()
+    assert trendline_icon.count("<path") == 1
+    assert 'd="M4 18 20 6"' in trendline_icon
     assert "lucide-minus.svg" in page.text
     assert "lucide-type.svg" in page.text
     assert "data-drawing-text-editor hidden" in page.text

@@ -228,6 +228,20 @@ def _dispatch_agent(
             f"/api/v1/trades/{execution_id}/stop",
             stop_payload,
         )
+    if action == "set-time":
+        if not args.commit:
+            parser.error("set-time 会补全既有交易的成交时间；必须显式传入 --commit")
+        execution_id = urllib.parse.quote(str(args.execution_id), safe="")
+        return _request_json(
+            base_url,
+            token,
+            "PATCH",
+            f"/api/v1/trades/{execution_id}/time",
+            {
+                "traded_at": args.traded_at,
+                "expected_revision": args.expected_revision,
+            },
+        )
     parser.error("unknown trades action")
     return {}
 

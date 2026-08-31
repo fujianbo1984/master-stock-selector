@@ -2481,6 +2481,92 @@ class UserRepository:
         item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
         return item
 
+    def complete_trade_time(
+        self,
+        user_id: str,
+        execution_id: str,
+        traded_at: str,
+        *,
+        expected_revision: int,
+        principal: ApiTokenPrincipal,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Fill a missing execution time without turning the Agent API into a general editor."""
+        if principal.user_id != user_id:
+            raise ValueError("Token 与交易用户不匹配")
+        normalized_time = str(traded_at or "").strip()
+        try:
+            datetime.strptime(normalized_time, "%H:%M:%S")
+        except ValueError as exc:
+            raise ValueError("成交时间必须为 HH:MM:SS") from exc
+        normalized_revision = _strict_positive_integer(
+            expected_revision, field="expected_revision"
+        )
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current_row = connection.execute(
+                """
+                SELECT * FROM user_trade_execution
+                WHERE user_id=? AND execution_id=?
+                """,
+                (user_id, execution_id),
+            ).fetchone()
+            if current_row is None:
+                raise ValueError("成交记录不存在")
+            current = dict(current_row)
+            if int(current.get("revision") or 1) != normalized_revision:
+                raise TradeRevisionConflict("成交记录已变化，请重新读取后再更新")
+            if str(current.get("traded_at") or "").strip():
+                raise ValueError("成交时间已存在；set-time 只能补全空时间")
+            rows = self._trade_rows(connection, user_id)
+            for row in rows:
+                if str(row["execution_id"]) == execution_id:
+                    row["traded_at"] = normalized_time
+                    break
+            ordered = sorted(
+                rows,
+                key=lambda row: (
+                    str(row["traded_on"]),
+                    str(row.get("traded_at") or ""),
+                    str(row.get("created_at") or ""),
+                    str(row["execution_id"]),
+                ),
+            )
+            _match_trade_executions(ordered)
+            cursor = connection.execute(
+                """
+                UPDATE user_trade_execution
+                SET traded_at=?, revision=revision + 1, updated_at=CURRENT_TIMESTAMP
+                WHERE user_id=? AND execution_id=? AND revision=? AND traded_at=''
+                """,
+                (normalized_time, user_id, execution_id, normalized_revision),
+            )
+            if cursor.rowcount != 1:
+                raise TradeRevisionConflict("成交记录已变化，请重新读取后再更新")
+            updated = connection.execute(
+                """
+                SELECT * FROM user_trade_execution
+                WHERE user_id=? AND execution_id=?
+                """,
+                (user_id, execution_id),
+            ).fetchone()
+            assert updated is not None
+            self._insert_api_audit(
+                connection,
+                principal,
+                action="trades.time",
+                request_id=request_id,
+                outcome="UPDATED",
+                details={
+                    "execution_id": execution_id,
+                    "traded_at": normalized_time,
+                    "revision": int(updated["revision"]),
+                },
+            )
+        item = dict(updated)
+        item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
+        return item
+
     def _prepare_trade_batch(
         self,
         connection: sqlite3.Connection,

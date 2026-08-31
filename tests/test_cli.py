@@ -343,6 +343,57 @@ def test_agent_cli_sends_integer_revision_when_updating_stop(monkeypatch) -> Non
     ]
 
 
+def test_agent_cli_requires_commit_and_sends_revision_when_completing_trade_time(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def fake_request(base_url, token, method, path, body=None, *, headers=None):
+        calls.append((method, path, body))
+        return {"status": "UPDATED", "revision": 2}
+
+    monkeypatch.setenv("MASTERSTOCK_AGENT_TOKEN", "mst_test-token")
+    monkeypatch.setattr("master_stock_selector.commands.agent._request_json", fake_request)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "agent",
+                "trades",
+                "set-time",
+                "execution-1",
+                "09:30:24",
+                "--expected-revision",
+                "1",
+            ]
+        )
+    assert exc_info.value.code == 2
+    assert calls == []
+
+    assert (
+        main(
+            [
+                "agent",
+                "trades",
+                "set-time",
+                "execution-1",
+                "09:30:24",
+                "--expected-revision",
+                "1",
+                "--commit",
+            ]
+        )
+        == 0
+    )
+    assert calls == [
+        (
+            "PATCH",
+            "/api/v1/trades/execution-1/time",
+            {"traded_at": "09:30:24", "expected_revision": 1},
+        )
+    ]
+
+
 def test_agent_cli_refuses_bearer_token_over_public_http(monkeypatch) -> None:
     monkeypatch.setenv("MASTERSTOCK_AGENT_TOKEN", "mst_test-token")
 

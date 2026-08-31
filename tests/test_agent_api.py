@@ -218,6 +218,60 @@ def test_agent_api_preflight_atomic_commit_idempotency_and_stop_update(tmp_path)
     assert client.get("/api/v1/trades", headers=headers).json()["count"] == 3
 
 
+def test_agent_api_completes_only_missing_trade_time_with_revision_guard(tmp_path) -> None:
+    client = _client(tmp_path)
+    users, user = _principal(client)
+    token, _ = users.create_api_token(user.user_id, "time-completer")
+    headers = _token_headers(token)
+    payload = {
+        "trades": [
+            {
+                "symbol": "000001.SZ",
+                "traded_on": "2026-08-01",
+                "side": "BUY",
+                "quantity": 100,
+                "price": 10.0,
+            }
+        ]
+    }
+    committed = client.post(
+        "/api/v1/trades/batch",
+        headers=_token_headers(token, key="missing-time"),
+        json=payload,
+    )
+    assert committed.status_code == 200
+    execution_id = committed.json()["results"][0]["execution_id"]
+
+    invalid = client.patch(
+        f"/api/v1/trades/{execution_id}/time",
+        headers=headers,
+        json={"traded_at": "9:30", "expected_revision": 1},
+    )
+    assert invalid.status_code == 422
+    assert "HH:MM:SS" in invalid.json()["detail"]
+
+    completed = client.patch(
+        f"/api/v1/trades/{execution_id}/time",
+        headers=headers,
+        json={"traded_at": "09:30:24", "expected_revision": 1},
+    )
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "UPDATED"
+    assert completed.json()["revision"] == 2
+    assert completed.json()["trade"]["traded_at"] == "09:30:24"
+
+    repeated = client.patch(
+        f"/api/v1/trades/{execution_id}/time",
+        headers=headers,
+        json={"traded_at": "09:31:00", "expected_revision": 2},
+    )
+    assert repeated.status_code == 422
+    assert "只能补全空时间" in repeated.json()["detail"]
+    stored = client.get(f"/api/v1/trades/{execution_id}", headers=headers).json()["trade"]
+    assert stored["traded_at"] == "09:30:24"
+    assert stored["revision"] == 2
+
+
 def test_agent_api_rejects_oversell_atomically_and_enforces_scopes(tmp_path) -> None:
     client = _client(tmp_path)
     users, user = _principal(client)

@@ -426,6 +426,53 @@ def build_agent_api_router(
             receipt["trade"] = trade
         return receipt
 
+    @router.patch("/trades/{execution_id}/time")
+    async def complete_trade_time(request: Request, execution_id: str) -> dict[str, Any]:
+        principal = require_token(request, "trades:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        try:
+            if "traded_at" not in payload:
+                raise ValueError("缺少 traded_at")
+            expected_revision = payload.get("expected_revision")
+            if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+                raise ValueError("expected_revision 必须为正整数")
+            trade = users.complete_trade_time(
+                principal.user_id,
+                execution_id,
+                str(payload["traded_at"]),
+                expected_revision=expected_revision,
+                principal=principal,
+                request_id=rid,
+            )
+        except TradeRevisionConflict as exc:
+            users.audit_api_action(
+                principal,
+                action="trades.time",
+                request_id=rid,
+                outcome="CONFLICT",
+                details={"execution_id": execution_id},
+            )
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (TypeError, ValueError) as exc:
+            users.audit_api_action(
+                principal,
+                action="trades.time",
+                request_id=rid,
+                outcome="REJECTED",
+                details={"execution_id": execution_id},
+            )
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        receipt: dict[str, Any] = {
+            "request_id": rid,
+            "status": "UPDATED",
+            "execution_id": execution_id,
+            "revision": int(trade["revision"]),
+        }
+        if "trades:read" in principal.scopes:
+            receipt["trade"] = trade
+        return receipt
+
     @router.get("/plans/current")
     def current_plan(request: Request) -> dict[str, Any]:
         principal = require_token(request, "plans:read")

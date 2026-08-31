@@ -169,6 +169,7 @@ export MASTERSTOCK_AGENT_TOKEN
 .venv/bin/masterstock agent me
 .venv/bin/masterstock agent trades validate trades.json
 .venv/bin/masterstock agent trades import trades.json --commit
+.venv/bin/masterstock agent trades set-time EXECUTION_ID 09:30:24 --expected-revision 1 --commit
 ```
 
 登录用户也可以在网站“阅读感想”工作区或 Agent CLI 中编写私有感想。

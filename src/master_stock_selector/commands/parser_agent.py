@@ -48,6 +48,12 @@ def register_agent(subparsers: SubparserRegistry) -> None:
     stop.add_argument("--expected-revision", type=int, required=True)
     stop.add_argument("--commit", action="store_true", help="确认修改止损")
 
+    trade_time = trade_actions.add_parser("set-time", help="补全既有交易的成交时间")
+    trade_time.add_argument("execution_id")
+    trade_time.add_argument("traded_at", help="成交时间，格式 HH:MM:SS")
+    trade_time.add_argument("--expected-revision", type=int, required=True)
+    trade_time.add_argument("--commit", action="store_true", help="确认补全成交时间")
+
     plans = actions.add_parser("plans", help="读取或讨论个人交易计划")
     plan_actions = plans.add_subparsers(dest="plan_action", required=True)
     plan_actions.add_parser("current")
