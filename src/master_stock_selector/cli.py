@@ -43,10 +43,17 @@ def load_local_env(path: str | Path = ".env") -> set[str]:
     """Load local overrides before parser defaults are evaluated."""
 
     env_path = Path(path)
-    if not env_path.exists():
+    try:
+        if not env_path.exists():
+            return set()
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, PermissionError):
+        # The local dotenv file is optional. Production services receive their
+        # configuration through systemd's EnvironmentFile and may deliberately
+        # deny access to files in the working directory.
         return set()
     inserted: set[str] = set()
-    for line in env_path.read_text(encoding="utf-8").splitlines():
+    for line in lines:
         text = line.strip()
         if not text or text.startswith("#") or "=" not in text:
             continue

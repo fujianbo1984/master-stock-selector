@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from master_stock_selector.cli import main
+from master_stock_selector.cli import load_local_env, main
 from master_stock_selector.commands.diagnostics import evaluate_freshness
 from master_stock_selector.commands.dispatch import COMMAND_HANDLERS
 from master_stock_selector.web.users import UserRepository
@@ -41,6 +43,21 @@ def test_cli_exposes_only_current_product_commands(capsys) -> None:
     assert "vcp" not in output.lower()
     assert "etf" not in output.lower()
     assert "northstar" not in output.lower()
+
+
+def test_load_local_env_ignores_inaccessible_optional_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / ".env"
+
+    def deny_access(*args: object, **kwargs: object) -> None:
+        raise PermissionError("sandbox denied optional dotenv")
+
+    monkeypatch.setattr(type(env_file), "exists", deny_access)
+    monkeypatch.delenv("MASTERSTOCK_OPTIONAL_ENV_TEST", raising=False)
+
+    assert load_local_env(env_file) == set()
+    assert "MASTERSTOCK_OPTIONAL_ENV_TEST" not in os.environ
 
 
 def _seed_diagnostic_databases(tmp_path, trade_date="2026-08-25"):
