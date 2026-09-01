@@ -167,6 +167,7 @@ Agent Token 由用户在“账户设置”中创建，建议一台设备或一�
 read -s MASTERSTOCK_AGENT_TOKEN
 export MASTERSTOCK_AGENT_TOKEN
 .venv/bin/masterstock agent me
+.venv/bin/masterstock agent observations add 600988.SH --tag "等待突破" --commit
 .venv/bin/masterstock agent trades validate trades.json
 .venv/bin/masterstock agent trades import trades.json --commit
 .venv/bin/masterstock agent trades set-time EXECUTION_ID 09:30:24 --expected-revision 1 --commit

@@ -300,6 +300,52 @@ def test_agent_cli_help_discloses_the_production_domain(capsys) -> None:
     assert "MASTERSTOCK_AGENT_URL" in output
 
 
+def test_agent_cli_requires_commit_and_adds_observation(monkeypatch) -> None:
+    calls = []
+
+    def fake_request(base_url, token, method, path, body=None, *, headers=None):
+        calls.append((method, path, body))
+        return {"status": "ADDED"}
+
+    monkeypatch.setenv("MASTERSTOCK_AGENT_TOKEN", "mst_test-token")
+    monkeypatch.setattr("master_stock_selector.commands.agent._request_json", fake_request)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["agent", "observations", "add", "000001.sz"])
+    assert exc_info.value.code == 2
+    assert calls == []
+
+    assert (
+        main(
+            [
+                "agent",
+                "observations",
+                "add",
+                "000001.sz",
+                "--tag",
+                "杯柄",
+                "--tag",
+                "等待突破",
+                "--note",
+                "CLI 加入",
+                "--commit",
+            ]
+        )
+        == 0
+    )
+    assert calls == [
+        (
+            "POST",
+            "/api/v1/observations",
+            {
+                "symbol": "000001.SZ",
+                "tags": ["杯柄", "等待突破"],
+                "note": "CLI 加入",
+            },
+        )
+    ]
+
+
 def test_agent_cli_requires_explicit_commit_for_stop(monkeypatch) -> None:
     monkeypatch.setenv("MASTERSTOCK_AGENT_TOKEN", "mst_test-token")
 

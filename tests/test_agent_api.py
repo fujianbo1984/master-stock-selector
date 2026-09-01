@@ -33,6 +33,7 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
     assert 'aria-current="page"' in page.text
     assert '<option value="365" selected>365 天</option>' in page.text
     for scope in (
+        "observations:write",
         "trades:read",
         "trades:write",
         "plans:read",
@@ -48,6 +49,7 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
             "csrf_token": _csrf(client),
             "name": "Codex Agent",
             "expires_days": "90",
+            "observations:write": "on",
             "trades:read": "on",
             "trades:write": "on",
             "plans:read": "on",
@@ -64,6 +66,7 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
     assert len(tokens) == 1
     assert tokens[0]["active"] is True
     assert tokens[0]["scopes"] == [
+        "observations:write",
         "plans:read",
         "plans:write",
         "trades:read",
@@ -83,6 +86,57 @@ def test_user_creates_one_time_agent_token_and_can_revoke_it(tmp_path) -> None:
     )
     assert revoked.status_code == 303
     assert users.list_api_tokens(user.user_id)[0]["active"] is False
+
+
+def test_agent_api_adds_observation_idempotently_and_enforces_scope(tmp_path) -> None:
+    client = _client(tmp_path)
+    users, user = _principal(client)
+    token, _ = users.create_api_token(
+        user.user_id, "observation-writer", scopes=("observations:write",)
+    )
+    trade_token, _ = users.create_api_token(
+        user.user_id, "trade-only", scopes=("trades:write",)
+    )
+    payload = {
+        "symbol": "000001.sz",
+        "tags": ["#杯柄", "等待突破", "杯柄"],
+        "note": "CLI 加入",
+    }
+
+    forbidden = client.post(
+        "/api/v1/observations", headers=_token_headers(trade_token), json=payload
+    )
+    assert forbidden.status_code == 403
+
+    added = client.post(
+        "/api/v1/observations", headers=_token_headers(token), json=payload
+    )
+    assert added.status_code == 200
+    assert added.json()["status"] == "ADDED"
+    assert added.json()["observation"]["symbol"] == "000001.SZ"
+    assert added.json()["observation"]["manual_state"] == "WATCH"
+    assert added.json()["observation"]["tags"] == ["杯柄", "等待突破"]
+    assert added.json()["observation"]["note"] == "CLI 加入"
+
+    users.save_review(user.user_id, "000001.SZ", "FOCUS", "保留重点状态")
+    repeated = client.post(
+        "/api/v1/observations",
+        headers=_token_headers(token),
+        json={"symbol": "000001.SZ", "tags": ["新标签"], "note": "不应覆盖"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "ALREADY_PRESENT"
+    assert repeated.json()["observation"]["manual_state"] == "FOCUS"
+    assert repeated.json()["observation"]["note"] == "保留重点状态"
+    assert repeated.json()["observation"]["tags"] == ["杯柄", "等待突破"]
+
+    unknown = client.post(
+        "/api/v1/observations",
+        headers=_token_headers(token),
+        json={"symbol": "999999.SZ"},
+    )
+    assert unknown.status_code == 422
+    assert "观察池事实" in unknown.json()["detail"]
 
 
 def test_agent_api_preflight_atomic_commit_idempotency_and_stop_update(tmp_path) -> None:

@@ -42,6 +42,7 @@ API_TOKEN_DEFAULT_EXPIRES_DAYS = 365
 API_TOKEN_MAX_EXPIRES_DAYS = 365
 API_TOKEN_SCOPES = frozenset(
     {
+        "observations:write",
         "trades:read",
         "trades:write",
         "plans:read",

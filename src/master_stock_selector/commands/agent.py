@@ -178,6 +178,22 @@ def _dispatch_agent(
                 base_url, token, "POST", f"/api/v1/reading/{note_id}/share/stop", {}
             )
         parser.error("unknown reading action")
+    if args.agent_action == "observations":
+        if args.observation_action == "add":
+            if not args.commit:
+                parser.error("observations add 会写入我的观察；必须显式传入 --commit")
+            return _request_json(
+                base_url,
+                token,
+                "POST",
+                "/api/v1/observations",
+                {
+                    "symbol": str(args.symbol).upper(),
+                    "tags": list(args.tag),
+                    "note": args.note,
+                },
+            )
+        parser.error("unknown observations action")
     if args.agent_action != "trades":
         parser.error("unknown agent action")
     action = str(args.trade_action)

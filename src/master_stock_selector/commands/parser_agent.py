@@ -22,6 +22,18 @@ def register_agent(subparsers: SubparserRegistry) -> None:
     actions = parser.add_subparsers(dest="agent_action", required=True)
     actions.add_parser("me", help="验证 Token 和当前账户")
 
+    observations = actions.add_parser("observations", help="管理当前账号的“我的观察”")
+    observation_actions = observations.add_subparsers(
+        dest="observation_action", required=True
+    )
+    observation_add = observation_actions.add_parser(
+        "add", help="将大师观察池股票加入“我的观察”"
+    )
+    observation_add.add_argument("symbol")
+    observation_add.add_argument("--tag", action="append", default=[])
+    observation_add.add_argument("--note", default="")
+    observation_add.add_argument("--commit", action="store_true", help="确认加入我的观察")
+
     trades = actions.add_parser("trades", help="预检、批量录入和查询交易")
     trade_actions = trades.add_subparsers(dest="trade_action", required=True)
 

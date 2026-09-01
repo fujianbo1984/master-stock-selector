@@ -154,6 +154,7 @@ def build_auth_router(
                 )
             )
             available_scopes = [
+                "observations:write",
                 "trades:read",
                 "trades:write",
                 "plans:read",

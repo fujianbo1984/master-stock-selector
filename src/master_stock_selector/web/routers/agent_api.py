@@ -149,6 +149,53 @@ def build_agent_api_router(
         if principal.username.casefold() != site_owner_username.casefold():
             raise HTTPException(status_code=403, detail="阅读感想功能暂未对其他用户开放")
 
+    @router.post("/observations")
+    async def add_observation(request: Request) -> dict[str, Any]:
+        principal = require_token(request, "observations:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        symbol = str(payload.get("symbol") or "").upper().strip()
+        tags = payload.get("tags", [])
+        note = payload.get("note", "")
+        try:
+            if not symbol or "." not in symbol:
+                raise ValueError("股票代码格式不正确")
+            if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+                raise ValueError("tags 必须为字符串数组")
+            if not isinstance(note, str):
+                raise ValueError("note 必须为字符串")
+            detail = repository.stock_detail(symbol)
+            if not detail.get("latest"):
+                raise ValueError("该股票没有可用的大师观察池事实")
+            existing = users.review(principal.user_id, symbol)
+            if existing["manual_state"] == "UNREVIEWED":
+                users.save_review(principal.user_id, symbol, "WATCH", note, tags)
+                status = "ADDED"
+            else:
+                status = "ALREADY_PRESENT"
+            observation = users.review(principal.user_id, symbol)
+        except (TypeError, ValueError) as exc:
+            users.audit_api_action(
+                principal,
+                action="observations.add",
+                request_id=rid,
+                outcome="REJECTED",
+                details={"symbol": symbol},
+            )
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal,
+            action="observations.add",
+            request_id=rid,
+            outcome=status,
+            details={"symbol": symbol},
+        )
+        return {
+            "request_id": rid,
+            "status": status,
+            "observation": observation,
+        }
+
     @router.get("/me")
     def me(request: Request) -> dict[str, Any]:
         principal = require_token(request)
