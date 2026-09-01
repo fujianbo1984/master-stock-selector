@@ -33,6 +33,13 @@ def register_agent(subparsers: SubparserRegistry) -> None:
     observation_add.add_argument("--tag", action="append", default=[])
     observation_add.add_argument("--note", default="")
     observation_add.add_argument("--commit", action="store_true", help="确认加入我的观察")
+    observation_import = observation_actions.add_parser(
+        "import", help="从文本文件批量加入“我的观察”"
+    )
+    observation_import.add_argument("file", help="每行一个股票代码；使用 - 从标准输入读取")
+    observation_import.add_argument("--tag", action="append", default=[])
+    observation_import.add_argument("--note", default="")
+    observation_import.add_argument("--commit", action="store_true", help="确认批量加入")
 
     trades = actions.add_parser("trades", help="预检、批量录入和查询交易")
     trade_actions = trades.add_subparsers(dest="trade_action", required=True)

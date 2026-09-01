@@ -196,6 +196,49 @@ def build_agent_api_router(
             "observation": observation,
         }
 
+    @router.post("/observations/batch")
+    async def add_observations_batch(request: Request) -> dict[str, Any]:
+        principal = require_token(request, "observations:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        raw_symbols = payload.get("symbols")
+        tags = payload.get("tags", [])
+        note = payload.get("note", "")
+        if not isinstance(raw_symbols, list) or not raw_symbols:
+            raise HTTPException(status_code=422, detail="symbols 必须是非空数组")
+        if len(raw_symbols) > 500:
+            raise HTTPException(status_code=422, detail="单次最多导入 500 个股票代码")
+        if not all(isinstance(symbol, str) for symbol in raw_symbols):
+            raise HTTPException(status_code=422, detail="symbols 必须是字符串数组")
+        if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+            raise HTTPException(status_code=422, detail="tags 必须为字符串数组")
+        if not isinstance(note, str):
+            raise HTTPException(status_code=422, detail="note 必须为字符串")
+        symbols = list(dict.fromkeys(symbol.upper().strip() for symbol in raw_symbols))
+        invalid = [
+            symbol
+            for symbol in symbols
+            if len(symbol) != 9
+            or symbol[6] != "."
+            or not symbol[:6].isdigit()
+            or symbol[7:] not in {"SH", "SZ"}
+        ]
+        if invalid:
+            raise HTTPException(status_code=422, detail={"invalid_symbols": invalid})
+        unavailable = sorted(set(symbols) - repository.observable_symbols(set(symbols)))
+        if unavailable:
+            raise HTTPException(status_code=422, detail={"unknown_symbols": unavailable})
+        try:
+            return users.add_observations(
+                principal,
+                symbols,
+                note=note,
+                tags=tags,
+                request_id=rid,
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @router.get("/me")
     def me(request: Request) -> dict[str, Any]:
         principal = require_token(request)

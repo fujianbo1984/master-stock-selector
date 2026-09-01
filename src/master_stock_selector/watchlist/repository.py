@@ -3609,6 +3609,20 @@ class WatchlistRepository:
         """Resolve public stock names without exposing private trade storage."""
         return self._trade_stock_names(symbols)
 
+    def observable_symbols(self, symbols: set[str]) -> set[str]:
+        """Return requested stocks that have at least one formal method fact."""
+        normalized = {symbol.upper() for symbol in symbols if symbol}
+        if not normalized:
+            return set()
+        placeholders = ",".join("?" for _ in normalized)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""SELECT DISTINCT symbol FROM stock_method_daily_fact
+                WHERE symbol IN ({placeholders})""",
+                tuple(sorted(normalized)),
+            ).fetchall()
+        return {str(row["symbol"]) for row in rows}
+
     def observation_snapshot(self, symbol: str, as_of_date: str) -> dict[str, Any]:
         """Freeze the latest public method facts known on a user's trade date."""
         self.initialize()

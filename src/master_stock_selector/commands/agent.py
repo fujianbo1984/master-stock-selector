@@ -193,6 +193,22 @@ def _dispatch_agent(
                     "note": args.note,
                 },
             )
+        if args.observation_action == "import":
+            if not args.commit:
+                parser.error("observations import 会批量写入我的观察；必须显式传入 --commit")
+            if args.token_stdin and args.file == "-":
+                parser.error("--token-stdin 不能与从标准输入读取股票代码同时使用")
+            return _request_json(
+                base_url,
+                token,
+                "POST",
+                "/api/v1/observations/batch",
+                {
+                    "symbols": _load_observation_symbols(str(args.file), parser),
+                    "tags": list(args.tag),
+                    "note": args.note,
+                },
+            )
         parser.error("unknown observations action")
     if args.agent_action != "trades":
         parser.error("unknown agent action")
@@ -296,6 +312,35 @@ def _load_trade_payload(path: str, parser: argparse.ArgumentParser) -> dict[str,
         return value
     parser.error("交易 JSON 必须是数组或包含 trades 数组的对象")
     return {}
+
+
+def _load_observation_symbols(path: str, parser: argparse.ArgumentParser) -> list[str]:
+    try:
+        text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        parser.error(f"无法读取股票代码文件：{exc}")
+    symbols: list[str] = []
+    invalid: list[str] = []
+    for raw in re.split(r"[\s,;]+", text.lstrip("\ufeff")):
+        value = raw.strip().upper()
+        if not value:
+            continue
+        if re.fullmatch(r"\d{6}\.(?:SH|SZ)", value):
+            symbol = value
+        elif re.fullmatch(r"\d{6}", value) and value[0] in "01236":
+            symbol = value + (".SH" if value.startswith("6") else ".SZ")
+        else:
+            invalid.append(value)
+            continue
+        if symbol not in symbols:
+            symbols.append(symbol)
+    if invalid:
+        parser.error("股票代码格式不正确：" + ", ".join(invalid[:10]))
+    if not symbols:
+        parser.error("股票代码文件为空")
+    if len(symbols) > 500:
+        parser.error("单次最多导入 500 个去重股票代码")
+    return symbols
 
 
 def _load_json_object(path: str, parser: argparse.ArgumentParser) -> dict[str, Any]:

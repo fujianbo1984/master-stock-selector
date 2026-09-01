@@ -1752,6 +1752,74 @@ class UserRepository:
                     ),
                 )
 
+    def add_observations(
+        self,
+        principal: ApiTokenPrincipal,
+        symbols: Sequence[str],
+        *,
+        note: str = "",
+        tags: str | Sequence[str] | None = None,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Add many observations atomically without changing existing reviews."""
+        normalized = list(dict.fromkeys(symbol.upper().strip() for symbol in symbols if symbol))
+        if not normalized:
+            raise ValueError("股票代码不能为空")
+        normalized_tags = normalize_observation_tags(tags if tags is not None else ())
+        placeholders = ",".join("?" for _ in normalized)
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = {
+                str(row["symbol"])
+                for row in connection.execute(
+                    f"""SELECT symbol FROM user_stock_review
+                    WHERE user_id=? AND symbol IN ({placeholders})""",
+                    (principal.user_id, *normalized),
+                ).fetchall()
+            }
+            added = [symbol for symbol in normalized if symbol not in existing]
+            connection.executemany(
+                """INSERT INTO user_stock_review(
+                    user_id, symbol, manual_state, note, tags_json, reviewed_at
+                ) VALUES (?, ?, 'WATCH', ?, ?, CURRENT_TIMESTAMP)""",
+                [
+                    (
+                        principal.user_id,
+                        symbol,
+                        note.strip(),
+                        json.dumps(normalized_tags, ensure_ascii=False),
+                    )
+                    for symbol in added
+                ],
+            )
+            results = [
+                {
+                    "symbol": symbol,
+                    "status": "ALREADY_PRESENT" if symbol in existing else "ADDED",
+                }
+                for symbol in normalized
+            ]
+            self._insert_api_audit(
+                connection,
+                principal,
+                action="observations.batch",
+                request_id=request_id,
+                outcome="COMMITTED",
+                details={
+                    "requested": len(normalized),
+                    "added": len(added),
+                    "already_present": len(existing),
+                },
+            )
+        return {
+            "request_id": request_id,
+            "status": "COMMITTED",
+            "requested": len(normalized),
+            "added": len(added),
+            "already_present": len(existing),
+            "results": results,
+        }
+
     def save_c1_record(
         self, user_id: str, symbol: str, payload: Mapping[str, Any]
     ) -> dict[str, Any]:

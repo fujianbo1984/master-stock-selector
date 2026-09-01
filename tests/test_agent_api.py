@@ -139,6 +139,55 @@ def test_agent_api_adds_observation_idempotently_and_enforces_scope(tmp_path) ->
     assert "观察池事实" in unknown.json()["detail"]
 
 
+def test_agent_api_batch_adds_atomically_and_preserves_existing_state(tmp_path) -> None:
+    client = _client(tmp_path)
+    users, user = _principal(client)
+    token, _ = users.create_api_token(
+        user.user_id, "observation-batch", scopes=("observations:write",)
+    )
+    headers = _token_headers(token)
+
+    rejected = client.post(
+        "/api/v1/observations/batch",
+        headers=headers,
+        json={"symbols": ["000001.SZ", "999999.SZ"]},
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == {"unknown_symbols": ["999999.SZ"]}
+    assert users.review(user.user_id, "000001.SZ")["manual_state"] == "UNREVIEWED"
+
+    added = client.post(
+        "/api/v1/observations/batch",
+        headers=headers,
+        json={
+            "symbols": ["000001.sz", "000001.SZ"],
+            "tags": ["#长图", "长图"],
+            "note": "批量导入",
+        },
+    )
+    assert added.status_code == 200
+    assert added.json()["status"] == "COMMITTED"
+    assert added.json()["requested"] == 1
+    assert added.json()["added"] == 1
+    assert added.json()["already_present"] == 0
+    assert added.json()["results"] == [{"symbol": "000001.SZ", "status": "ADDED"}]
+    assert users.review(user.user_id, "000001.SZ")["tags"] == ["长图"]
+
+    users.save_review(user.user_id, "000001.SZ", "FOCUS", "保留原状态", ["重点"])
+    repeated = client.post(
+        "/api/v1/observations/batch",
+        headers=headers,
+        json={"symbols": ["000001.SZ"], "tags": ["不应覆盖"], "note": "不应覆盖"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["added"] == 0
+    assert repeated.json()["already_present"] == 1
+    review = users.review(user.user_id, "000001.SZ")
+    assert review["manual_state"] == "FOCUS"
+    assert review["note"] == "保留原状态"
+    assert review["tags"] == ["重点"]
+
+
 def test_agent_api_preflight_atomic_commit_idempotency_and_stop_update(tmp_path) -> None:
     client = _client(tmp_path)
     users, user = _principal(client)

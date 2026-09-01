@@ -363,6 +363,59 @@ def test_agent_cli_requires_commit_and_adds_observation(monkeypatch) -> None:
     ]
 
 
+def test_agent_cli_imports_deduplicated_observations_in_one_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    symbols = tmp_path / "symbols.txt"
+    symbols.write_text("000001\n600988.SH\n000001.sz\n", encoding="utf-8")
+    calls = []
+
+    def fake_request(base_url, token, method, path, body=None, *, headers=None):
+        calls.append((method, path, body))
+        return {
+            "status": "COMMITTED",
+            "requested": 2,
+            "added": 1,
+            "already_present": 1,
+        }
+
+    monkeypatch.setenv("MASTERSTOCK_AGENT_TOKEN", "mst_test-token")
+    monkeypatch.setattr("master_stock_selector.commands.agent._request_json", fake_request)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["agent", "observations", "import", str(symbols)])
+    assert exc_info.value.code == 2
+    assert calls == []
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "agent",
+                "observations",
+                "import",
+                str(symbols),
+                "--tag",
+                "长图导入",
+                "--commit",
+            ]
+        )
+        == 0
+    )
+    assert calls == [
+        (
+            "POST",
+            "/api/v1/observations/batch",
+            {
+                "symbols": ["000001.SZ", "600988.SH"],
+                "tags": ["长图导入"],
+                "note": "",
+            },
+        )
+    ]
+    assert '"status": "COMMITTED"' in capsys.readouterr().out
+
+
 def test_agent_cli_requires_explicit_commit_for_stop(monkeypatch) -> None:
     monkeypatch.setenv("MASTERSTOCK_AGENT_TOKEN", "mst_test-token")
 
