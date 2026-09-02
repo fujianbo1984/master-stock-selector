@@ -380,6 +380,24 @@ def build_watchlist_router(
             )
         return rows
 
+    def brooks_navigation_rows(
+        query_date: str,
+        *,
+        state: str,
+        industry: str,
+        min_amount: float,
+        q: str,
+    ) -> list[dict[str, Any]]:
+        if not query_date:
+            return []
+        return _filter_brooks_rows(
+            repository.brooks_rows(query_date, BROOKS_POLICY_VERSION),
+            state=state,
+            industry=industry,
+            min_amount=min_amount,
+            q=q,
+        )
+
     def require_csrf(request: Request, user: AuthenticatedUser, supplied: str) -> None:
         if not users.csrf_valid(user, supplied):
             raise HTTPException(status_code=403, detail="CSRF 校验失败")
@@ -923,43 +941,17 @@ def build_watchlist_router(
                 "PAUSED",
             },
         }
-        needle = q.strip().casefold()
-        filtered: list[dict[str, Any]] = []
         industry_filter = industry.strip()
         available_industries = sorted(
             {str(row.get("industry") or "") for row in all_rows if row.get("industry")}
         )
-        for raw in all_rows:
-            row = dict(raw)
-            if str(row.get("state") or "") not in state_groups[state_mode]:
-                continue
-            if industry_filter and str(row.get("industry") or "") != industry_filter:
-                continue
-            if float(row.get("median_amount20") or 0) / 100000 < min_amount:
-                continue
-            haystack = " ".join(
-                str(row.get(key) or "") for key in ("symbol", "name", "industry")
-            ).casefold()
-            if needle and needle not in haystack:
-                continue
-            evidence = dict(row.get("evidence") or {})
-            current_close = float(evidence.get("current_close") or 0)
-            row["current_close"] = current_close
-            row["state_label"] = BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知")
-            row["retracement_pct"] = float(row.get("current_retracement") or 0) * 100
-            row["tight_risk_pct"] = (
-                (current_close - float(row["tight_invalidation"])) / current_close * 100
-                if current_close > 0
-                else None
-            )
-            row["structural_risk_pct"] = (
-                (current_close - float(row["structural_invalidation"])) / current_close * 100
-                if current_close > 0
-                else None
-            )
-            row["median_amount20_yi"] = float(row.get("median_amount20") or 0) / 100000
-            row.update(_stock_external_urls(str(row.get("symbol") or "")))
-            filtered.append(row)
+        filtered = _filter_brooks_rows(
+            all_rows,
+            state=state_mode,
+            industry=industry_filter,
+            min_amount=min_amount,
+            q=q,
+        )
         counts = {
             key: sum(str(row.get("state") or "") in values for row in all_rows)
             for key, values in state_groups.items()
@@ -1219,6 +1211,8 @@ def build_watchlist_router(
         nav_next: str = "",
         nav_position: str = "",
         nav_total: str = "",
+        brooks_state: str = "active",
+        min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
@@ -1341,6 +1335,17 @@ def build_watchlist_router(
             nav_next=nav_next,
             nav_position=nav_position,
             nav_total=nav_total,
+            brooks_state=brooks_state,
+            min_amount=min_amount,
+            brooks_rows=brooks_navigation_rows(
+                query_date,
+                state=brooks_state,
+                industry=industry,
+                min_amount=min_amount,
+                q=q,
+            )
+            if section.partition("#")[0] == "brooks-results"
+            else None,
         )
         payload["market_metrics"] = market_reader.safe_stock_market_metrics(
             query_date,
@@ -1399,6 +1404,8 @@ def build_watchlist_router(
         nav_next: str = "",
         nav_position: str = "",
         nav_total: str = "",
+        brooks_state: str = "active",
+        min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
@@ -1456,6 +1463,17 @@ def build_watchlist_router(
             nav_next=nav_next,
             nav_position=nav_position,
             nav_total=nav_total,
+            brooks_state=brooks_state,
+            min_amount=min_amount,
+            brooks_rows=brooks_navigation_rows(
+                query_date,
+                state=brooks_state,
+                industry=industry,
+                min_amount=min_amount,
+                q=q,
+            )
+            if section.partition("#")[0] == "brooks-results"
+            else None,
         )
         chart_methods = _chart_method_statuses(payload["history"], query_date)
         market_metrics = market_reader.safe_stock_market_metrics(query_date, [symbol]).get(
@@ -1511,6 +1529,8 @@ def build_watchlist_router(
         industry: str = "",
         q: str = "",
         section: str = "",
+        brooks_state: str = "active",
+        min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
         if not payload["latest"]:
@@ -1549,6 +1569,17 @@ def build_watchlist_router(
                 if section.partition("#")[0] == "open-positions"
                 else None
             ),
+            brooks_state=brooks_state,
+            min_amount=min_amount,
+            brooks_rows=brooks_navigation_rows(
+                query_date,
+                state=brooks_state,
+                industry=industry,
+                min_amount=min_amount,
+                q=q,
+            )
+            if section.partition("#")[0] == "brooks-results"
+            else None,
         )
         external_urls = _stock_external_urls(symbol)
         if not external_urls["tonghuashun_url"]:
@@ -2783,6 +2814,72 @@ def _navigation_item(symbol: str, names: dict[str, str] | None = None) -> dict[s
     }
 
 
+def _filter_brooks_rows(
+    rows: list[dict[str, Any]],
+    *,
+    state: str,
+    industry: str,
+    min_amount: float,
+    q: str,
+) -> list[dict[str, Any]]:
+    state_groups = {
+        "s2": {"S2_H1", "S2_H1_H2_TAG"},
+        "s1": {"S1_TOUCH25"},
+        "s0": {"S0_IMPULSE"},
+        "active": {"S2_H1", "S2_H1_H2_TAG", "S1_TOUCH25", "S0_IMPULSE"},
+        "terminal": {"COMPLETED", "INVALIDATED", "STALE"},
+        "paused": {"PAUSED"},
+        "all": {
+            "S2_H1",
+            "S2_H1_H2_TAG",
+            "S1_TOUCH25",
+            "S0_IMPULSE",
+            "COMPLETED",
+            "INVALIDATED",
+            "STALE",
+            "PAUSED",
+        },
+    }
+    state_mode = state.lower().strip()
+    if state_mode not in state_groups:
+        state_mode = "active"
+    industry_filter = industry.strip()
+    needle = q.strip().casefold()
+    filtered: list[dict[str, Any]] = []
+    for raw in rows:
+        row = dict(raw)
+        if str(row.get("state") or "") not in state_groups[state_mode]:
+            continue
+        if industry_filter and str(row.get("industry") or "") != industry_filter:
+            continue
+        if float(row.get("median_amount20") or 0) / 100000 < min_amount:
+            continue
+        haystack = " ".join(
+            str(row.get(key) or "") for key in ("symbol", "name", "industry")
+        ).casefold()
+        if needle and needle not in haystack:
+            continue
+        evidence = dict(row.get("evidence") or {})
+        current_close = float(evidence.get("current_close") or 0)
+        row["current_close"] = current_close
+        row["state_label"] = BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知")
+        row["retracement_pct"] = float(row.get("current_retracement") or 0) * 100
+        row["tight_risk_pct"] = (
+            (current_close - float(row["tight_invalidation"])) / current_close * 100
+            if current_close > 0
+            else None
+        )
+        row["structural_risk_pct"] = (
+            (current_close - float(row["structural_invalidation"])) / current_close * 100
+            if current_close > 0
+            else None
+        )
+        row["median_amount20_yi"] = float(row.get("median_amount20") or 0) / 100000
+        row.update(_stock_external_urls(str(row.get("symbol") or "")))
+        filtered.append(row)
+    return filtered
+
+
 def _stock_navigation(
     repository: WatchlistRepository,
     market_reader: MarketDataReader,
@@ -2800,6 +2897,9 @@ def _stock_navigation(
     rows_for_date: Callable[[str], list[dict[str, Any]]] | None = None,
     personal_rows: list[dict[str, Any]] | None = None,
     position_rows: list[dict[str, Any]] | None = None,
+    brooks_rows: list[dict[str, Any]] | None = None,
+    brooks_state: str = "active",
+    min_amount: float = 0,
     nav_previous: str = "",
     nav_next: str = "",
     nav_position: str = "",
@@ -2816,19 +2916,31 @@ def _stock_navigation(
         method=method,
         state=state,
     )
-    query = urlencode(
-        {
-            "date": query_date,
-            "view": view_mode,
-            "method": method_mode,
-            "state": state_mode,
-            "manual": manual,
-            "min_cap": min_cap,
-            "industry": industry,
-            "q": q,
-            "section": section,
-        }
-    )
+    if section == "brooks-results":
+        query = urlencode(
+            {
+                "date": query_date,
+                "brooks_state": brooks_state,
+                "min_amount": min_amount,
+                "industry": industry,
+                "q": q,
+                "section": section,
+            }
+        )
+    else:
+        query = urlencode(
+            {
+                "date": query_date,
+                "view": view_mode,
+                "method": method_mode,
+                "state": state_mode,
+                "manual": manual,
+                "min_cap": min_cap,
+                "industry": industry,
+                "q": q,
+                "section": section,
+            }
+        )
     list_url = "/a/daily?" + _daily_query_string(
         query_date=query_date,
         view=view_mode,
@@ -2842,6 +2954,16 @@ def _stock_navigation(
         list_url = "/a/observations?" + urlencode({"state": manual, "date": query_date})
     elif section == "open-positions":
         list_url = "/a/review#current-positions"
+    elif section == "brooks-results":
+        list_url = "/a/brooks-second-leg?" + urlencode(
+            {
+                "date": query_date,
+                "state": brooks_state,
+                "industry": industry,
+                "min_amount": min_amount,
+                "q": q,
+            }
+        )
     labels = {
         "new-candidates": "新进 / 重进",
         "continuing-candidates": "持续符合",
@@ -2856,6 +2978,7 @@ def _stock_navigation(
         "focus-candidates": "我的重点观察",
         "personal-observations": "我的观察",
         "open-positions": "当前持仓",
+        "brooks-results": "Brooks 第二腿观察池",
     }
     empty: dict[str, Any] = {
         "query": query,
@@ -2955,6 +3078,33 @@ def _stock_navigation(
             "total": len(position_rows),
             "previous": position_item_at(index - 1),
             "next": position_item_at(index + 1),
+        }
+
+    if section == "brooks-results" and brooks_rows is not None:
+        symbols = [str(row.get("symbol") or "").upper() for row in brooks_rows]
+        try:
+            index = symbols.index(symbol.upper())
+        except ValueError:
+            return empty
+
+        def brooks_item_at(position: int) -> dict[str, str] | None:
+            if position < 0 or position >= len(brooks_rows):
+                return None
+            row = brooks_rows[position]
+            return {
+                "symbol": str(row["symbol"]),
+                "name": str(row.get("name") or row["symbol"]),
+            }
+
+        return {
+            "query": query,
+            "entry_query": query,
+            "list_url": list_url,
+            "section_label": labels[section],
+            "position": index + 1,
+            "total": len(brooks_rows),
+            "previous": brooks_item_at(index - 1),
+            "next": brooks_item_at(index + 1),
         }
 
     rows = (

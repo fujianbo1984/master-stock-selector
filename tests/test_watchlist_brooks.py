@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, timedelta
+from html import unescape
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -19,6 +20,7 @@ from master_stock_selector.watchlist.brooks_service import BrooksRunConfig, run_
 from master_stock_selector.watchlist.repository import WatchlistRepository
 from master_stock_selector.web.app import create_app
 from master_stock_selector.web.users import UserRepository
+from tests.test_watchlist_web import _seed_filter_cases, _seed_watchlist
 
 
 def _dates(count: int) -> list[str]:
@@ -595,6 +597,79 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "Brooks 独立计算凭证" in runs.text
     assert "brooks-web" not in runs.text  # 运行 ID 不作为产品展示字段。
     assert "1" in runs.text
+
+
+def test_brooks_results_keep_previous_and_next_navigation_in_stock_chart(
+    tmp_path: Path,
+) -> None:
+    market_path = tmp_path / "market.sqlite3"
+    watchlist_path = tmp_path / "watchlist.sqlite3"
+    user_path = tmp_path / "users.sqlite3"
+    with sqlite3.connect(market_path):
+        pass
+    UserRepository(user_path).migrate_schema()
+    _seed_watchlist(watchlist_path)
+    _seed_filter_cases(watchlist_path)
+    repository = WatchlistRepository(watchlist_path)
+    repository.migrate_brooks_schema()
+    first_event, first_fact = _event_and_fact()
+    second_event = {
+        **first_event,
+        "event_id": "brooks|000002.SZ|2026-07-31|8",
+        "symbol": "000002.SZ",
+    }
+    second_fact = {
+        **first_fact,
+        "event_id": second_event["event_id"],
+        "symbol": "000002.SZ",
+        "source_digest": "fact-digest-2",
+    }
+    repository.persist_brooks_run(
+        events=[first_event, second_event],
+        facts=[first_fact, second_fact],
+        receipt={
+            "run_id": "brooks-navigation",
+            "as_of_date": "2026-07-31",
+            "from_date": "2026-07-31",
+            "origin": "RECONSTRUCTED",
+            "policy_version": BROOKS_POLICY_VERSION,
+            "market_database": str(market_path),
+            "source_digest": "navigation-source",
+            "counts": {"daily_facts": 2},
+            "status": "SUCCESS",
+            "started_at": "2026-07-31T17:00:00+08:00",
+            "finished_at": "2026-07-31T17:01:00+08:00",
+        },
+    )
+    client = TestClient(
+        create_app(
+            market_database=market_path,
+            watchlist_database=watchlist_path,
+            user_database=user_path,
+            secure_cookies=False,
+            access_logging=False,
+        )
+    )
+
+    listing = client.get("/a/brooks-second-leg?date=2026-07-31&state=s1")
+    assert listing.status_code == 200
+    assert "/a/stocks/000001.SZ/chart?" in listing.text
+    assert "section=brooks-results" in listing.text
+    first_chart_href = unescape(
+        listing.text.split('href="/a/stocks/000001.SZ/chart?', 1)[1].split('"', 1)[0]
+    )
+    first_chart = client.get(f"/a/stocks/000001.SZ/chart?{first_chart_href}")
+
+    assert first_chart.status_code == 200
+    assert "Brooks 第二腿观察池 <b>1 / 2</b>" in first_chart.text
+    assert 'aria-label="下一只：ST示例"' in first_chart.text
+    next_href = unescape(first_chart.text.split('data-chart-next href="', 1)[1].split('"', 1)[0])
+    second_chart = client.get(next_href)
+
+    assert second_chart.status_code == 200
+    assert "Brooks 第二腿观察池 <b>2 / 2</b>" in second_chart.text
+    assert 'aria-label="上一只：平安银行"' in second_chart.text
+    assert "/a/brooks-second-leg?date=2026-07-31" in second_chart.text
 
 
 def test_brooks_service_reads_raw_times_factor_and_persists_a_run(tmp_path: Path) -> None:
