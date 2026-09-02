@@ -50,6 +50,16 @@ STATE_LABELS = {
     "REENTERED": "重新进入",
     "DATA_GAP": "数据中断",
 }
+BROOKS_STATE_LABELS = {
+    "S0_IMPULSE": "S0 第一腿",
+    "S1_TOUCH25": "S1 回吐25%",
+    "S2_H1": "S2 H1确认",
+    "S2_H1_H2_TAG": "S2 H1 · H2标签",
+    "COMPLETED": "主要路径完成",
+    "INVALIDATED": "结构失效",
+    "STALE": "观察超时",
+    "PAUSED": "资格暂停",
+}
 STAGE_LABELS = {
     "STAGE_1": "第一阶段 · 筑底",
     "STAGE_2": "第二阶段 · 上升",
@@ -248,10 +258,7 @@ def build_watchlist_router(
         cached = projection_cache.get(query_date)
         if cached is not None and cached[0] == fingerprint:
             return cached[1]
-        rows = [
-            _decorate_provisional_row(row)
-            for row in repository.provisional_rows(query_date)
-        ]
+        rows = [_decorate_provisional_row(row) for row in repository.provisional_rows(query_date)]
         for row in rows:
             row["manual"] = {
                 "manual_state": "UNREVIEWED",
@@ -277,9 +284,7 @@ def build_watchlist_router(
         rows = cached_rows(query_date, include_liquidity=include_liquidity)
         user = current_user(request)
         reviews = (
-            users.reviews_for_symbols(
-                user.user_id, [str(row.get("symbol") or "") for row in rows]
-            )
+            users.reviews_for_symbols(user.user_id, [str(row.get("symbol") or "") for row in rows])
             if user is not None
             else {}
         )
@@ -300,15 +305,11 @@ def build_watchlist_router(
             )
         return result
 
-    def projection_rows_for_user(
-        request: Request, query_date: str
-    ) -> list[dict[str, Any]]:
+    def projection_rows_for_user(request: Request, query_date: str) -> list[dict[str, Any]]:
         rows = cached_projection_rows(query_date)
         user = current_user(request)
         reviews = (
-            users.reviews_for_symbols(
-                user.user_id, [str(row.get("symbol") or "") for row in rows]
-            )
+            users.reviews_for_symbols(user.user_id, [str(row.get("symbol") or "") for row in rows])
             if user is not None
             else {}
         )
@@ -346,9 +347,7 @@ def build_watchlist_router(
         if user is None:
             return []
         reviews = users.reviews_for_user(user.user_id)
-        names = repository.stock_names(
-            {str(review.get("symbol") or "") for review in reviews}
-        )
+        names = repository.stock_names({str(review.get("symbol") or "") for review in reviews})
         return [
             {
                 "symbol": str(review.get("symbol") or ""),
@@ -453,11 +452,7 @@ def build_watchlist_router(
             )
             shared_plans = users.trading_plans.shared_versions(owner_id)
             current_shared_plan = next(
-                (
-                    plan
-                    for plan in shared_plans
-                    if str(plan.get("share_status") or "") == "ACTIVE"
-                ),
+                (plan for plan in shared_plans if str(plan.get("share_status") or "") == "ACTIVE"),
                 None,
             )
             for shared_plan in shared_plans:
@@ -482,10 +477,14 @@ def build_watchlist_router(
             ]
             focus_symbols = {str(row.get("symbol") or "") for row in reviews}
             focus_names = repository.stock_names(focus_symbols)
-            public_by_symbol = {
-                str(row.get("symbol") or ""): row
-                for row in cached_rows(query_date, include_liquidity=False)
-            } if query_date else {}
+            public_by_symbol = (
+                {
+                    str(row.get("symbol") or ""): row
+                    for row in cached_rows(query_date, include_liquidity=False)
+                }
+                if query_date
+                else {}
+            )
             held_symbols = {str(item["symbol"]) for item in positions}
             for row in reviews:
                 symbol = str(row.get("symbol") or "")
@@ -501,9 +500,7 @@ def build_watchlist_router(
                         "is_held": symbol in held_symbols,
                     }
                 )
-                latest_updated_at = max(
-                    latest_updated_at, str(row.get("reviewed_at") or "")
-                )
+                latest_updated_at = max(latest_updated_at, str(row.get("reviewed_at") or ""))
             focus_items.sort(key=lambda item: (item["reviewed_at"], item["symbol"]), reverse=True)
             for item in positions:
                 item["is_focus"] = str(item["symbol"]) in focus_symbols
@@ -516,7 +513,10 @@ def build_watchlist_router(
             shared_plans=shared_plans,
         )
         latest_updated_at = max(
-            [latest_updated_at, *(str(article.get("updated_on") or "") for article in reading_notes)]
+            [
+                latest_updated_at,
+                *(str(article.get("updated_on") or "") for article in reading_notes),
+            ]
         )
 
         page = render(
@@ -588,9 +588,7 @@ def build_watchlist_router(
             value: sum(1 for item in items if item["manual"]["manual_state"] == value)
             for value in ("WATCH", "FOCUS", "ARCHIVED")
         }
-        visible_items = [
-            item for item in items if item["manual"]["manual_state"] == selected_state
-        ]
+        visible_items = [item for item in items if item["manual"]["manual_state"] == selected_state]
         watch_tags: dict[str, int] = {}
         for item in items:
             if item["manual"]["manual_state"] != "WATCH":
@@ -617,8 +615,7 @@ def build_watchlist_router(
                 "selected_state": selected_state,
                 "selected_tag": selected_tag,
                 "watch_tags": [
-                    {"label": label, "count": count}
-                    for label, count in sorted(watch_tags.items())
+                    {"label": label, "count": count} for label, count in sorted(watch_tags.items())
                 ],
                 "state_urls": {
                     value: f"/a/observations?{urlencode({'state': value, 'date': query_date})}"
@@ -671,9 +668,7 @@ def build_watchlist_router(
             q=q,
         )
         projection_rows = (
-            projection_rows_for_user(request, query_date)
-            if view_mode == "projection"
-            else []
+            projection_rows_for_user(request, query_date) if view_mode == "projection" else []
         )
         projection_base_rows = _base_filter_rows(
             projection_rows,
@@ -683,9 +678,7 @@ def build_watchlist_router(
             q=q,
         )
         rows = projection_rows if view_mode == "projection" else formal_rows
-        base_rows = (
-            projection_base_rows if view_mode == "projection" else formal_base_rows
-        )
+        base_rows = projection_base_rows if view_mode == "projection" else formal_base_rows
         current_counts = {
             "all": len(_current_rows(formal_base_rows, "all")),
             "weinstein": len(_current_rows(formal_base_rows, "weinstein")),
@@ -694,9 +687,7 @@ def build_watchlist_router(
         }
         method_ready = method_mode in METHOD_LABELS
         change_counts = {
-            value: len(_change_rows(formal_base_rows, method_mode, value))
-            if method_ready
-            else 0
+            value: len(_change_rows(formal_base_rows, method_mode, value)) if method_ready else 0
             for value in (
                 "NEW",
                 "ENTERED",
@@ -710,8 +701,14 @@ def build_watchlist_router(
         projection_counts = {
             value: len(_projection_rows(projection_base_rows, value))
             for value in (
-                "CHANGE", "ENTER", "PRE_ENTERED", "PRE_REENTERED",
-                "PRE_EXITED", "PASSING", "PRE_CONTINUING", "DATA_GAP",
+                "CHANGE",
+                "ENTER",
+                "PRE_ENTERED",
+                "PRE_REENTERED",
+                "PRE_EXITED",
+                "PASSING",
+                "PRE_CONTINUING",
+                "DATA_GAP",
             )
         }
         filtered = (
@@ -802,9 +799,7 @@ def build_watchlist_router(
                     "small_cap": sum(
                         1
                         for row in formal_rows
-                        if row["has_pass"]
-                        and not row.get("is_st")
-                        and row.get("small_cap")
+                        if row["has_pass"] and not row.get("is_st") and row.get("small_cap")
                     ),
                     "missing_market_cap": sum(
                         1
@@ -826,9 +821,15 @@ def build_watchlist_router(
                         target_method=method_mode if method_ready else "weinstein",
                         target_state=(
                             state_mode
-                            if state_mode in {
-                                "NEW", "ENTERED", "REENTERED", "CONTINUING",
-                                "EXIT", "EXITED", "DATA_GAP",
+                            if state_mode
+                            in {
+                                "NEW",
+                                "ENTERED",
+                                "REENTERED",
+                                "CONTINUING",
+                                "EXIT",
+                                "EXITED",
+                                "DATA_GAP",
                             }
                             else "NEW"
                         ),
@@ -878,6 +879,107 @@ def build_watchlist_router(
             },
         )
 
+    @router.get("/a/brooks-second-leg", response_class=HTMLResponse)
+    def brooks_second_leg(
+        request: Request,
+        date: str | None = None,
+        state: str = "active",
+        industry: str = "",
+        min_amount: float = Query(default=0, ge=0, le=10000),
+        q: str = "",
+    ) -> HTMLResponse:
+        state_mode = state.lower().strip()
+        allowed_states = {"active", "s2", "s1", "s0", "terminal", "paused", "all"}
+        if state_mode not in allowed_states:
+            raise HTTPException(status_code=422, detail="unsupported Brooks state filter")
+        dates = repository.brooks_fact_dates()
+        query_date = ""
+        if dates:
+            if date and date in dates:
+                query_date = date
+            elif date:
+                query_date = next((value for value in dates if value <= date), dates[0])
+            else:
+                query_date = dates[0]
+        all_rows = repository.brooks_rows(query_date) if query_date else []
+        state_groups = {
+            "s2": {"S2_H1", "S2_H1_H2_TAG"},
+            "s1": {"S1_TOUCH25"},
+            "s0": {"S0_IMPULSE"},
+            "active": {"S2_H1", "S2_H1_H2_TAG", "S1_TOUCH25", "S0_IMPULSE"},
+            "terminal": {"COMPLETED", "INVALIDATED", "STALE"},
+            "paused": {"PAUSED"},
+            "all": {
+                "S2_H1",
+                "S2_H1_H2_TAG",
+                "S1_TOUCH25",
+                "S0_IMPULSE",
+                "COMPLETED",
+                "INVALIDATED",
+                "STALE",
+                "PAUSED",
+            },
+        }
+        needle = q.strip().casefold()
+        filtered: list[dict[str, Any]] = []
+        industry_filter = industry.strip()
+        available_industries = sorted(
+            {str(row.get("industry") or "") for row in all_rows if row.get("industry")}
+        )
+        for raw in all_rows:
+            row = dict(raw)
+            if str(row.get("state") or "") not in state_groups[state_mode]:
+                continue
+            if industry_filter and str(row.get("industry") or "") != industry_filter:
+                continue
+            if float(row.get("median_amount20") or 0) / 100000 < min_amount:
+                continue
+            haystack = " ".join(
+                str(row.get(key) or "") for key in ("symbol", "name", "industry")
+            ).casefold()
+            if needle and needle not in haystack:
+                continue
+            evidence = dict(row.get("evidence") or {})
+            current_close = float(evidence.get("current_close") or 0)
+            row["current_close"] = current_close
+            row["state_label"] = BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知")
+            row["retracement_pct"] = float(row.get("current_retracement") or 0) * 100
+            row["tight_risk_pct"] = (
+                (current_close - float(row["tight_invalidation"])) / current_close * 100
+                if current_close > 0
+                else None
+            )
+            row["structural_risk_pct"] = (
+                (current_close - float(row["structural_invalidation"])) / current_close * 100
+                if current_close > 0
+                else None
+            )
+            row["median_amount20_yi"] = float(row.get("median_amount20") or 0) / 100000
+            row.update(_stock_external_urls(str(row.get("symbol") or "")))
+            filtered.append(row)
+        counts = {
+            key: sum(str(row.get("state") or "") in values for row in all_rows)
+            for key, values in state_groups.items()
+        }
+        return render(
+            request,
+            "ashare/brooks_second_leg.html",
+            {
+                "active": "Brooks 第二腿",
+                "query_date": query_date,
+                "latest_date": dates[0] if dates else "",
+                "date_fallback": date if date and date != query_date else "",
+                "schema_ready": repository.brooks_schema_ready(),
+                "state": state_mode,
+                "industry": industry_filter,
+                "available_industries": available_industries,
+                "min_amount": min_amount,
+                "q": q,
+                "rows": filtered,
+                "counts": counts,
+            },
+        )
+
     @router.get("/a/industries", response_class=HTMLResponse)
     def industries(
         request: Request,
@@ -899,9 +1001,13 @@ def build_watchlist_router(
                 continue
             if method == "both" and int(row.get("both_pass_count") or 0) <= 0:
                 continue
-            if query and query not in " ".join(
-                [str(row.get("industry_code") or ""), str(row.get("industry_name") or "")]
-            ).lower():
+            if (
+                query
+                and query
+                not in " ".join(
+                    [str(row.get("industry_code") or ""), str(row.get("industry_name") or "")]
+                ).lower()
+            ):
                 continue
             filtered.append(row)
         return render(
@@ -917,11 +1023,11 @@ def build_watchlist_router(
                 "summary": {
                     "industries": len(rows),
                     "active": sum(1 for row in rows if int(row.get("union_pass_count") or 0) > 0),
-                    "small_sample": sum(1 for row in rows if row.get("quality_state") == "SMALL_SAMPLE"),
-                    "unknown": sum(1 for row in rows if row.get("quality_state") == "UNKNOWN"),
-                    "coverage": (
-                        rows[0].get("membership_coverage_pct") if rows else None
+                    "small_sample": sum(
+                        1 for row in rows if row.get("quality_state") == "SMALL_SAMPLE"
                     ),
+                    "unknown": sum(1 for row in rows if row.get("quality_state") == "UNKNOWN"),
+                    "coverage": (rows[0].get("membership_coverage_pct") if rows else None),
                 },
             },
         )
@@ -977,12 +1083,8 @@ def build_watchlist_router(
         benchmark_symbol = (
             benchmark.upper() if benchmark.upper() in BREADTH_BENCHMARKS else "000985.CSI"
         )
-        weinstein_history = repository.weinstein_weekly_breadth_history(
-            query_date, limit=52
-        )
-        minervini_history = repository.minervini_breadth_history(
-            query_date, limit=260
-        )
+        weinstein_history = repository.weinstein_weekly_breadth_history(query_date, limit=52)
+        minervini_history = repository.minervini_breadth_history(query_date, limit=260)
         benchmark_series = _normalized_index_series(
             market_reader.safe_index_bars(benchmark_symbol, query_date)[-260:]
         )
@@ -1004,9 +1106,7 @@ def build_watchlist_router(
             ),
         }
         canonical_price_summary = _market_price_summary(canonical_price_series)
-        risk_context = _market_risk_context(
-            method_summaries, canonical_price_summary
-        )
+        risk_context = _market_risk_context(method_summaries, canonical_price_summary)
         benchmark_summary = _proxy_summary(benchmark_series)
         benchmark_summary.update(
             {
@@ -1014,16 +1114,11 @@ def build_watchlist_router(
                 "name": BREADTH_BENCHMARKS[benchmark_symbol],
             }
         )
-        style_symbols = {
-            str(item["left_symbol"])
-            for item in STYLE_RELATIVE_PAIRS
-        } | {
-            str(item["right_symbol"])
-            for item in STYLE_RELATIVE_PAIRS
+        style_symbols = {str(item["left_symbol"]) for item in STYLE_RELATIVE_PAIRS} | {
+            str(item["right_symbol"]) for item in STYLE_RELATIVE_PAIRS
         }
         style_bars = {
-            symbol: market_reader.safe_index_bars(symbol, query_date)
-            for symbol in style_symbols
+            symbol: market_reader.safe_index_bars(symbol, query_date) for symbol in style_symbols
         }
         style_relative = []
         for pair in STYLE_RELATIVE_PAIRS:
@@ -1050,9 +1145,7 @@ def build_watchlist_router(
                 "latest_date": repository.latest_fact_date(),
                 "weinstein_history": weinstein_history,
                 "minervini_history": minervini_history,
-                "breadth_history_available": bool(
-                    weinstein_history or minervini_history
-                ),
+                "breadth_history_available": bool(weinstein_history or minervini_history),
                 "proxy": benchmark_series,
                 "method_summaries": method_summaries,
                 "risk_context": risk_context,
@@ -1060,15 +1153,11 @@ def build_watchlist_router(
                 "proxy_summary": benchmark_summary,
                 "benchmarks": BREADTH_BENCHMARKS,
                 "style_relative": style_relative,
-                "style_relative_available": any(
-                    item["series"] for item in style_relative
-                ),
+                "style_relative_available": any(item["series"] for item in style_relative),
                 "indices": rows,
                 "market_overview": market_overview,
                 "weinstein_policy_version": (
-                    str(rows[0].get("policy_version") or "")
-                    if rows
-                    else "weinstein-stage-30w-v1"
+                    str(rows[0].get("policy_version") or "") if rows else "weinstein-stage-30w-v1"
                 ),
                 "minervini_policy_version": (
                     str(rows[0].get("minervini", {}).get("policy_version") or "")
@@ -1159,8 +1248,7 @@ def build_watchlist_router(
         change_history = [
             row
             for row in payload["history"]
-            if str(row.get("state") or "")
-            in {"ENTERED", "REENTERED", "EXITED", "DATA_GAP"}
+            if str(row.get("state") or "") in {"ENTERED", "REENTERED", "EXITED", "DATA_GAP"}
         ]
         visible_by_key = {
             (str(row.get("as_of_date") or ""), str(row.get("method") or "")): row
@@ -1255,6 +1343,13 @@ def build_watchlist_router(
             query_date,
             [symbol],
         ).get(symbol.upper(), {})
+        payload["brooks"] = repository.brooks_stock_fact(symbol, query_date)
+        if payload["brooks"]:
+            brooks = payload["brooks"]
+            brooks["state_label"] = BROOKS_STATE_LABELS.get(str(brooks.get("state") or ""), "未知")
+            current_close = float(brooks.get("evidence", {}).get("current_close") or 0)
+            brooks["current_close"] = current_close
+            brooks["retracement_pct"] = float(brooks.get("current_retracement") or 0) * 100
         payload["anomaly_evidence"] = _stock_anomaly_evidence(
             repository, market_reader, payload, query_date, symbol
         )
@@ -1493,8 +1588,7 @@ def build_watchlist_router(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         chart_prefix = f"/a/stocks/{symbol.upper()}/chart"
         if return_to.startswith(chart_prefix) and (
-            len(return_to) == len(chart_prefix)
-            or return_to[len(chart_prefix)] in "?#"
+            len(return_to) == len(chart_prefix) or return_to[len(chart_prefix)] in "?#"
         ):
             navigation_context = {
                 key: str((values.get(key) or [""])[0])
@@ -1579,7 +1673,8 @@ def build_watchlist_router(
                 quantity=int(value("quantity")),
                 price=float(value("price")),
                 fee=float(value("fee", "0") or "0"),
-                method="MANUAL", plan_setup_id=value("plan_setup_id", OTHER_SETUP_ID),
+                method="MANUAL",
+                plan_setup_id=value("plan_setup_id", OTHER_SETUP_ID),
                 other_setup_note=value("other_setup_note"),
                 stop_price=float(stop_price) if stop_price else None,
                 rationale=value("rationale"),
@@ -1616,14 +1711,20 @@ def build_watchlist_router(
             users.update_trade(
                 user.user_id,
                 execution_id,
-                traded_on=traded_on, traded_at=value("traded_at"), side=value("side"),
-                quantity=int(value("quantity")), price=float(value("price")),
-                fee=float(value("fee", "0") or "0"), method="MANUAL",
+                traded_on=traded_on,
+                traded_at=value("traded_at"),
+                side=value("side"),
+                quantity=int(value("quantity")),
+                price=float(value("price")),
+                fee=float(value("fee", "0") or "0"),
+                method="MANUAL",
                 plan_setup_id=value("plan_setup_id", OTHER_SETUP_ID),
                 other_setup_note=value("other_setup_note"),
                 stop_price=float(stop_price) if stop_price else None,
-                rationale=value("rationale"), invalidation=value("invalidation"),
-                exit_reason=exit_reason, market_context=value("market_context"),
+                rationale=value("rationale"),
+                invalidation=value("invalidation"),
+                exit_reason=exit_reason,
+                market_context=value("market_context"),
                 observation_snapshot=repository.observation_snapshot(
                     str(existing["symbol"]), traded_on
                 ),
@@ -1638,30 +1739,20 @@ def build_watchlist_router(
         date: str,
         length: int | None = Query(default=None, ge=1, le=250),
         multiplier: float | None = Query(default=None, gt=0, le=20),
-        source: str | None = Query(
-            default=None, pattern="^(close|open|high|low)$"
-        ),
+        source: str | None = Query(default=None, pattern="^(close|open|high|low)$"),
         use_ema: bool | None = None,
-        band_style: str | None = Query(
-            default=None, pattern="^(atr|tr|range)$"
-        ),
+        band_style: str | None = Query(default=None, pattern="^(atr|tr|range)$"),
         atr_length: int | None = Query(default=None, ge=1, le=250),
         limit: int | None = Query(default=None, ge=30),
         interval: str = Query(default="day", pattern="^(day|week)$"),
     ) -> dict[str, Any]:
         _, defaults = default_keltner_preset(interval)
         length = length if length is not None else int(defaults["length"])
-        multiplier = (
-            multiplier if multiplier is not None else float(defaults["multiplier"])
-        )
+        multiplier = multiplier if multiplier is not None else float(defaults["multiplier"])
         source = source if source is not None else str(defaults["source"])
         use_ema = use_ema if use_ema is not None else bool(defaults["use_ema"])
-        band_style = (
-            band_style if band_style is not None else str(defaults["band_style"])
-        )
-        atr_length = (
-            atr_length if atr_length is not None else int(defaults["atr_length"])
-        )
+        band_style = band_style if band_style is not None else str(defaults["band_style"])
+        atr_length = atr_length if atr_length is not None else int(defaults["atr_length"])
         actual_keltner_config = keltner_config_payload(
             interval=interval,
             length=length,
@@ -1673,18 +1764,12 @@ def build_watchlist_router(
         )
         warmup_periods = max(200, length, atr_length)
         analysis_limit = (
-            None
-            if limit is None
-            else limit + warmup_periods * (6 if interval == "week" else 1)
+            None if limit is None else limit + warmup_periods * (6 if interval == "week" else 1)
         )
         analysis_daily_bars = market_reader.safe_stock_chart_bars(
             symbol, date, limit=analysis_limit
         )
-        visible_daily_bars = (
-            analysis_daily_bars
-            if limit is None
-            else analysis_daily_bars[-limit:]
-        )
+        visible_daily_bars = analysis_daily_bars if limit is None else analysis_daily_bars[-limit:]
         bars = _weekly_bars(visible_daily_bars) if interval == "week" else visible_daily_bars
         analysis_bars = (
             _weekly_bars(analysis_daily_bars) if interval == "week" else analysis_daily_bars
@@ -1709,11 +1794,7 @@ def build_watchlist_router(
         visible_dates = {str(row["trade_date"]) for row in bars}
         moving_average_lengths = (10, 30) if interval == "week" else (50, 150, 200)
         moving_averages = {
-            str(period): [
-                point
-                for point in points
-                if str(point["trade_date"]) in visible_dates
-            ]
+            str(period): [point for point in points if str(point["trade_date"]) in visible_dates]
             for period, points in _chart_moving_averages(
                 analysis_bars, moving_average_lengths
             ).items()
@@ -1768,18 +1849,13 @@ def build_watchlist_router(
             )
         if interval == "week":
             bars = _weekly_bars(market_reader.safe_stock_chart_bars(symbol, date))
-            week_end = {
-                _week_key(str(row["trade_date"])): str(row["trade_date"])
-                for row in bars
-            }
+            week_end = {_week_key(str(row["trade_date"])): str(row["trade_date"]) for row in bars}
             for execution in overlay["executions"]:
                 execution["traded_on"] = week_end.get(
                     _week_key(str(execution["traded_on"])), str(execution["traded_on"])
                 )
         return {
-            "drawings": users.chart_drawings(
-                user.user_id, symbol, price_scale_id, interval
-            ),
+            "drawings": users.chart_drawings(user.user_id, symbol, price_scale_id, interval),
             "trade_overlay": overlay,
         }
 
@@ -1810,9 +1886,7 @@ def build_watchlist_router(
         user = require_user(request)
         require_csrf(request, user, request.headers.get("X-CSRF-Token", ""))
         return {
-            "deleted": users.delete_chart_drawing(
-                user.user_id, drawing_id, symbol, price_scale_id
-            )
+            "deleted": users.delete_chart_drawing(user.user_id, drawing_id, symbol, price_scale_id)
         }
 
     @router.get("/a/runs", response_class=HTMLResponse)
@@ -1825,6 +1899,7 @@ def build_watchlist_router(
                 "latest_date": repository.latest_fact_date(),
                 "query_date": repository.latest_fact_date(),
                 "runs": repository.run_receipts(30),
+                "brooks_runs": repository.brooks_run_receipts(30),
                 "collections": market_reader.collection_receipts(30),
             },
         )
@@ -1860,8 +1935,7 @@ def build_watchlist_router(
             "industry_level": "L3",
             "policy_version": INDUSTRY_POLICY_VERSION,
             "rows": [
-                _decorate_industry(row)
-                for row in repository.industry_observations(query_date)
+                _decorate_industry(row) for row in repository.industry_observations(query_date)
             ],
         }
 
@@ -1962,9 +2036,7 @@ def _web_exit_reason(choice: str, other: str, *, legacy: str = "") -> str:
     return normalized_choice
 
 
-def _normalize_daily_query(
-    *, view: str | None, method: str, state: str
-) -> tuple[str, str, str]:
+def _normalize_daily_query(*, view: str | None, method: str, state: str) -> tuple[str, str, str]:
     method_mode = method.lower().strip()
     if method_mode not in {"all", "both", *METHOD_LABELS}:
         method_mode = "all"
@@ -1992,8 +2064,14 @@ def _normalize_daily_query(
             )
     if requested_view == "projection":
         if state_mode not in {
-            "CHANGE", "ENTER", "PRE_ENTERED", "PRE_REENTERED",
-            "PRE_EXITED", "PASSING", "PRE_CONTINUING", "DATA_GAP",
+            "CHANGE",
+            "ENTER",
+            "PRE_ENTERED",
+            "PRE_REENTERED",
+            "PRE_EXITED",
+            "PASSING",
+            "PRE_CONTINUING",
+            "DATA_GAP",
         }:
             state_mode = "CHANGE"
         return "projection", "weinstein", state_mode
@@ -2053,17 +2131,14 @@ def _decorate_watchlist_row(row: dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
     for method, method_row in methods.items():
         method_row["method_label"] = METHOD_LABELS.get(method, method)
-        method_row["result_label"] = RESULT_LABELS.get(
-            str(method_row.get("result") or ""), "未知"
-        )
+        method_row["result_label"] = RESULT_LABELS.get(str(method_row.get("result") or ""), "未知")
         method_row["state_label"] = STATE_LABELS.get(
             str(method_row.get("state") or ""), "未发生变化"
         )
         profile = dict(method_row.get("evidence", {}).get("profile") or {})
         method_row["stage_label"] = STAGE_LABELS.get(str(profile.get("stage") or ""), "")
     item["both_pass"] = all(
-        methods.get(method, {}).get("result") == "PASS"
-        for method in ("minervini", "weinstein")
+        methods.get(method, {}).get("result") == "PASS" for method in ("minervini", "weinstein")
     )
     item["has_pass"] = any(value.get("result") == "PASS" for value in methods.values())
     item["has_new_state"] = any(state in {"ENTERED", "REENTERED"} for state in states)
@@ -2093,9 +2168,7 @@ def _decorate_provisional_row(row: dict[str, Any]) -> dict[str, Any]:
     metrics = dict(item.get("metrics") or {})
     checks = dict(metrics.get("checks") or {})
     failed = [str(value) for value in metrics.get("failed_checks") or []]
-    item["state_label"] = PROVISIONAL_STATE_LABELS.get(
-        str(item.get("state") or ""), "周内状态未知"
-    )
+    item["state_label"] = PROVISIONAL_STATE_LABELS.get(str(item.get("state") or ""), "周内状态未知")
     item["projected_stage_label"] = STAGE_LABELS.get(
         str(item.get("projected_stage") or "UNKNOWN"), "数据不足"
     )
@@ -2124,19 +2197,13 @@ def _decorate_provisional_row(row: dict[str, Any]) -> dict[str, Any]:
             "return_13w_pct",
         )
     }
-    item["failed_check_labels"] = [
-        WEINSTEIN_CHECK_LABELS.get(key, key) for key in failed
-    ]
+    item["failed_check_labels"] = [WEINSTEIN_CHECK_LABELS.get(key, key) for key in failed]
     item["passed_check_count"] = sum(bool(value) for value in checks.values())
     item["check_count"] = len(checks)
     previous_result = str(item.get("previous_result") or "UNKNOWN")
     projected_result = str(item.get("projected_result") or "UNKNOWN")
-    item["previous_projection_label"] = PROJECTION_RESULT_LABELS.get(
-        previous_result, "状态未知"
-    )
-    item["current_projection_label"] = PROJECTION_RESULT_LABELS.get(
-        projected_result, "状态未知"
-    )
+    item["previous_projection_label"] = PROJECTION_RESULT_LABELS.get(previous_result, "状态未知")
+    item["current_projection_label"] = PROJECTION_RESULT_LABELS.get(projected_result, "状态未知")
     item["previous_projection_source"] = (
         f"{item.get('previous_as_of_date')} 投影"
         if item.get("previous_as_of_date")
@@ -2144,19 +2211,18 @@ def _decorate_provisional_row(row: dict[str, Any]) -> dict[str, Any]:
     )
     elapsed = int(item.get("sessions_elapsed") or 0)
     total = int(item.get("sessions_total") or 0)
-    item["maturity_label"] = (
-        f"本周第 {elapsed}/{total} 个交易日" if total else "交易日历不足"
-    )
+    item["maturity_label"] = f"本周第 {elapsed}/{total} 个交易日" if total else "交易日历不足"
     item["is_change"] = str(item.get("state") or "") in {
-        "PRE_ENTERED", "PRE_REENTERED", "PRE_EXITED", "DATA_GAP"
+        "PRE_ENTERED",
+        "PRE_REENTERED",
+        "PRE_EXITED",
+        "DATA_GAP",
     }
     item.update(_stock_external_urls(str(item.get("symbol") or "")))
     return item
 
 
-def _chart_method_statuses(
-    history: list[dict[str, Any]], query_date: str
-) -> list[dict[str, str]]:
+def _chart_method_statuses(history: list[dict[str, Any]], query_date: str) -> list[dict[str, str]]:
     """Return independent method facts as of the chart date; do not combine them."""
 
     result: list[dict[str, str]] = []
@@ -2245,8 +2311,10 @@ def _attach_quote_changes(
         row.update(values)
         change_pct = row.get("change_pct")
         row["change_class"] = (
-            "up" if change_pct is not None and float(change_pct) > 0
-            else "down" if change_pct is not None and float(change_pct) < 0
+            "up"
+            if change_pct is not None and float(change_pct) > 0
+            else "down"
+            if change_pct is not None and float(change_pct) < 0
             else "flat"
         )
 
@@ -2312,9 +2380,7 @@ def _decorate_industry_confirmation(row: dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
     item["stage_label"] = STAGE_LABELS.get(str(item.get("stage") or ""), "数据不足")
     coverage = item.get("price_coverage_pct")
-    item["price_coverage_pct_label"] = (
-        f"{float(coverage):.1f}%" if coverage is not None else "暂无"
-    )
+    item["price_coverage_pct_label"] = f"{float(coverage):.1f}%" if coverage is not None else "暂无"
     return item
 
 
@@ -2338,16 +2404,16 @@ def _stock_external_urls(symbol: str) -> dict[str, str]:
     code = _plain_code(value)
     suffix = value.split(".", 1)[1] if "." in value else ""
     exchange = {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}.get(suffix, "")
-    tradingview_symbol = f"{exchange}:{code}" if exchange and len(code) == 6 and code.isdigit() else ""
+    tradingview_symbol = (
+        f"{exchange}:{code}" if exchange and len(code) == 6 and code.isdigit() else ""
+    )
     tradingview_url = (
         f"https://cn.tradingview.com/chart/?symbol={quote(tradingview_symbol, safe='')}"
         if tradingview_symbol
         else ""
     )
     tonghuashun_url = (
-        f"https://stockpage.10jqka.com.cn/{code}/"
-        if len(code) == 6 and code.isdigit()
-        else ""
+        f"https://stockpage.10jqka.com.cn/{code}/" if len(code) == 6 and code.isdigit() else ""
     )
     return {
         "tradingview_url": tradingview_url,
@@ -2361,9 +2427,7 @@ def _index_external_urls(symbol: str) -> dict[str, str]:
     code = _plain_code(symbol)
     suffix = str(symbol or "").upper().split(".", 1)[1] if "." in symbol else ""
     if suffix == "SH" and len(code) == 6:
-        urls["tonghuashun_url"] = (
-            f"https://q.10jqka.com.cn/zs/detail/code/1B{code[-4:]}/"
-        )
+        urls["tonghuashun_url"] = f"https://q.10jqka.com.cn/zs/detail/code/1B{code[-4:]}/"
     elif suffix == "SZ" and len(code) == 6:
         urls["tonghuashun_url"] = f"https://stockpage.10jqka.com.cn/{code}/index/"
     return urls
@@ -2382,15 +2446,17 @@ def _weekly_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     weekly: list[dict[str, Any]] = []
     for values in grouped.values():
         first, last = values[0], values[-1]
-        weekly.append({
-            **last,
-            "open": first["open"],
-            "high": max(float(item["high"]) for item in values),
-            "low": min(float(item["low"]) for item in values),
-            "close": last["close"],
-            "volume": sum(float(item.get("volume") or 0) for item in values),
-            "amount": sum(float(item.get("amount") or 0) for item in values),
-        })
+        weekly.append(
+            {
+                **last,
+                "open": first["open"],
+                "high": max(float(item["high"]) for item in values),
+                "low": min(float(item["low"]) for item in values),
+                "close": last["close"],
+                "volume": sum(float(item.get("volume") or 0) for item in values),
+                "amount": sum(float(item.get("amount") or 0) for item in values),
+            }
+        )
     return weekly
 
 
@@ -2406,22 +2472,13 @@ def _chart_method_overlay(
         return {"events": [], "coverage": {}}
     first_bar_date = str(bars[0]["trade_date"])
     last_bar_date = str(bars[-1]["trade_date"])
-    retained = repository.stock_method_chart_events(
-        symbol, first_bar_date, end_date
-    )
+    retained = repository.stock_method_chart_events(symbol, first_bar_date, end_date)
     dates = {str(row["trade_date"]) for row in bars}
-    week_ends = {
-        _week_key(str(row["trade_date"])): str(row["trade_date"])
-        for row in bars
-    }
+    week_ends = {_week_key(str(row["trade_date"])): str(row["trade_date"]) for row in bars}
     events: list[dict[str, Any]] = []
     for item in retained["events"]:
         as_of_date = str(item["as_of_date"])
-        plot_date = (
-            week_ends.get(_week_key(as_of_date), "")
-            if interval == "week"
-            else as_of_date
-        )
+        plot_date = week_ends.get(_week_key(as_of_date), "") if interval == "week" else as_of_date
         if plot_date not in dates:
             continue
         events.append({**item, "plot_date": plot_date})
@@ -2432,10 +2489,7 @@ def _chart_method_overlay(
         coverage[method] = {
             **values,
             "complete_for_chart_range": bool(
-                from_date
-                and to_date
-                and from_date <= first_bar_date
-                and to_date >= last_bar_date
+                from_date and to_date and from_date <= first_bar_date and to_date >= last_bar_date
             ),
         }
     return {"events": events, "coverage": coverage}
@@ -2477,9 +2531,7 @@ def _industry_chart_summary(bars: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _industry_navigation(
-    rows: list[dict[str, Any]], *, industry_code: str
-) -> dict[str, Any]:
+def _industry_navigation(rows: list[dict[str, Any]], *, industry_code: str) -> dict[str, Any]:
     ordered_rows = sorted(
         rows,
         key=lambda row: (
@@ -2546,13 +2598,17 @@ def _base_filter_rows(
             continue
         if industry and str(row.get("industry_code") or "") != industry:
             continue
-        if query and query not in " ".join(
-            [
-                str(row.get("symbol") or ""),
-                str(row.get("name") or ""),
-                str(row.get("industry") or ""),
-            ]
-        ).lower():
+        if (
+            query
+            and query
+            not in " ".join(
+                [
+                    str(row.get("symbol") or ""),
+                    str(row.get("name") or ""),
+                    str(row.get("industry") or ""),
+                ]
+            ).lower()
+        ):
             continue
         result.append(row)
     return result
@@ -2563,16 +2619,12 @@ def _current_rows(rows: list[dict[str, Any]], method: str) -> list[dict[str, Any
         return [row for row in rows if row["both_pass"]]
     if method in METHOD_LABELS:
         return [
-            row
-            for row in rows
-            if row.get("methods", {}).get(method, {}).get("result") == "PASS"
+            row for row in rows if row.get("methods", {}).get(method, {}).get("result") == "PASS"
         ]
     return [row for row in rows if row["has_pass"]]
 
 
-def _change_rows(
-    rows: list[dict[str, Any]], method: str, state: str
-) -> list[dict[str, Any]]:
+def _change_rows(rows: list[dict[str, Any]], method: str, state: str) -> list[dict[str, Any]]:
     if method not in METHOD_LABELS:
         return []
 
@@ -2587,25 +2639,18 @@ def _change_rows(
     return [row for row in rows if matches(row)]
 
 
-def _projection_rows(
-    rows: list[dict[str, Any]], state: str
-) -> list[dict[str, Any]]:
+def _projection_rows(rows: list[dict[str, Any]], state: str) -> list[dict[str, Any]]:
     if state == "CHANGE":
         states = {"PRE_ENTERED", "PRE_REENTERED", "PRE_EXITED", "DATA_GAP"}
         selected = [row for row in rows if str(row.get("state") or "") in states]
     elif state == "ENTER":
         selected = [
-            row for row in rows
-            if str(row.get("state") or "") in {"PRE_ENTERED", "PRE_REENTERED"}
+            row for row in rows if str(row.get("state") or "") in {"PRE_ENTERED", "PRE_REENTERED"}
         ]
     elif state == "PASSING":
-        selected = [
-            row for row in rows if str(row.get("projected_result") or "") == "PASS"
-        ]
+        selected = [row for row in rows if str(row.get("projected_result") or "") == "PASS"]
     else:
-        selected = [
-            row for row in rows if str(row.get("state") or "") == state
-        ]
+        selected = [row for row in rows if str(row.get("state") or "") == state]
     rank = {
         "PRE_ENTERED": 0,
         "PRE_REENTERED": 1,
@@ -2623,9 +2668,7 @@ def _projection_rows(
     )
 
 
-def _sort_daily_rows(
-    rows: list[dict[str, Any]], *, view: str, method: str
-) -> list[dict[str, Any]]:
+def _sort_daily_rows(rows: list[dict[str, Any]], *, view: str, method: str) -> list[dict[str, Any]]:
     del view, method
 
     def change_key(row: dict[str, Any]) -> tuple[bool, float, str]:
@@ -2641,9 +2684,7 @@ def _sort_daily_rows(
     return sorted(rows, key=change_key)
 
 
-def _prepare_daily_rows(
-    rows: list[dict[str, Any]], *, method: str
-) -> list[dict[str, Any]]:
+def _prepare_daily_rows(rows: list[dict[str, Any]], *, method: str) -> list[dict[str, Any]]:
     prepared: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
@@ -2652,9 +2693,7 @@ def _prepare_daily_rows(
             method_items = [(method, methods.get(method, {}))]
         else:
             method_items = [
-                (key, value)
-                for key, value in methods.items()
-                if value.get("result") == "PASS"
+                (key, value) for key, value in methods.items() if value.get("result") == "PASS"
             ]
         item["display_facts"] = [
             {
@@ -2729,9 +2768,7 @@ def _filter_rows(
     )
 
 
-def _navigation_item(
-    symbol: str, names: dict[str, str] | None = None
-) -> dict[str, str] | None:
+def _navigation_item(symbol: str, names: dict[str, str] | None = None) -> dict[str, str] | None:
     normalized = symbol.upper().strip()
     if not normalized:
         return None
@@ -2797,9 +2834,7 @@ def _stock_navigation(
         q=q,
     )
     if section == "personal-observations":
-        list_url = "/a/observations?" + urlencode(
-            {"state": manual, "date": query_date}
-        )
+        list_url = "/a/observations?" + urlencode({"state": manual, "date": query_date})
     elif section == "open-positions":
         list_url = "/a/review#current-positions"
     labels = {
@@ -2838,9 +2873,7 @@ def _stock_navigation(
     )
     if submitted_is_complete:
         submitted_symbols = {
-            value.upper().strip()
-            for value in (nav_previous, nav_next)
-            if value.strip()
+            value.upper().strip() for value in (nav_previous, nav_next) if value.strip()
         }
         submitted_names = repository.stock_names(submitted_symbols)
         nav_query = urlencode(
@@ -2866,8 +2899,7 @@ def _stock_navigation(
         selected = [
             row
             for row in personal_rows
-            if manual == "all"
-            or str(row.get("manual", {}).get("manual_state") or "") == manual
+            if manual == "all" or str(row.get("manual", {}).get("manual_state") or "") == manual
         ]
         symbols = [str(row.get("symbol") or "").upper() for row in selected]
         try:
@@ -2966,17 +2998,13 @@ def _stock_navigation(
             selected = [
                 row
                 for row in filtered
-                if row["has_pass"]
-                and not row["has_new_state"]
-                and not row["has_exit_state"]
+                if row["has_pass"] and not row["has_new_state"] and not row["has_exit_state"]
             ]
         elif section == "exit-candidates":
             selected = [row for row in filtered if row["has_exit_state"]]
         elif section == "focus-candidates":
             selected = [
-                row
-                for row in filtered
-                if str(row["manual"].get("manual_state") or "") == "FOCUS"
+                row for row in filtered if str(row["manual"].get("manual_state") or "") == "FOCUS"
             ]
     symbols = [str(row.get("symbol") or "").upper() for row in selected]
     try:
@@ -3009,18 +3037,11 @@ def _market_overview_summary(
     if not indices:
         headline = "市场内部与主要指数趋势独立呈现"
     else:
-        weinstein_stage_2 = sum(
-            1 for row in indices if row.get("stage") == "STAGE_2"
-        )
+        weinstein_stage_2 = sum(1 for row in indices if row.get("stage") == "STAGE_2")
         minervini_stage_2 = sum(
-            1
-            for row in indices
-            if row.get("minervini", {}).get("result") == "PASS"
+            1 for row in indices if row.get("minervini", {}).get("result") == "PASS"
         )
-        all_strong = (
-            weinstein_stage_2 == len(indices)
-            and minervini_stage_2 == len(indices)
-        )
+        all_strong = weinstein_stage_2 == len(indices) and minervini_stage_2 == len(indices)
         none_strong = weinstein_stage_2 == 0 and minervini_stage_2 == 0
         tone = str(risk_context.get("tone") or "mixed")
         if tone == "positive" and none_strong:
@@ -3068,11 +3089,7 @@ def _breadth_method_summary(
     baseline = points[-(period + 1)] if len(points) >= period + 1 else None
     latest_rate = float(latest["pass_rate"])
     baseline_rate = float(baseline["pass_rate"]) if baseline is not None else None
-    delta = (
-        round(latest_rate - baseline_rate, 2)
-        if baseline_rate is not None
-        else None
-    )
+    delta = round(latest_rate - baseline_rate, 2) if baseline_rate is not None else None
     if delta is None:
         direction = "UNKNOWN"
         direction_label = "数据不足"

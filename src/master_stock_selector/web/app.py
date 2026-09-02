@@ -34,7 +34,7 @@ STATIC_DIR = Path(__file__).with_name("static")
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LOGGER = logging.getLogger(__name__)
 PUBLIC_HTML_CACHE_PATH = re.compile(
-    r"^/a/(?:daily|industries|indices|runs|industries/[^/]+/chart|"
+    r"^/a/(?:daily|brooks-second-leg|industries|indices|runs|industries/[^/]+/chart|"
     r"stocks/[^/]+(?:/(?:chart|realtime))?)$"
 )
 PUBLIC_API_CACHE_PATH = re.compile(
@@ -55,7 +55,7 @@ def create_app(
     access_logging: bool | None = None,
     icp_filing: str | None = None,
 ) -> FastAPI:
-    """Create the user-facing two-master watchlist website."""
+    """Create the user-facing independent-method A-share watchlist website."""
 
     market_path = _market_database_path(market_database)
     watchlist_path = _watchlist_database_path(watchlist_database)
@@ -87,7 +87,7 @@ def create_app(
 
     app = FastAPI(
         title="大师选股",
-        description="Weinstein 指数与个股阶段、Minervini 个股趋势模板观察池",
+        description="Weinstein、Minervini 与独立 Brooks 第二腿 A 股观察池",
     )
     app.state.market_database = str(market_path)
     app.state.watchlist_database = str(watchlist_path)
@@ -173,6 +173,7 @@ def create_app(
         user = current_user(request)
         public_items = [
             ("大师观察池", "/a/daily"),
+            ("Brooks 第二腿", "/a/brooks-second-leg"),
             ("市场全景", "/a/indices"),
             ("行业观察", "/a/industries"),
         ]

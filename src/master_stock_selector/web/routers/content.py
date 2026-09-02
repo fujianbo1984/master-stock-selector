@@ -36,6 +36,31 @@ def build_content_router(
             reverse=True,
         )
 
+    def article_neighbors(
+        article: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        articles = sorted(
+            shared_articles(),
+            key=lambda item: (str(item["published_on"]), str(item["slug"])),
+        )
+        current_index = next(
+            (
+                index
+                for index, item in enumerate(articles)
+                if str(item["href"]) == str(article["href"])
+            ),
+            None,
+        )
+        if current_index is None:
+            return None, None
+        previous_article = articles[current_index - 1] if current_index > 0 else None
+        next_article = (
+            articles[current_index + 1]
+            if current_index < len(articles) - 1
+            else None
+        )
+        return previous_article, next_article
+
     def require_user(request: Request) -> Any:
         user = current_user(request)
         if user is None:
@@ -226,6 +251,7 @@ def build_content_router(
         article = users.reading_notes.shared_by_id(identifier, share_id) if identifier else None
         if article is None:
             raise HTTPException(status_code=404, detail="共享的阅读感想不存在或已撤回")
+        previous_article, next_article = article_neighbors(article)
         return mark_private(
             render(
                 request,
@@ -233,8 +259,8 @@ def build_content_router(
                 {
                     "active": "",
                     "article": article,
-                    "previous_article": None,
-                    "next_article": None,
+                    "previous_article": previous_article,
+                    "next_article": next_article,
                     "suppress_research_date_note": True,
                 },
             )
@@ -276,23 +302,15 @@ def build_content_router(
         article = published_article(slug)
         if article is None:
             raise HTTPException(status_code=404)
-        articles = sorted(
-            shared_articles(),
-            key=lambda item: (str(item["published_on"]), str(item["slug"])),
-        )
-        current_index = next(
-            index for index, item in enumerate(articles) if item["slug"] == slug
-        )
+        previous_article, next_article = article_neighbors(article)
         response = render(
             request,
             "reading/article.html",
             {
                 "active": "",
                 "article": article,
-                "previous_article": articles[current_index - 1] if current_index > 0 else None,
-                "next_article": (
-                    articles[current_index + 1] if current_index < len(articles) - 1 else None
-                ),
+                "previous_article": previous_article,
+                "next_article": next_article,
                 "suppress_research_date_note": True,
             },
         )

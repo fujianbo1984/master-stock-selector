@@ -50,6 +50,7 @@ if [[ "$ORIGIN" == "observed" ]]; then
     --watchlist-database "$WATCHLIST_DATABASE"
     --apply
   )
+  "$MASTERSTOCK_BIN" "${args[@]}"
 else
   args=(
     watchlist
@@ -64,6 +65,20 @@ else
   if [[ -n "$FROM_DATE" ]]; then
     args+=(--from "$FROM_DATE")
   fi
+  "$MASTERSTOCK_BIN" "${args[@]}"
+  brooks_args=(
+    watchlist
+    --brooks-only
+    --origin reconstructed
+    --market-database "$MARKET_DATABASE"
+    --watchlist-database "$WATCHLIST_DATABASE"
+    --apply
+  )
+  if [[ -n "$RUN_DATE" ]]; then
+    brooks_args+=(--date "$RUN_DATE")
+  fi
+  if [[ -n "$FROM_DATE" ]]; then
+    brooks_args+=(--from "$FROM_DATE")
+  fi
+  "$MASTERSTOCK_BIN" "${brooks_args[@]}"
 fi
-
-"$MASTERSTOCK_BIN" "${args[@]}"

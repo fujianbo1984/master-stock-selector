@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from master_stock_selector.watchlist.brooks import BROOKS_POLICY_VERSION
 from master_stock_selector.watchlist.methods import (
     MINERVINI_INDEX_STAGE2_POLICY_VERSION,
     MINERVINI_POLICY_VERSION,
@@ -242,6 +243,84 @@ def _seed_watchlist(path):
             ],
         }
     )
+    repository.migrate_brooks_schema()
+    repository.persist_brooks_run(
+        events=[
+            {
+                "event_id": "brooks|000001.SZ|2026-07-31|8",
+                "symbol": "000001.SZ",
+                "signal_date": "2026-07-31",
+                "start_date": "2026-07-21",
+                "duration_bars": 8,
+                "impulse_start": 10.0,
+                "signal_close": 14.0,
+                "signal_high": 14.2,
+                "impulse_height": 4.0,
+                "atr20": 1.0,
+                "move_atr": 4.0,
+                "path_efficiency": 0.9,
+                "bullish_body_count": 7,
+                "bullish_body_share": 0.875,
+                "mean_close_location": 0.8,
+                "mean_overlap": 0.1,
+                "speed_atr_per_session": 0.5,
+                "median_amount20": 100_000.0,
+                "signal_tradability": "TRADABLE",
+                "source_digest": "brooks-event",
+                "origin": "RECONSTRUCTED",
+                "policy_version": BROOKS_POLICY_VERSION,
+            }
+        ],
+        facts=[
+            {
+                "as_of_date": "2026-07-31",
+                "event_id": "brooks|000001.SZ|2026-07-31|8",
+                "symbol": "000001.SZ",
+                "state": "S1_TOUCH25",
+                "state_reason": "TOUCH25_CONFIRMED",
+                "state_rank": 2,
+                "state_changed_on": "2026-07-31",
+                "touch25_date": "2026-07-31",
+                "h1_date": "",
+                "h1_failure_date": "",
+                "h2_date": "",
+                "bars_after_signal": 1,
+                "bars_after_touch25": 0,
+                "current_retracement": 0.25,
+                "maximum_low_retracement": 0.3,
+                "pullback_atr": 1.2,
+                "pullback_low_anchor": 12.8,
+                "prior_high": 14.2,
+                "mm_0_8": 16.0,
+                "mm_1_0": 16.8,
+                "tight_invalidation": 12.8,
+                "structural_invalidation": 10.0,
+                "prior_high_touched": False,
+                "prior_high_closed": False,
+                "mm_0_8_completed": False,
+                "mm_1_0_completed": False,
+                "next_open_status": "PENDING",
+                "tradability_reason": "",
+                "evidence": {"current_close": 13.0},
+                "source_digest": "brooks-fact",
+                "origin": "RECONSTRUCTED",
+                "policy_version": BROOKS_POLICY_VERSION,
+            }
+        ],
+        receipt={
+            "run_id": "brooks-web-test",
+            "as_of_date": "2026-07-31",
+            "from_date": "2026-07-31",
+            "origin": "RECONSTRUCTED",
+            "policy_version": BROOKS_POLICY_VERSION,
+            "market_database": "/tmp/market.sqlite3",
+            "source_digest": "brooks-source",
+            "counts": {"symbols_scanned": 1, "impulse_events_seen": 1, "daily_facts": 1},
+            "status": "SUCCESS",
+            "started_at": "2026-08-02T10:01:00+08:00",
+            "finished_at": "2026-08-02T10:02:00+08:00",
+        },
+    )
 
 
 def _client(tmp_path):
@@ -258,9 +337,7 @@ def _client(tmp_path):
 
 def _authenticated_client(app, username: str = "tester") -> TestClient:
     users = app.state.user_repository
-    account = next(
-        (item for item in users.list_users() if item["username"] == username), None
-    )
+    account = next((item for item in users.list_users() if item["username"] == username), None)
     if account is None:
         users.create_user(username, "Test-password-123", "测试用户")
     client = TestClient(app)
@@ -274,9 +351,7 @@ def _authenticated_client(app, username: str = "tester") -> TestClient:
 
 
 def _csrf(client: TestClient) -> str:
-    user = client.app.state.user_repository.session_user(
-        client.cookies.get(SESSION_COOKIE)
-    )
+    user = client.app.state.user_repository.session_user(client.cookies.get(SESSION_COOKIE))
     assert user is not None
     return user.csrf_token
 
@@ -359,7 +434,7 @@ def test_owner_activity_is_login_only_and_shows_only_sanitized_owner_data(tmp_pa
     assert page.text.index("八张示意图读懂 Adam Grimes 的交易模板") < page.text.index(
         "少学一种形态，多建立一道边界"
     )
-    assert 'data-owner-feed' in page.text
+    assert "data-owner-feed" in page.text
     assert 'data-owner-view="trade"' in page.text
     assert 'data-owner-item-kind="trade"' in page.text
     assert "查看全部交易记录" in page.text
@@ -368,8 +443,8 @@ def test_owner_activity_is_login_only_and_shows_only_sanitized_owner_data(tmp_pa
     assert ">613<" not in page.text
     assert ">387<" not in page.text
     assert ">250<" not in page.text
-    assert "name=\"quantity\"" not in page.text
-    assert "name=\"fee\"" not in page.text
+    assert 'name="quantity"' not in page.text
+    assert 'name="fee"' not in page.text
 
     owner = _authenticated_client(app, "我不是来玩的")
     owner_page = owner.get("/a/owner")
@@ -379,9 +454,10 @@ def test_owner_activity_is_login_only_and_shows_only_sanitized_owner_data(tmp_pa
 
 
 def test_relative_database_paths_are_rooted_at_project_directory() -> None:
-    assert _resolve_database_path("data/example.sqlite3") == (
-        PROJECT_ROOT / "data" / "example.sqlite3"
-    ).resolve()
+    assert (
+        _resolve_database_path("data/example.sqlite3")
+        == (PROJECT_ROOT / "data" / "example.sqlite3").resolve()
+    )
 
 
 def test_web_startup_rejects_unmigrated_user_database_without_modifying_it(tmp_path) -> None:
@@ -524,7 +600,15 @@ def _seed_chart_market(path) -> None:
             """
         )
         qfq_rows = [("2026-05-31", 99.0, 99.0, 99.0, 99.0, "2026-05-31", "")] + [
-            (f"2026-06-{day:02d}", 10 + day / 10, 11 + day / 10, 9 + day / 10, 10.5 + day / 10, f"2026-06-{day:02d}", "qfq-scale-v1")
+            (
+                f"2026-06-{day:02d}",
+                10 + day / 10,
+                11 + day / 10,
+                9 + day / 10,
+                10.5 + day / 10,
+                f"2026-06-{day:02d}",
+                "qfq-scale-v1",
+            )
             for day in range(1, 31)
         ]
         connection.executemany(
@@ -541,7 +625,9 @@ def _seed_chart_market(path) -> None:
             """,
             [(row[6], row[0]) for row in qfq_rows],
         )
-        raw_rows = [("2026-05-31", 9.9, 10.9, 8.9, 10.4, "2026-05-31")] + [row[:6] for row in qfq_rows[1:]]
+        raw_rows = [("2026-05-31", 9.9, 10.9, 8.9, 10.4, "2026-05-31")] + [
+            row[:6] for row in qfq_rows[1:]
+        ]
         connection.executemany(
             """
             INSERT INTO daily_bars VALUES ('ashare', '000001.SZ', ?, ?, ?, ?, ?, 1000, 2000,
@@ -555,7 +641,10 @@ def _seed_chart_market(path) -> None:
         )
         connection.executemany(
             "INSERT INTO market_index_daily_bars VALUES ('ashare', '000985.CSI', ?, ?, ?, ?, ?, 1000)",
-            [(row[0], 100 + index, 101 + index, 99 + index, 100.5 + index) for index, row in enumerate(qfq_rows)],
+            [
+                (row[0], 100 + index, 101 + index, 99 + index, 100.5 + index)
+                for index, row in enumerate(qfq_rows)
+            ],
         )
 
 
@@ -582,9 +671,7 @@ def _seed_style_index_market(path) -> None:
                 "000985.CSI": 120.0 + offset,
             }
             rows.extend(
-                (
-                    "ashare", symbol, trade_date, close, close, close, close, 1000.0
-                )
+                ("ashare", symbol, trade_date, close, close, close, close, 1000.0)
                 for symbol, close in closes.items()
             )
         connection.executemany(
@@ -613,27 +700,41 @@ def _seed_chart_method_events(path) -> None:
         )
         facts = (
             (
-                "2026-06-10", "weinstein", "PASS", WEINSTEIN_POLICY_VERSION,
+                "2026-06-10",
+                "weinstein",
+                "PASS",
+                WEINSTEIN_POLICY_VERSION,
                 '{"profile":{"result":"PASS","stage":"STAGE_2",'
                 '"stage_started_on":"2026-06-05","duration_weeks":1,'
                 '"effective_week_end":"2026-06-05"}}',
             ),
             (
-                "2026-06-11", "minervini", "PASS", MINERVINI_POLICY_VERSION,
+                "2026-06-11",
+                "minervini",
+                "PASS",
+                MINERVINI_POLICY_VERSION,
                 '{"profile":{"result":"PASS","failed_checks":[]}}',
             ),
             (
-                "2026-06-15", "minervini", "UNKNOWN", MINERVINI_POLICY_VERSION,
+                "2026-06-15",
+                "minervini",
+                "UNKNOWN",
+                MINERVINI_POLICY_VERSION,
                 '{"profile":{"result":"UNKNOWN","failed_checks":[]}}',
             ),
             (
-                "2026-06-18", "minervini", "PASS", MINERVINI_POLICY_VERSION,
+                "2026-06-18",
+                "minervini",
+                "PASS",
+                MINERVINI_POLICY_VERSION,
                 '{"profile":{"result":"PASS","failed_checks":[]}}',
             ),
             (
-                "2026-06-20", "minervini", "FAIL", MINERVINI_POLICY_VERSION,
-                '{"profile":{"result":"FAIL",'
-                '"failed_checks":["close_above_sma50"]}}',
+                "2026-06-20",
+                "minervini",
+                "FAIL",
+                MINERVINI_POLICY_VERSION,
+                '{"profile":{"result":"FAIL","failed_checks":["close_above_sma50"]}}',
             ),
         )
         connection.executemany(
@@ -648,7 +749,13 @@ def _seed_chart_method_events(path) -> None:
         transitions = (
             ("2026-06-10", "weinstein", "ENTERED", WEINSTEIN_POLICY_VERSION, "RULES_PASS"),
             ("2026-06-11", "minervini", "ENTERED", MINERVINI_POLICY_VERSION, "RULES_PASS"),
-            ("2026-06-15", "minervini", "DATA_GAP", MINERVINI_POLICY_VERSION, "REQUIRED_INPUT_MISSING"),
+            (
+                "2026-06-15",
+                "minervini",
+                "DATA_GAP",
+                MINERVINI_POLICY_VERSION,
+                "REQUIRED_INPUT_MISSING",
+            ),
             ("2026-06-18", "minervini", "REENTERED", MINERVINI_POLICY_VERSION, "RULES_PASS_AGAIN"),
             ("2026-06-20", "minervini", "EXITED", MINERVINI_POLICY_VERSION, "RULES_NO_LONGER_PASS"),
         )
@@ -864,9 +971,7 @@ def test_daily_query_preserves_filters_and_discloses_fallbacks(tmp_path):
         "date=2026-07-31&view=changes&method=minervini&state=NEW"
         "&min_cap=0&industry=851911.SI&q=平安"
     )
-    page = client.get(
-        f"/a/daily?{query}"
-    )
+    page = client.get(f"/a/daily?{query}")
 
     assert page.status_code == 200
     assert "当前行业：" in page.text
@@ -896,9 +1001,7 @@ def test_daily_query_preserves_filters_and_discloses_fallbacks(tmp_path):
     assert "请求日期 2026-08-01 没有观察事实" in fallback.text
     assert "当前显示最新事实日期 2026-07-31" in fallback.text
 
-    legacy = client.get(
-        "/a/daily?date=2026-07-31&method=weinstein&state=STABLE&min_cap=0"
-    )
+    legacy = client.get("/a/daily?date=2026-07-31&method=weinstein&state=STABLE&min_cap=0")
     assert "正式状态变化" in legacy.text
     assert "持续符合" in legacy.text
     assert "state=CONTINUING" in legacy.text
@@ -915,7 +1018,10 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert "仅供研究，不构成投资建议" in response.text
     assert "不构成任何投资建议、收益承诺或自动买卖指令" in response.text
     assert response.text.index("投资风险提示") < response.text.index("今日观察池")
-    assert 'class="section grid kpi-grid watchlist-summary query-summary home-summary"' in response.text
+    assert (
+        'class="section grid kpi-grid watchlist-summary query-summary home-summary"'
+        in response.text
+    )
     assert "数据与方法说明" in response.text
     assert "Weinstein" in response.text
     assert "Minervini" in response.text
@@ -930,7 +1036,7 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert "https://stockpage.10jqka.com.cn/000001/" in response.text
     assert (
         'href="/a/stocks/000001.SZ?date=2026-07-31&amp;view=current&amp;method=all'
-        '&amp;min_cap=0&amp;section=daily-results'
+        "&amp;min_cap=0&amp;section=daily-results"
     ) in response.text
     assert response.text.count("kpi-link") == 4
     assert "view=current" in response.text
@@ -948,9 +1054,7 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert "综合评分" not in response.text
     assert client.get("/").history[0].headers["location"] == "/a/daily"
     assert client.get("/a/dashboard").history[0].headers["location"] == "/a/daily"
-    focus_redirect = client.get(
-        "/a/focus?date=2026-07-31&min_cap=0", follow_redirects=False
-    )
+    focus_redirect = client.get("/a/focus?date=2026-07-31&min_cap=0", follow_redirects=False)
     assert focus_redirect.headers["location"] == (
         "/a/observations?date=2026-07-31&min_cap=0&state=FOCUS"
     )
@@ -971,15 +1075,16 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
         assert filtered.status_code == 200
         assert "请选择 Weinstein 或 Minervini" not in filtered.text
         assert "正式状态变化" in filtered.text
-        assert 'aria-current="page" href="/a/daily?date=2026-07-31&amp;view=changes&amp;method=weinstein' in filtered.text
+        assert (
+            'aria-current="page" href="/a/daily?date=2026-07-31&amp;view=changes&amp;method=weinstein'
+            in filtered.text
+        )
 
 
 def test_weinstein_projection_page_shows_daily_entry_evidence_and_confirmation(tmp_path):
     client = _client(tmp_path)
 
-    response = client.get(
-        "/a/daily?date=2026-07-31&view=projection&state=CHANGE&min_cap=0"
-    )
+    response = client.get("/a/daily?date=2026-07-31&view=projection&state=CHANGE&min_cap=0")
 
     assert response.status_code == 200
     assert "每日进入 / 退出" in response.text
@@ -1120,26 +1225,24 @@ def test_anonymous_user_can_open_combined_indices_and_market_breadth_page(tmp_pa
     assert "Weinstein 只绘制正式完整周点" in response.text
     assert "中证全指" in response.text
     assert "上证综指" in response.text
-    assert 'data-overlay-chart' in response.text
-    assert 'data-proxy-chart' not in response.text
-    assert 'data-rate-chart' not in response.text
+    assert "data-overlay-chart" in response.text
+    assert "data-proxy-chart" not in response.text
+    assert "data-rate-chart" not in response.text
     assert 'onchange="this.form.requestSubmit()"' in response.text
-    assert '>切换</button>' not in response.text
+    assert ">切换</button>" not in response.text
     assert "不合成市场总分" in response.text
     assert 'id="weinstein-breadth-data"' in response.text
     assert 'id="minervini-breadth-data"' in response.text
     assert "breadth-chart.js" in response.text
     assert 'aria-current="page" href="/a/indices?date=2026-07-31"' in response.text
-    assert '个人工作区</span>' not in response.text
+    assert "个人工作区</span>" not in response.text
 
     legacy = client.get(
         "/a/breadth?date=2026-07-31&benchmark=000300.SH",
         follow_redirects=False,
     )
     assert legacy.status_code == 303
-    assert legacy.headers["location"] == (
-        "/a/indices?benchmark=000300.SH&date=2026-07-31"
-    )
+    assert legacy.headers["location"] == ("/a/indices?benchmark=000300.SH&date=2026-07-31")
 
 
 def test_market_risk_context_combines_weekly_daily_and_price_without_score():
@@ -1171,8 +1274,7 @@ def test_market_risk_context_combines_weekly_daily_and_price_without_score():
         ),
     }
     prices = [
-        {"trade_date": f"2026-P-{index + 1:02d}", "close": 1000.0 + index}
-        for index in range(21)
+        {"trade_date": f"2026-P-{index + 1:02d}", "close": 1000.0 + index} for index in range(21)
     ]
     price_summary = _market_price_summary(prices)
 
@@ -1204,9 +1306,7 @@ def test_market_risk_context_requires_full_native_frequency_windows():
         period=4,
         period_label="4周",
     )
-    price = _market_price_summary(
-        [{"trade_date": "2026-07-31", "close": 1000.0}]
-    )
+    price = _market_price_summary([{"trade_date": "2026-07-31", "close": 1000.0}])
     context = _market_risk_context(
         {
             "weinstein": summary,
@@ -1240,8 +1340,7 @@ def test_relative_strength_aligns_dates_and_reports_20d_and_60d_windows():
         {"trade_date": "2026-01-03", "value": 1200.0},
     ]
     synthetic = [
-        {"trade_date": f"2026-{index + 1:03d}", "value": 1000.0 + index}
-        for index in range(61)
+        {"trade_date": f"2026-{index + 1:03d}", "value": 1000.0 + index} for index in range(61)
     ]
     summary = _relative_strength_summary(synthetic)
     assert summary["return_20d_pct"] == 1.92
@@ -1264,9 +1363,7 @@ def test_market_breadth_shows_three_independent_style_relative_pairs(tmp_path):
     )
 
     response = client.get("/a/indices?date=2026-07-31")
-    switched = client.get(
-        "/a/indices?date=2026-07-31&benchmark=000300.SH"
-    )
+    switched = client.get("/a/indices?date=2026-07-31&benchmark=000300.SH")
 
     assert response.status_code == 200
     assert "风格相对强弱" in response.text
@@ -1319,10 +1416,11 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "两种方法独立证据" in detail.text
     assert "30周线" in detail.text
     assert "股份制银行III（申万2021三级）" in detail.text
-    assert detail.text.index("method-evidence-grid") < detail.text.index(
-        "manual-review-panel"
-    )
+    assert detail.text.index("method-evidence-grid") < detail.text.index("manual-review-panel")
     assert "两种方法逐项对照" in detail.text
+    assert "Brooks 第二腿独立证据" in detail.text
+    assert "S1 回吐25%" in detail.text
+    assert "不改变上方两法结论" in detail.text
     assert "异常交易复核" in detail.text
     assert "日线描述性证据 · 不改变 Weinstein 或 Minervini 结论" in detail.text
     assert "daily-anomaly-review-v1" in detail.text
@@ -1349,15 +1447,13 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
 
 def test_watch_observation_tags_can_be_added_filtered_and_edited(tmp_path):
     client = _client(tmp_path)
-    user = client.app.state.user_repository.session_user(
-        client.cookies.get(SESSION_COOKIE)
-    )
+    user = client.app.state.user_repository.session_user(client.cookies.get(SESSION_COOKIE))
     assert user is not None
     detail_before = client.get("/a/stocks/000001.SZ?date=2026-07-31")
     daily_before = client.get("/a/daily?date=2026-07-31&min_cap=0")
     chart_before = client.get("/a/stocks/000001.SZ/chart?date=2026-07-31")
     assert '观察标签<input name="tags"' in detail_before.text
-    assert '标签（可选）' in daily_before.text
+    assert "标签（可选）" in daily_before.text
     assert 'class="chart-review-tag-input" name="tags"' in chart_before.text
 
     added = client.post(
@@ -1374,9 +1470,7 @@ def test_watch_observation_tags_can_be_added_filtered_and_edited(tmp_path):
         user.user_id, "000002.SZ", "WATCH", "另一只", "低位"
     )
 
-    filtered = client.get(
-        "/a/observations?date=2026-07-31&state=WATCH&tag=等待突破"
-    )
+    filtered = client.get("/a/observations?date=2026-07-31&state=WATCH&tag=等待突破")
     assert added.status_code == 200
     assert '观察标签<input name="tags" value="杯柄，等待突破"' in added.text
     assert filtered.status_code == 200
@@ -1404,13 +1498,11 @@ def test_watch_observation_tags_can_be_added_filtered_and_edited(tmp_path):
         "突破后回踩"
     ]
 
-    client.app.state.user_repository.save_review(
-        user.user_id, "000001.SZ", "FOCUS", "转为重点"
-    )
+    client.app.state.user_repository.save_review(user.user_id, "000001.SZ", "FOCUS", "转为重点")
     focus = client.get("/a/observations?date=2026-07-31&state=FOCUS")
-    assert '按标签查询' not in focus.text
-    assert '修改标签' not in focus.text
-    assert '保存标签' not in focus.text
+    assert "按标签查询" not in focus.text
+    assert "修改标签" not in focus.text
+    assert "保存标签" not in focus.text
 
 
 def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tmp_path):
@@ -1466,9 +1558,7 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     client = _authenticated_client(app)
     user = app.state.user_repository.session_user(client.cookies.get(SESSION_COOKIE))
     assert user is not None
-    app.state.user_repository.save_review(
-        user.user_id, "000001.SZ", "FOCUS", "保留既有备注"
-    )
+    app.state.user_repository.save_review(user.user_id, "000001.SZ", "FOCUS", "保留既有备注")
     app.state.user_repository.save_review(user.user_id, "000006.SZ", "FOCUS", "")
 
     workspace = client.get("/a/observations?date=2026-07-31&state=FOCUS")
@@ -1494,10 +1584,7 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert "← ST未来名称" in historical_detail.text
     assert chart.status_code == 200
     assert "我的观察 <b>1 / 2</b>" in chart.text
-    assert (
-        'href="/a/observations?state=FOCUS&amp;date=2026-07-31"'
-        in chart.text
-    )
+    assert 'href="/a/observations?state=FOCUS&amp;date=2026-07-31"' in chart.text
     assert "当日观察池内" in chart.text
     assert "Minervini：符合" in chart.text
     assert "Weinstein：符合" in chart.text
@@ -1617,8 +1704,7 @@ def test_chart_review_keeps_position_when_manual_state_changes_sort_order(tmp_pa
     app.state.user_repository.save_review(user.user_id, "000003.SZ", "FOCUS", "")
 
     chart_url = (
-        "/a/stocks/000001.SZ/chart?date=2026-07-31&manual=all&min_cap=0"
-        "&section=new-candidates"
+        "/a/stocks/000001.SZ/chart?date=2026-07-31&manual=all&min_cap=0&section=new-candidates"
     )
     before = client.get(chart_url)
     assert "新进 / 重进 <b>2 / 2</b>" in before.text
@@ -1669,13 +1755,15 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     industry_controller = client.get("/static/industry-chart.js").text
     assert 'upColor: "#fffdfa"' in industry_controller
     assert 'downColor: "#202020"' in industry_controller
-    assert 'borderVisible: true' in industry_controller
+    assert "borderVisible: true" in industry_controller
     assert "方法宽度顺序 <b>1 / 1</b>" in chart.text
     assert "已是第一个行业" in chart.text
     assert "已是最后一个行业" in chart.text
     assert '<svg class="industry-kline"' not in chart.text
     assert "全部 30 个交易日" in chart.text
-    assert chart.text.index("industry-kline-panel") < chart.text.index("industry-confirmation-panel")
+    assert chart.text.index("industry-kline-panel") < chart.text.index(
+        "industry-confirmation-panel"
+    )
     assert "不计分、不判定“主线”" in page.text
     assert "不构成投资建议或自动买卖指令" in page.text
     assert "industry-observation-table-compact" in page.text
@@ -1717,8 +1805,8 @@ def test_stock_industry_context_is_optional_and_does_not_replace_method_evidence
     assert page.status_code == 200
     assert "Weinstein" in page.text
     assert "交易方案" in page.text
-    assert 'data-trade-setup-field' in page.text
-    assert '卖出原因（可选）' in page.text
+    assert "data-trade-setup-field" in page.text
+    assert "卖出原因（可选）" in page.text
     for reason in ("部分止盈", "抵达阻力位", "高潮离场", "形态不符合预期", "其他"):
         assert f">{reason}</option>" in page.text
     assert 'name="exit_reason_other"' in page.text
@@ -1762,9 +1850,16 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
         "/a/stocks/000001.SZ/trades",
         data={
             "csrf_token": _csrf(client),
-            "traded_on": "2026-07-31", "side": "BUY", "quantity": "100",
-                "price": "12.5", "fee": "5", "plan_setup_id": "OTHER", "stop_price": "12.0",
-            "rationale": "突破", "invalidation": "跌破止损", "market_context": "指数 Stage 2",
+            "traded_on": "2026-07-31",
+            "side": "BUY",
+            "quantity": "100",
+            "price": "12.5",
+            "fee": "5",
+            "plan_setup_id": "OTHER",
+            "stop_price": "12.0",
+            "rationale": "突破",
+            "invalidation": "跌破止损",
+            "market_context": "指数 Stage 2",
         },
         follow_redirects=False,
     )
@@ -1772,8 +1867,12 @@ def test_trade_journal_records_executions_and_renders_descriptive_review(tmp_pat
         "/a/stocks/000001.SZ/trades",
         data={
             "csrf_token": _csrf(client),
-            "traded_on": "2026-08-03", "side": "SELL", "quantity": "100",
-            "price": "13.0", "fee": "5", "exit_reason_choice": "部分止盈",
+            "traded_on": "2026-08-03",
+            "side": "SELL",
+            "quantity": "100",
+            "price": "13.0",
+            "fee": "5",
+            "exit_reason_choice": "部分止盈",
         },
         follow_redirects=False,
     )
@@ -1800,8 +1899,12 @@ def test_trade_review_counts_partial_sell_in_realized_pnl_only(tmp_path):
         "/a/stocks/000001.SZ/trades",
         data={
             "csrf_token": _csrf(client),
-            "traded_on": "2026-07-31", "side": "BUY", "quantity": "100",
-            "price": "10", "fee": "0", "plan_setup_id": "OTHER",
+            "traded_on": "2026-07-31",
+            "side": "BUY",
+            "quantity": "100",
+            "price": "10",
+            "fee": "0",
+            "plan_setup_id": "OTHER",
         },
         follow_redirects=False,
     )
@@ -1809,8 +1912,11 @@ def test_trade_review_counts_partial_sell_in_realized_pnl_only(tmp_path):
         "/a/stocks/000001.SZ/trades",
         data={
             "csrf_token": _csrf(client),
-            "traded_on": "2026-08-03", "side": "SELL", "quantity": "40",
-            "price": "12", "fee": "0",
+            "traded_on": "2026-08-03",
+            "side": "SELL",
+            "quantity": "40",
+            "price": "12",
+            "fee": "0",
         },
         follow_redirects=False,
     )
@@ -1869,23 +1975,16 @@ def test_open_positions_support_previous_and_next_chart_navigation(tmp_path):
     review = client.get("/a/review")
     assert review.status_code == 200
     assert 'id="current-positions"' in review.text
-    assert (
-        "/a/stocks/000001.SZ/chart?date=2026-07-31&amp;section=open-positions"
-        in review.text
-    )
+    assert "/a/stocks/000001.SZ/chart?date=2026-07-31&amp;section=open-positions" in review.text
 
-    first_chart = client.get(
-        "/a/stocks/000001.SZ/chart?date=2026-07-31&section=open-positions"
-    )
+    first_chart = client.get("/a/stocks/000001.SZ/chart?date=2026-07-31&section=open-positions")
     assert first_chart.status_code == 200
     assert "当前持仓 <b>1 / 3</b>" in first_chart.text
     assert 'aria-label="下一只：ST示例"' in first_chart.text
     assert "/a/stocks/000002.SZ/chart?date=2026-07-31" in first_chart.text
     assert 'href="/a/review#current-positions"' in first_chart.text
 
-    middle_chart = client.get(
-        "/a/stocks/000002.SZ/chart?date=2026-07-31&section=open-positions"
-    )
+    middle_chart = client.get("/a/stocks/000002.SZ/chart?date=2026-07-31&section=open-positions")
     assert middle_chart.status_code == 200
     assert "当前持仓 <b>2 / 3</b>" in middle_chart.text
     assert 'aria-label="上一只：ST未来名称"' in middle_chart.text
@@ -1906,12 +2005,13 @@ def test_open_positions_support_previous_and_next_chart_navigation(tmp_path):
     assert "/a/stocks/000001.SZ/realtime?date=2026-07-31" in middle_realtime.text
     assert "/a/stocks/000003.SZ/realtime?date=2026-07-31" in middle_realtime.text
     assert 'src="https://stockpage.10jqka.com.cn/000002/"' in middle_realtime.text
-    assert 'sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"' in middle_realtime.text
+    assert (
+        'sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"'
+        in middle_realtime.text
+    )
     assert 'class="app-body realtime-chart-body"' in middle_realtime.text
 
-    last_chart = client.get(
-        "/a/stocks/000003.SZ/chart?date=2026-07-31&section=open-positions"
-    )
+    last_chart = client.get("/a/stocks/000003.SZ/chart?date=2026-07-31&section=open-positions")
     assert last_chart.status_code == 200
     assert "当前持仓 <b>3 / 3</b>" in last_chart.text
     assert 'aria-label="上一只：ST示例"' in last_chart.text
@@ -2007,9 +2107,7 @@ def test_daily_watchlist_orders_quotes_by_change_pct_descending(tmp_path):
         )
     )
 
-    page = client.get(
-        "/a/daily?date=2026-07-31&view=current&method=minervini&min_cap=0"
-    )
+    page = client.get("/a/daily?date=2026-07-31&view=current&method=minervini&min_cap=0")
 
     assert page.status_code == 200
     assert page.text.index("小盘示例") < page.text.index("平安银行")
@@ -2031,13 +2129,24 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert user is not None
     buy_id = app.state.user_repository.record_trade(
         user.user_id,
-        traded_on="2026-06-10", symbol="000001.SZ", side="BUY", quantity=100,
-        price=11.5, fee=0.0, method="MANUAL", stop_price=10.5,
+        traded_on="2026-06-10",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=11.5,
+        fee=0.0,
+        method="MANUAL",
+        stop_price=10.5,
     )
     app.state.user_repository.record_trade(
         user.user_id,
-        traded_on="2026-06-20", symbol="000001.SZ", side="SELL", quantity=100,
-        price=12.5, fee=0.0, method="MANUAL",
+        traded_on="2026-06-20",
+        symbol="000001.SZ",
+        side="SELL",
+        quantity=100,
+        price=12.5,
+        fee=0.0,
+        method="MANUAL",
     )
 
     page = client.get("/a/stocks/000001.SZ/chart?date=2026-06-30")
@@ -2052,22 +2161,21 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in page.text
     assert "https://stockpage.10jqka.com.cn/000001/" in page.text
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
-    assert 'data-chart-source=' not in page.text
-    assert 'data-chart-pane=' not in page.text
+    assert "data-chart-source=" not in page.text
+    assert "data-chart-pane=" not in page.text
     assert "stock-chart.js?v=20260831-trade-info-toggle-v1" in page.text
     assert "stock-chart-source.js" not in page.text
-    assert 'data-chart-period-change' in page.text
-    assert 'data-chart-ohlcv' in page.text
-    assert 'data-chart-state-overlay' in page.text
-    assert 'data-chart-retry hidden' in page.text
+    assert "data-chart-period-change" in page.text
+    assert "data-chart-ohlcv" in page.text
+    assert "data-chart-state-overlay" in page.text
+    assert "data-chart-retry hidden" in page.text
     assert 'data-draw-tool="trendline" aria-label="趋势线"' in page.text
     assert 'data-draw-tool="horizontal" aria-label="水平线"' in page.text
     assert 'data-draw-tool="text" aria-label="文字标记"' in page.text
     assert "lucide-trend-line.svg" in page.text
     assert "lucide-trending-up.svg" not in page.text
     trendline_icon = (
-        PROJECT_ROOT
-        / "src/master_stock_selector/web/static/vendor/lucide-trend-line.svg"
+        PROJECT_ROOT / "src/master_stock_selector/web/static/vendor/lucide-trend-line.svg"
     ).read_text()
     assert trendline_icon.count("<path") == 1
     assert 'd="M4 18 20 6"' in trendline_icon
@@ -2076,7 +2184,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "data-drawing-text-editor hidden" in page.text
     assert "当日观察池" in page.text
     assert "当日涨跌幅" in page.text
-    assert 'data-kc-source' in page.text
+    assert "data-kc-source" in page.text
     assert 'data-chart-limit="all"' in page.text
     assert 'data-chart-interval="day"' in page.text
     assert 'data-chart-interval="week"' in page.text
@@ -2091,25 +2199,27 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-framework-layer="minervini" checked' not in page.text
     assert 'data-framework-layer="minervini"' in page.text
     assert 'data-framework-layer="weinstein" checked' in page.text
-    assert 'data-keltner checked' in page.text
-    assert 'data-trade-info checked' in page.text
-    assert '> 成交信息</label>' in page.text
+    assert "data-keltner checked" in page.text
+    assert "data-trade-info checked" in page.text
+    assert "> 成交信息</label>" in page.text
     assert "A股日线校准：20 / 20 / 2.35" in page.text
     assert "Adam原始参考：20 / 20 / 2.25" in page.text
     assert 'data-kc-atr-length type="number" min="1" max="250" value="20"' in page.text
-    assert 'data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="2.35"' in page.text
-    assert 'data-method-layer=' not in page.text
-    assert 'data-chart-framework-panel' in page.text
+    assert (
+        'data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="2.35"' in page.text
+    )
+    assert "data-method-layer=" not in page.text
+    assert "data-chart-framework-panel" in page.text
     assert page.text.count("> 均线</label>") == 2
     assert "M大师均线与RS" not in page.text
     assert "W大师均线" not in page.text
     assert "叠加" not in page.text
-    assert 'data-chart-compare' not in page.text
+    assert "data-chart-compare" not in page.text
     assert "双框架摘要" not in page.text
-    assert 'data-chart-record' not in page.text
+    assert "data-chart-record" not in page.text
     assert "录入成交" not in page.text
-    assert 'data-chart-method-timeline' in page.text
-    assert 'data-chart-anomaly-evidence' in page.text
+    assert "data-chart-method-timeline" in page.text
+    assert "data-chart-anomaly-evidence" in page.text
     assert "异常交易复核" in page.text
     assert 'data-anomaly-url="/api/a/stocks/000001.SZ/anomaly?date=2026-06-30"' in page.text
     assert "daily-anomaly-review-v1" not in page.text
@@ -2134,7 +2244,10 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "storeAppearance();" in controller
     assert "restoreChartView();" in controller
     assert "storeChartView();" in controller
-    assert 'const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";' in controller
+    assert (
+        'const frameworkForInterval = () => interval === "week" ? "weinstein" : "minervini";'
+        in controller
+    )
     assert "renderFrameworkPanel();" in controller
     assert "renderTimeline();" in controller
     assert "renderComparePanel" not in controller
@@ -2142,7 +2255,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "recordMode" not in controller
     assert "version !== requestVersion" in controller
     assert "new AbortController()" in controller
-    assert 'const chartCacheLimit = 12;' in controller
+    assert "const chartCacheLimit = 12;" in controller
     assert 'root.querySelector("[data-chart-next]")' in controller
     assert "scheduleAdjacentChartPrefetch();" in controller
     assert "overlayRequest = loadPrivateOverlay(cached);" in controller
@@ -2152,7 +2265,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "setChartState(" in controller
     assert "compactVolume" in controller
     assert "renderTextDrawings();" in controller
-    assert 'interval_scope: interval' in controller
+    assert "interval_scope: interval" in controller
     assert chart.status_code == 200
     payload = chart.json()
     assert payload["status"] == "OK"
@@ -2176,36 +2289,31 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert payload["bars"][-1]["change_amount"] == 0.1
     assert payload["bars"][-1]["change_pct"] == 0.75
     assert [item["label"] for item in payload["method_events"]] == [
-        "W入", "M入", "M?", "M再", "M出",
+        "W入",
+        "M入",
+        "M?",
+        "M再",
+        "M出",
     ]
     assert payload["method_events"][0]["as_of_date"] == "2026-06-10"
     assert payload["method_events"][0]["effective_date"] == "2026-06-05"
     assert payload["method_events"][0]["plot_date"] == "2026-06-10"
-    assert payload["method_events"][-1]["failed_checks"] == [
-        "close_above_sma50"
-    ]
-    assert not payload["method_event_coverage"]["weinstein"][
-        "complete_for_chart_range"
-    ]
-    all_payload = client.get(
-        "/api/a/stocks/000001.SZ/chart?date=2026-06-30"
-    ).json()
+    assert payload["method_events"][-1]["failed_checks"] == ["close_above_sma50"]
+    assert not payload["method_event_coverage"]["weinstein"]["complete_for_chart_range"]
+    all_payload = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30").json()
     assert len(all_payload["bars"]) > len(payload["bars"])
     assert all_payload["bars"][0]["trade_date"] == "2026-05-31"
     assert all_payload["bars"][0]["close"] == 10.4
     assert payload["keltner"][-1]["upper"] is not None
     assert "trade_overlay" not in payload
 
-    anomaly = client.get(
-        "/api/a/stocks/000001.SZ/anomaly?date=2026-06-30"
-    )
+    anomaly = client.get("/api/a/stocks/000001.SZ/anomaly?date=2026-06-30")
     assert anomaly.status_code == 200
     assert anomaly.json()["policy_version"] == "daily-anomaly-review-v1"
     assert len(anomaly.json()["evidence"]) == 5
 
     overlay = client.get(
-        "/api/me/stocks/000001.SZ/overlay"
-        "?date=2026-06-30&price_scale_id=qfq-scale-v1"
+        "/api/me/stocks/000001.SZ/overlay?date=2026-06-30&price_scale_id=qfq-scale-v1"
     ).json()
     assert overlay["trade_overlay"]["executions"][0]["execution_id"] == buy_id
     assert overlay["trade_overlay"]["executions"][0]["stop_price"] == 10.5
@@ -2227,9 +2335,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert len(weekly["bars"]) < len(payload["bars"])
     assert weekly["bars"][-1]["change_pct"] is not None
     assert weekly["method_events"][0]["as_of_date"] == "2026-06-10"
-    assert weekly["method_events"][0]["plot_date"] in {
-        row["trade_date"] for row in weekly["bars"]
-    }
+    assert weekly["method_events"][0]["plot_date"] in {row["trade_date"] for row in weekly["bars"]}
     assert weekly["method_events"][0]["plot_date"] != "2026-06-05"
     open_source = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&source=open"
@@ -2250,8 +2356,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     )
     assert saved.status_code == 200
     drawings = client.get(
-        "/api/me/stocks/000001.SZ/overlay"
-        "?date=2026-06-30&price_scale_id=qfq-scale-v1"
+        "/api/me/stocks/000001.SZ/overlay?date=2026-06-30&price_scale_id=qfq-scale-v1"
     ).json()["drawings"]
     assert drawings[0]["anchors"][1]["logical_from_end"] == 5.5
     text_saved = client.post(
@@ -2269,12 +2374,10 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert text_saved.status_code == 200
     assert text_saved.json()["content_text"] == "突破后首次缩量回踩"
     day_drawings = client.get(
-        "/api/me/stocks/000001.SZ/overlay"
-        "?date=2026-06-30&price_scale_id=qfq-scale-v1&interval=day"
+        "/api/me/stocks/000001.SZ/overlay?date=2026-06-30&price_scale_id=qfq-scale-v1&interval=day"
     ).json()["drawings"]
     week_drawings = client.get(
-        "/api/me/stocks/000001.SZ/overlay"
-        "?date=2026-06-30&price_scale_id=qfq-scale-v1&interval=week"
+        "/api/me/stocks/000001.SZ/overlay?date=2026-06-30&price_scale_id=qfq-scale-v1&interval=week"
     ).json()["drawings"]
     assert {item["drawing_id"] for item in day_drawings} == {"line-1", "text-1"}
     assert {item["drawing_id"] for item in week_drawings} == {"line-1"}
@@ -2282,9 +2385,11 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
         "/api/me/stocks/000001.SZ/chart/drawings",
         headers={"X-CSRF-Token": _csrf(client)},
         json={
-            "price_scale_id": "qfq-scale-v1", "tool": "text",
+            "price_scale_id": "qfq-scale-v1",
+            "tool": "text",
             "anchors": [{"date": "2026-06-10", "price": 11.5}],
-            "content_text": "", "interval_scope": "day",
+            "content_text": "",
+            "interval_scope": "day",
         },
     )
     assert invalid_text.status_code == 400
@@ -2333,9 +2438,7 @@ def test_limited_stock_chart_reads_market_bars_once(tmp_path, monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(app.state.market_reader, "safe_stock_chart_bars", counted)
-    response = TestClient(app).get(
-        "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30"
-    )
+    response = TestClient(app).get("/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30")
 
     assert response.status_code == 200
     assert len(calls) == 1
@@ -2414,43 +2517,40 @@ def test_anonymous_surface_is_public_read_only_and_private_routes_require_login(
     login = client.get("/login")
     assert "公开事实与个人判断" in login.text
     assert "一个账号对应一个独立工作区" in login.text
-    assert 'data-password-toggle' in login.text
+    assert "data-password-toggle" in login.text
     assert "进入我的工作区" in login.text
     assert "site-footer" not in login.text
     stock = client.get("/a/stocks/000001.SZ")
     chart = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30")
 
     assert stock.status_code == 200
-    assert stock.headers["cache-control"] == (
-        "public, max-age=30, stale-while-revalidate=60"
-    )
-    assert chart.headers["cache-control"] == (
-        "public, max-age=300, stale-while-revalidate=60"
-    )
+    assert stock.headers["cache-control"] == ("public, max-age=30, stale-while-revalidate=60")
+    assert chart.headers["cache-control"] == ("public, max-age=300, stale-while-revalidate=60")
     assert "登录后记录个人观察" in stock.text
     assert 'action="/a/stocks/000001.SZ/review"' not in stock.text
     assert "trade_overlay" not in chart.json()
     assert "drawings" not in chart.json()
-    assert client.get("/a/focus", follow_redirects=False).headers["location"].startswith(
-        "/login"
-    )
-    assert client.get("/a/review", follow_redirects=False).headers["location"].startswith(
-        "/login"
-    )
+    assert client.get("/a/focus", follow_redirects=False).headers["location"].startswith("/login")
+    assert client.get("/a/review", follow_redirects=False).headers["location"].startswith("/login")
     combined_market = client.get("/a/indices")
     assert combined_market.status_code == 200
     assert "市场全景" in combined_market.text
     assert client.get("/a/breadth", follow_redirects=False).headers["location"] == (
         "/a/indices?benchmark=000985.CSI"
     )
-    assert client.post(
-        "/a/stocks/000001.SZ/review",
-        data={"manual_state": "FOCUS", "note": "不应写入"},
-    ).status_code == 401
-    assert client.get(
-        "/api/me/stocks/000001.SZ/overlay"
-        "?date=2026-06-30&price_scale_id=qfq-scale-v1"
-    ).status_code == 401
+    assert (
+        client.post(
+            "/a/stocks/000001.SZ/review",
+            data={"manual_state": "FOCUS", "note": "不应写入"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.get(
+            "/api/me/stocks/000001.SZ/overlay?date=2026-06-30&price_scale_id=qfq-scale-v1"
+        ).status_code
+        == 401
+    )
     assert client.get("/healthz").headers["cache-control"] == "no-store"
 
 
@@ -2483,48 +2583,55 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
     alice = _authenticated_client(app, "alice")
     bob = _authenticated_client(app, "bob")
 
-    assert alice.post(
-        "/a/stocks/000001.SZ/review",
-        data={
-            "csrf_token": _csrf(alice),
-            "manual_state": "FOCUS",
-            "note": "Alice 私有备注",
-        },
-        follow_redirects=False,
-    ).status_code == 303
-    assert alice.post(
-        "/a/stocks/000001.SZ/c1",
-        data={
-            "csrf_token": _csrf(alice),
-            "as_of_date": "2026-07-31",
-            "range_started_on": "2026-04-01",
-            "lower_bound": "9.5",
-            "upper_bound": "13.5",
-            "atr14": "0.8",
-            "support_test_count": "3",
-            "structure_state": "READY",
-            "entry_variant": "FIRST",
-            "note": "Alice C1私有结构",
-        },
-        follow_redirects=False,
-    ).status_code == 303
-    assert alice.post(
-        "/a/stocks/000001.SZ/trades",
-        data={
-            "csrf_token": _csrf(alice),
-            "traded_on": "2026-06-10",
-            "side": "BUY",
-            "quantity": "100",
-            "price": "11.5",
-            "fee": "0",
-            "setup_method": "PULLBACK",
-            "stop_price": "10.5",
-        },
-        follow_redirects=False,
-    ).status_code == 303
-    alice_user = app.state.user_repository.session_user(
-        alice.cookies.get(SESSION_COOKIE)
+    assert (
+        alice.post(
+            "/a/stocks/000001.SZ/review",
+            data={
+                "csrf_token": _csrf(alice),
+                "manual_state": "FOCUS",
+                "note": "Alice 私有备注",
+            },
+            follow_redirects=False,
+        ).status_code
+        == 303
     )
+    assert (
+        alice.post(
+            "/a/stocks/000001.SZ/c1",
+            data={
+                "csrf_token": _csrf(alice),
+                "as_of_date": "2026-07-31",
+                "range_started_on": "2026-04-01",
+                "lower_bound": "9.5",
+                "upper_bound": "13.5",
+                "atr14": "0.8",
+                "support_test_count": "3",
+                "structure_state": "READY",
+                "entry_variant": "FIRST",
+                "note": "Alice C1私有结构",
+            },
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    assert (
+        alice.post(
+            "/a/stocks/000001.SZ/trades",
+            data={
+                "csrf_token": _csrf(alice),
+                "traded_on": "2026-06-10",
+                "side": "BUY",
+                "quantity": "100",
+                "price": "11.5",
+                "fee": "0",
+                "setup_method": "PULLBACK",
+                "stop_price": "10.5",
+            },
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    alice_user = app.state.user_repository.session_user(alice.cookies.get(SESSION_COOKIE))
     assert alice_user is not None
     alice_review = app.state.user_repository.trade_review(
         alice_user.user_id, {"000001.SZ": "平安银行"}
@@ -2538,18 +2645,27 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
     assert "Alice C1私有结构" not in bob.get("/a/stocks/000001.SZ").text
     assert "Alice C1私有结构" not in bob.get("/api/a/watchlist/2026-07-31?min_cap=0").text
     assert bob.get("/a/daily?manual=FOCUS&min_cap=0").text.count("000001.SZ") == 0
-    assert bob.post(
-        f"/a/trades/{execution_id}",
-        data={"csrf_token": _csrf(bob)},
-    ).status_code == 404
-    assert alice.post(
-        "/a/stocks/000001.SZ/review",
-        data={"manual_state": "ARCHIVED"},
-    ).status_code == 403
-    assert alice.post(
-        "/a/stocks/000001.SZ/c1",
-        data={"action": "clear"},
-    ).status_code == 403
+    assert (
+        bob.post(
+            f"/a/trades/{execution_id}",
+            data={"csrf_token": _csrf(bob)},
+        ).status_code
+        == 404
+    )
+    assert (
+        alice.post(
+            "/a/stocks/000001.SZ/review",
+            data={"manual_state": "ARCHIVED"},
+        ).status_code
+        == 403
+    )
+    assert (
+        alice.post(
+            "/a/stocks/000001.SZ/c1",
+            data={"action": "clear"},
+        ).status_code
+        == 403
+    )
 
     saved = alice.post(
         "/api/me/stocks/000001.SZ/chart/drawings",
@@ -2563,12 +2679,10 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
     )
     assert saved.status_code == 200
     alice_overlay = alice.get(
-        "/api/me/stocks/000001.SZ/overlay"
-        "?date=2026-06-30&price_scale_id=qfq-scale-v1"
+        "/api/me/stocks/000001.SZ/overlay?date=2026-06-30&price_scale_id=qfq-scale-v1"
     ).json()
     bob_overlay = bob.get(
-        "/api/me/stocks/000001.SZ/overlay"
-        "?date=2026-06-30&price_scale_id=qfq-scale-v1"
+        "/api/me/stocks/000001.SZ/overlay?date=2026-06-30&price_scale_id=qfq-scale-v1"
     ).json()
     assert len(alice_overlay["drawings"]) == 1
     assert len(alice_overlay["trade_overlay"]["executions"]) == 1
@@ -2577,8 +2691,7 @@ def test_two_users_are_isolated_for_reviews_trades_drawings_and_csrf(tmp_path):
         "trade_overlay": {"executions": [], "open_stops": []},
     }
     assert bob.delete(
-        "/api/me/stocks/000001.SZ/chart/drawings/alice-line"
-        "?price_scale_id=qfq-scale-v1",
+        "/api/me/stocks/000001.SZ/chart/drawings/alice-line?price_scale_id=qfq-scale-v1",
         headers={"X-CSRF-Token": _csrf(bob)},
     ).json() == {"deleted": False}
 
@@ -2618,9 +2731,7 @@ def test_authenticated_user_can_change_password_from_account_settings(tmp_path):
         secure_cookies=False,
     )
     client = _authenticated_client(app)
-    authenticated = app.state.user_repository.session_user(
-        client.cookies.get(SESSION_COOKIE)
-    )
+    authenticated = app.state.user_repository.session_user(client.cookies.get(SESSION_COOKIE))
     assert authenticated is not None
     api_token, _ = app.state.user_repository.create_api_token(
         authenticated.user_id, "password-change"
@@ -2664,22 +2775,29 @@ def test_authenticated_user_can_change_password_from_account_settings(tmp_path):
     assert changed.headers["location"] == "/login?password_changed=1"
     assert client.cookies.get(SESSION_COOKIE) is None
     assert client.get("/a/observations", follow_redirects=False).status_code == 303
-    assert client.get(
-        "/api/v1/me", headers={"Authorization": f"Bearer {api_token}"}
-    ).status_code == 401
+    assert (
+        client.get("/api/v1/me", headers={"Authorization": f"Bearer {api_token}"}).status_code
+        == 401
+    )
 
     notice = client.get(changed.headers["location"])
     assert "密码已更新" in notice.text
-    assert client.post(
-        "/login",
-        data={"username": "tester", "password": "Test-password-123"},
-        follow_redirects=False,
-    ).status_code == 401
-    assert client.post(
-        "/login",
-        data={"username": "tester", "password": "New-test-password-456"},
-        follow_redirects=False,
-    ).status_code == 303
+    assert (
+        client.post(
+            "/login",
+            data={"username": "tester", "password": "Test-password-123"},
+            follow_redirects=False,
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/login",
+            data={"username": "tester", "password": "New-test-password-456"},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
 
 
 def test_change_password_requires_login_csrf_and_matching_confirmation(tmp_path):
@@ -2691,21 +2809,25 @@ def test_change_password_requires_login_csrf_and_matching_confirmation(tmp_path)
         secure_cookies=False,
     )
     anonymous = TestClient(app)
-    assert anonymous.get("/account/password", follow_redirects=False).headers[
-        "location"
-    ] == "/login?next=/account/password"
+    assert (
+        anonymous.get("/account/password", follow_redirects=False).headers["location"]
+        == "/login?next=/account/password"
+    )
     assert anonymous.post("/account/password", data={}).status_code == 401
 
     client = _authenticated_client(app)
-    assert client.post(
-        "/account/password",
-        data={
-            "csrf_token": "wrong",
-            "current_password": "Test-password-123",
-            "new_password": "New-test-password-456",
-            "new_password_confirmation": "New-test-password-456",
-        },
-    ).status_code == 403
+    assert (
+        client.post(
+            "/account/password",
+            data={
+                "csrf_token": "wrong",
+                "current_password": "Test-password-123",
+                "new_password": "New-test-password-456",
+                "new_password_confirmation": "New-test-password-456",
+            },
+        ).status_code
+        == 403
+    )
     mismatch = client.post(
         "/account/password",
         data={

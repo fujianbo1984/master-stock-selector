@@ -463,6 +463,120 @@ BEFORE DELETE ON industry_observation_daily_fact BEGIN
 END;
 """
 
+BROOKS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS brooks_impulse_event (
+    event_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    signal_date TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    duration_bars INTEGER NOT NULL CHECK (duration_bars IN (3, 5, 8)),
+    impulse_start REAL NOT NULL CHECK (impulse_start > 0),
+    signal_close REAL NOT NULL CHECK (signal_close > 0),
+    signal_high REAL NOT NULL CHECK (signal_high > 0),
+    impulse_height REAL NOT NULL CHECK (impulse_height > 0),
+    atr20 REAL NOT NULL CHECK (atr20 > 0),
+    move_atr REAL NOT NULL,
+    path_efficiency REAL NOT NULL,
+    bullish_body_count INTEGER NOT NULL,
+    bullish_body_share REAL NOT NULL,
+    mean_close_location REAL NOT NULL,
+    mean_overlap REAL NOT NULL,
+    speed_atr_per_session REAL NOT NULL,
+    median_amount20 REAL NOT NULL,
+    signal_tradability TEXT NOT NULL,
+    source_digest TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
+    policy_version TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_id, policy_version)
+);
+CREATE INDEX IF NOT EXISTS idx_brooks_impulse_signal
+ON brooks_impulse_event(signal_date, symbol);
+CREATE TABLE IF NOT EXISTS brooks_second_leg_daily_fact (
+    as_of_date TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN (
+        'S0_IMPULSE', 'S1_TOUCH25', 'S2_H1', 'S2_H1_H2_TAG',
+        'COMPLETED', 'INVALIDATED', 'STALE', 'PAUSED'
+    )),
+    state_reason TEXT NOT NULL,
+    state_rank INTEGER NOT NULL,
+    state_changed_on TEXT NOT NULL,
+    touch25_date TEXT NOT NULL DEFAULT '',
+    h1_date TEXT NOT NULL DEFAULT '',
+    h1_failure_date TEXT NOT NULL DEFAULT '',
+    h2_date TEXT NOT NULL DEFAULT '',
+    bars_after_signal INTEGER NOT NULL,
+    bars_after_touch25 INTEGER NOT NULL,
+    current_retracement REAL NOT NULL,
+    maximum_low_retracement REAL NOT NULL,
+    pullback_atr REAL NOT NULL,
+    pullback_low_anchor REAL NOT NULL,
+    prior_high REAL NOT NULL,
+    mm_0_8 REAL NOT NULL,
+    mm_1_0 REAL NOT NULL,
+    tight_invalidation REAL NOT NULL,
+    structural_invalidation REAL NOT NULL,
+    prior_high_touched INTEGER NOT NULL CHECK (prior_high_touched IN (0, 1)),
+    prior_high_closed INTEGER NOT NULL CHECK (prior_high_closed IN (0, 1)),
+    mm_0_8_completed INTEGER NOT NULL CHECK (mm_0_8_completed IN (0, 1)),
+    mm_1_0_completed INTEGER NOT NULL CHECK (mm_1_0_completed IN (0, 1)),
+    next_open_status TEXT NOT NULL,
+    tradability_reason TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL,
+    source_digest TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
+    policy_version TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (as_of_date, event_id, policy_version),
+    FOREIGN KEY (event_id, policy_version)
+        REFERENCES brooks_impulse_event(event_id, policy_version)
+);
+CREATE INDEX IF NOT EXISTS idx_brooks_daily_state
+ON brooks_second_leg_daily_fact(as_of_date, state, state_rank);
+CREATE INDEX IF NOT EXISTS idx_brooks_daily_symbol
+ON brooks_second_leg_daily_fact(symbol, as_of_date);
+CREATE TABLE IF NOT EXISTS brooks_run_receipt (
+    run_id TEXT NOT NULL PRIMARY KEY,
+    as_of_date TEXT NOT NULL,
+    from_date TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('RECONSTRUCTED', 'OBSERVED')),
+    policy_version TEXT NOT NULL,
+    market_database TEXT NOT NULL,
+    source_digest TEXT NOT NULL,
+    counts_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status = 'SUCCESS'),
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TRIGGER IF NOT EXISTS trg_brooks_impulse_no_update
+BEFORE UPDATE ON brooks_impulse_event BEGIN
+    SELECT RAISE(ABORT, 'brooks_impulse_event is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_brooks_impulse_no_delete
+BEFORE DELETE ON brooks_impulse_event BEGIN
+    SELECT RAISE(ABORT, 'brooks_impulse_event is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_brooks_daily_no_update
+BEFORE UPDATE ON brooks_second_leg_daily_fact BEGIN
+    SELECT RAISE(ABORT, 'brooks_second_leg_daily_fact is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_brooks_daily_no_delete
+BEFORE DELETE ON brooks_second_leg_daily_fact BEGIN
+    SELECT RAISE(ABORT, 'brooks_second_leg_daily_fact is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_brooks_receipt_no_update
+BEFORE UPDATE ON brooks_run_receipt BEGIN
+    SELECT RAISE(ABORT, 'brooks_run_receipt is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_brooks_receipt_no_delete
+BEFORE DELETE ON brooks_run_receipt BEGIN
+    SELECT RAISE(ABORT, 'brooks_run_receipt is immutable');
+END;
+"""
+
 
 class MarketDataReader:
     def __init__(self, path: str | Path):
@@ -607,6 +721,122 @@ class MarketDataReader:
                 yield current_symbol, values
         finally:
             connection.close()
+
+    def iter_brooks_bars(self, end_date: str) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+        """Yield raw×same-date-factor bars required by the frozen Brooks contract."""
+
+        connection = self.connect()
+        try:
+            tables = {
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if "daily_adjustment_factors" not in tables:
+                raise ValueError(
+                    "行情库缺少 daily_adjustment_factors，不能按冻结复权口径计算 Brooks"
+                )
+            bar_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(daily_bars)").fetchall()
+            }
+            factor_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(daily_adjustment_factors)"
+                ).fetchall()
+            }
+            required = {"market", "symbol", "trade_date", "open", "high", "low", "close"}
+            if not required.issubset(bar_columns):
+                raise ValueError("行情库 daily_bars 缺少 Brooks 所需 OHLC 字段")
+            bar_as_of = " AND raw.data_as_of_date <= ?" if "data_as_of_date" in bar_columns else ""
+            factor_as_of = (
+                " AND factor.factor_as_of_date <= ?"
+                if "factor_as_of_date" in factor_columns
+                else ""
+            )
+            parameters: list[str] = [end_date]
+            if bar_as_of:
+                parameters.append(end_date)
+            if factor_as_of:
+                parameters.append(end_date)
+            amount = "raw.amount" if "amount" in bar_columns else "NULL"
+            pre_close = "raw.pre_close" if "pre_close" in bar_columns else "NULL"
+            input_hash = "raw.input_hash" if "input_hash" in bar_columns else "''"
+            cursor = connection.execute(
+                f"""
+                SELECT raw.symbol, raw.trade_date,
+                       raw.open * factor.adj_factor AS open,
+                       raw.high * factor.adj_factor AS high,
+                       raw.low * factor.adj_factor AS low,
+                       raw.close * factor.adj_factor AS close,
+                       {amount} AS amount, {pre_close} AS pre_close,
+                       raw.open AS raw_open, raw.high AS raw_high,
+                       raw.low AS raw_low, raw.close AS raw_close,
+                       {input_hash} || '|' || factor.adj_factor AS source_token
+                FROM daily_bars AS raw
+                JOIN daily_adjustment_factors AS factor
+                  ON factor.market=raw.market AND factor.symbol=raw.symbol
+                 AND factor.trade_date=raw.trade_date
+                WHERE raw.market='ashare' AND raw.adj_type='raw'
+                  AND raw.trade_date <= ?{bar_as_of}{factor_as_of}
+                  AND factor.adj_factor > 0
+                ORDER BY raw.symbol, raw.trade_date
+                """,
+                tuple(parameters),
+            )
+            current_symbol = ""
+            values: list[dict[str, Any]] = []
+            for row in cursor:
+                symbol = str(row["symbol"]).upper()
+                if current_symbol and symbol != current_symbol:
+                    yield current_symbol, values
+                    values = []
+                current_symbol = symbol
+                values.append(dict(row))
+            if current_symbol:
+                yield current_symbol, values
+        finally:
+            connection.close()
+
+    def security_histories(self, end_date: str) -> dict[str, list[dict[str, Any]]]:
+        """Return point-in-time identity/eligibility changes through one date."""
+
+        with self.connect() as connection:
+            table = connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='security_master_history'
+                """
+            ).fetchone()
+            if table:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM security_master_history
+                    WHERE valid_from <= ? ORDER BY symbol, valid_from
+                    """,
+                    (end_date,),
+                ).fetchall()
+            else:
+                rows = []
+        result: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            result[str(row["symbol"]).upper()].append(dict(row))
+        if result:
+            return dict(result)
+        for symbol, member in self.security_members(end_date).items():
+            result[symbol].append(
+                {
+                    "valid_from": str(member.get("list_date") or ""),
+                    "name": str(member.get("name") or ""),
+                    "industry": str(member.get("industry") or ""),
+                    "list_date": str(member.get("list_date") or ""),
+                    "listing_status_as_of": str(member.get("listing_status_as_of") or "listed"),
+                    "is_st": int(bool(member.get("is_st"))),
+                    "is_suspended": int(bool(member.get("is_suspended"))),
+                    "trading_status": str(member.get("trading_status") or "trading"),
+                }
+            )
+        return dict(result)
 
     def index_bars(self, index_symbol: str, end_date: str) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -932,9 +1162,7 @@ class MarketDataReader:
     ) -> dict[str, Any]:
         """Return a point-in-time descriptive anomaly review for one stock."""
 
-        requested = sorted(
-            {str(value).upper() for value in (*peer_symbols, symbol) if value}
-        )
+        requested = sorted({str(value).upper() for value in (*peer_symbols, symbol) if value})
         if not requested:
             return empty_daily_anomaly_evidence()
         with self.connect() as connection:
@@ -1307,6 +1535,43 @@ class WatchlistRepository:
                 self._ensure_trade_execution_columns(connection)
             self._initialized = True
 
+    def brooks_schema_ready(self) -> bool:
+        if not self.path.is_file():
+            return False
+        try:
+            with sqlite3.connect(f"file:{self.path.resolve()}?mode=ro", uri=True) as connection:
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+            return {
+                "brooks_impulse_event",
+                "brooks_second_leg_daily_fact",
+                "brooks_run_receipt",
+            }.issubset(tables)
+        except sqlite3.Error:
+            return False
+
+    def migrate_brooks_schema(self) -> dict[str, Any]:
+        """Explicitly add the isolated Brooks fact domain; never rewrite old facts."""
+
+        self.initialize()
+        already_ready = self.brooks_schema_ready()
+        with self.connect() as connection:
+            connection.executescript(BROOKS_SCHEMA_SQL)
+        return {
+            "status": "READY",
+            "database": str(self.path.resolve()),
+            "state": "REUSED" if already_ready else "CREATED",
+            "tables": [
+                "brooks_impulse_event",
+                "brooks_second_leg_daily_fact",
+                "brooks_run_receipt",
+            ],
+        }
+
     def _existing_schema_is_current(self) -> bool:
         """Avoid a schema write when opening the already-initialized live database."""
         if not self.path.is_file():
@@ -1653,6 +1918,261 @@ class WatchlistRepository:
                     )
                 ],
             )
+
+    def latest_brooks_fact_date(self) -> str:
+        if not self.brooks_schema_ready():
+            return ""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT MAX(as_of_date) FROM brooks_second_leg_daily_fact"
+            ).fetchone()
+        return str(row[0] or "") if row else ""
+
+    def latest_brooks_run_date(self) -> str:
+        if not self.brooks_schema_ready():
+            return ""
+        with self.connect() as connection:
+            row = connection.execute("SELECT MAX(as_of_date) FROM brooks_run_receipt").fetchone()
+        return str(row[0] or "") if row else ""
+
+    def brooks_fact_dates(self) -> list[str]:
+        if not self.brooks_schema_ready():
+            return []
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT as_of_date FROM brooks_second_leg_daily_fact
+                ORDER BY as_of_date DESC
+                """
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def persist_brooks_run(
+        self,
+        *,
+        events: Sequence[Mapping[str, Any]],
+        facts: Sequence[Mapping[str, Any]],
+        receipt: Mapping[str, Any],
+    ) -> None:
+        if not self.brooks_schema_ready():
+            raise ValueError("Brooks 表尚未初始化；请先运行 watchlist --brooks-schema --apply")
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._insert_immutable_rows(
+                connection,
+                "brooks_impulse_event",
+                (
+                    "event_id",
+                    "symbol",
+                    "signal_date",
+                    "start_date",
+                    "duration_bars",
+                    "impulse_start",
+                    "signal_close",
+                    "signal_high",
+                    "impulse_height",
+                    "atr20",
+                    "move_atr",
+                    "path_efficiency",
+                    "bullish_body_count",
+                    "bullish_body_share",
+                    "mean_close_location",
+                    "mean_overlap",
+                    "speed_atr_per_session",
+                    "median_amount20",
+                    "signal_tradability",
+                    "source_digest",
+                    "origin",
+                    "policy_version",
+                ),
+                [
+                    tuple(
+                        row[column]
+                        for column in (
+                            "event_id",
+                            "symbol",
+                            "signal_date",
+                            "start_date",
+                            "duration_bars",
+                            "impulse_start",
+                            "signal_close",
+                            "signal_high",
+                            "impulse_height",
+                            "atr20",
+                            "move_atr",
+                            "path_efficiency",
+                            "bullish_body_count",
+                            "bullish_body_share",
+                            "mean_close_location",
+                            "mean_overlap",
+                            "speed_atr_per_session",
+                            "median_amount20",
+                            "signal_tradability",
+                            "source_digest",
+                            "origin",
+                            "policy_version",
+                        )
+                    )
+                    for row in events
+                ],
+            )
+            fact_columns = (
+                "as_of_date",
+                "event_id",
+                "symbol",
+                "state",
+                "state_reason",
+                "state_rank",
+                "state_changed_on",
+                "touch25_date",
+                "h1_date",
+                "h1_failure_date",
+                "h2_date",
+                "bars_after_signal",
+                "bars_after_touch25",
+                "current_retracement",
+                "maximum_low_retracement",
+                "pullback_atr",
+                "pullback_low_anchor",
+                "prior_high",
+                "mm_0_8",
+                "mm_1_0",
+                "tight_invalidation",
+                "structural_invalidation",
+                "prior_high_touched",
+                "prior_high_closed",
+                "mm_0_8_completed",
+                "mm_1_0_completed",
+                "next_open_status",
+                "tradability_reason",
+                "evidence_json",
+                "source_digest",
+                "origin",
+                "policy_version",
+            )
+            self._insert_immutable_rows(
+                connection,
+                "brooks_second_leg_daily_fact",
+                fact_columns,
+                [
+                    tuple(
+                        _json(row.get("evidence") or {})
+                        if column == "evidence_json"
+                        else int(bool(row[column]))
+                        if column
+                        in {
+                            "prior_high_touched",
+                            "prior_high_closed",
+                            "mm_0_8_completed",
+                            "mm_1_0_completed",
+                        }
+                        else row[column]
+                        for column in fact_columns
+                    )
+                    for row in facts
+                ],
+            )
+            self._insert_immutable_rows(
+                connection,
+                "brooks_run_receipt",
+                (
+                    "run_id",
+                    "as_of_date",
+                    "from_date",
+                    "origin",
+                    "policy_version",
+                    "market_database",
+                    "source_digest",
+                    "counts_json",
+                    "status",
+                    "started_at",
+                    "finished_at",
+                ),
+                [
+                    (
+                        receipt["run_id"],
+                        receipt["as_of_date"],
+                        receipt["from_date"],
+                        receipt["origin"],
+                        receipt["policy_version"],
+                        receipt["market_database"],
+                        receipt["source_digest"],
+                        _json(receipt.get("counts") or {}),
+                        receipt["status"],
+                        receipt["started_at"],
+                        receipt["finished_at"],
+                    )
+                ],
+            )
+
+    def brooks_rows(self, as_of_date: str) -> list[dict[str, Any]]:
+        if not self.brooks_schema_ready():
+            return []
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT f.*, e.signal_date, e.start_date, e.duration_bars,
+                       e.impulse_start, e.signal_close, e.signal_high,
+                       e.impulse_height, e.atr20, e.move_atr, e.path_efficiency,
+                       e.bullish_body_count, e.bullish_body_share,
+                       e.mean_close_location, e.mean_overlap,
+                       e.speed_atr_per_session, e.median_amount20,
+                       identity.name, identity.industry
+                FROM brooks_second_leg_daily_fact AS f
+                JOIN brooks_impulse_event AS e
+                  ON e.event_id=f.event_id AND e.policy_version=f.policy_version
+                LEFT JOIN security_identity_history AS identity
+                  ON identity.symbol=f.symbol AND identity.valid_from=(
+                      SELECT MAX(latest.valid_from)
+                      FROM security_identity_history AS latest
+                      WHERE latest.symbol=f.symbol AND latest.valid_from <= f.as_of_date
+                  )
+                WHERE f.as_of_date = ?
+                ORDER BY f.state_rank, e.path_efficiency DESC,
+                         e.mean_close_location DESC, e.mean_overlap,
+                         e.bullish_body_share DESC, e.median_amount20 DESC,
+                         f.state_changed_on DESC, f.symbol
+                """,
+                (as_of_date,),
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "evidence": json.loads(str(row["evidence_json"] or "{}")),
+            }
+            for row in rows
+        ]
+
+    def brooks_stock_fact(self, symbol: str, end_date: str) -> dict[str, Any]:
+        """Return the latest independent Brooks event fact available by end_date."""
+
+        if not self.brooks_schema_ready() or not end_date:
+            return {}
+        symbol = symbol.upper()
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT f.*, e.signal_date, e.start_date, e.duration_bars,
+                       e.impulse_start, e.signal_close, e.signal_high,
+                       e.impulse_height, e.atr20, e.move_atr, e.path_efficiency,
+                       e.bullish_body_count, e.bullish_body_share,
+                       e.mean_close_location, e.mean_overlap,
+                       e.speed_atr_per_session, e.median_amount20
+                FROM brooks_second_leg_daily_fact AS f
+                JOIN brooks_impulse_event AS e
+                  ON e.event_id=f.event_id AND e.policy_version=f.policy_version
+                WHERE f.symbol=? AND f.as_of_date <= ?
+                ORDER BY f.as_of_date DESC, f.state_rank, e.signal_date DESC
+                LIMIT 1
+                """,
+                (symbol, end_date),
+            ).fetchone()
+        if row is None:
+            return {}
+        return {
+            **dict(row),
+            "evidence": json.loads(str(row["evidence_json"] or "{}")),
+        }
 
     def persist_index_minervini_facts(self, facts: Sequence[Mapping[str, Any]]) -> int:
         """Add index Stage 2 facts without rewriting an existing watchlist run."""
@@ -2632,9 +3152,7 @@ class WatchlistRepository:
                 break
         result: list[dict[str, Any]] = []
         for row in ordered_rows:
-            policy_version, origin = metadata.get(
-                str(row["as_of_date"]), ("", "")
-            )
+            policy_version, origin = metadata.get(str(row["as_of_date"]), ("", ""))
             if latest_policy and policy_version != latest_policy:
                 continue
             passed = int(row["pass_count"] or 0)
@@ -2645,9 +3163,7 @@ class WatchlistRepository:
                     "pass_count": passed,
                     "evaluable_count": evaluable,
                     "method_total": int(row["method_total"] or 0),
-                    "pass_rate": (
-                        round(passed * 100 / evaluable, 2) if evaluable else None
-                    ),
+                    "pass_rate": (round(passed * 100 / evaluable, 2) if evaluable else None),
                     "policy_version": policy_version,
                     "origin": origin,
                 }
@@ -3054,9 +3570,7 @@ class WatchlistRepository:
         if not code:
             return []
         with self.connect() as connection:
-            memberships = self._membership_rows_as_of(
-                connection, as_of_date, industry_code=code
-            )
+            memberships = self._membership_rows_as_of(connection, as_of_date, industry_code=code)
             identities = {
                 str(row["symbol"]): row
                 for row in self._identity_rows_as_of(
@@ -3084,15 +3598,9 @@ class WatchlistRepository:
         if not normalized:
             return {}
         with self.connect() as connection:
-            rows = self._membership_rows_as_of(
-                connection, as_of_date, symbols=[normalized]
-            )
+            rows = self._membership_rows_as_of(connection, as_of_date, symbols=[normalized])
         return next(
-            (
-                row
-                for row in rows
-                if str(row.get("assignment_state") or "") == "VERIFIED"
-            ),
+            (row for row in rows if str(row.get("assignment_state") or "") == "VERIFIED"),
             {},
         )
 
@@ -3190,9 +3698,7 @@ class WatchlistRepository:
             identity_row = next(
                 (
                     row
-                    for row in self._identity_rows_as_of(
-                        connection, detail_date, symbols=[symbol]
-                    )
+                    for row in self._identity_rows_as_of(connection, detail_date, symbols=[symbol])
                     if str(row["symbol"]) == symbol
                 ),
                 None,
@@ -3784,6 +4290,18 @@ class WatchlistRepository:
             {**dict(row), "counts": json.loads(str(row["counts_json"]) or "{}")} for row in rows
         ]
 
+    def brooks_run_receipts(self, limit: int = 20) -> list[dict[str, Any]]:
+        if not self.brooks_schema_ready():
+            return []
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM brooks_run_receipt ORDER BY started_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {**dict(row), "counts": json.loads(str(row["counts_json"]) or "{}")} for row in rows
+        ]
+
     def readiness(self) -> dict[str, Any]:
         self.initialize()
         with self.connect() as connection:
@@ -3910,9 +4428,7 @@ def _match_trade_executions(
                     "exit_price": float(row["price"]),
                     "stop_price": lot.get("stop_price"),
                     "initial_stop_price": lot.get("initial_stop_price"),
-                    "return_pct": round(pnl_cents / cost_cents * 100, 2)
-                    if cost_cents
-                    else None,
+                    "return_pct": round(pnl_cents / cost_cents * 100, 2) if cost_cents else None,
                     "holding_days": (
                         date.fromisoformat(str(row["traded_on"]))
                         - date.fromisoformat(str(lot["buy_date"]))
@@ -3957,12 +4473,18 @@ def _aggregate_completed_trades(
     for buy_id, fragments in grouped.items():
         if buy_id in open_buy_ids:
             continue
-        ordered = sorted(fragments, key=lambda item: (str(item["sell_date"]), str(item["sell_execution_id"])))
+        ordered = sorted(
+            fragments, key=lambda item: (str(item["sell_date"]), str(item["sell_execution_id"]))
+        )
         first = dict(ordered[0])
         quantity = sum(int(item["quantity"]) for item in ordered)
-        pnl_cents = sum(int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in ordered)
+        pnl_cents = sum(
+            int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in ordered
+        )
         gross_pnl = sum(float(item.get("gross_pnl") or 0) for item in ordered)
-        cost_cents = sum(int(item.get("cost_cents", round(float(item["cost"]) * 100))) for item in ordered)
+        cost_cents = sum(
+            int(item.get("cost_cents", round(float(item["cost"]) * 100))) for item in ordered
+        )
         proceeds_cents = sum(
             int(item.get("proceeds_cents", round(float(item["proceeds"]) * 100)))
             for item in ordered
@@ -3991,9 +4513,7 @@ def _aggregate_completed_trades(
                     / quantity,
                     6,
                 ),
-                "return_pct": round(pnl_cents / cost_cents * 100, 2)
-                if cost_cents
-                else None,
+                "return_pct": round(pnl_cents / cost_cents * 100, 2) if cost_cents else None,
                 "holding_days": int(last["holding_days"]),
                 "exit_reason": "；".join(
                     dict.fromkeys(str(item.get("exit_reason") or "") for item in ordered)
@@ -4055,9 +4575,7 @@ def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, An
 
 def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     count = len(trades)
-    pnl_cents = [
-        int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in trades
-    ]
+    pnl_cents = [int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in trades]
     pnl_values = [value / 100 for value in pnl_cents]
     gains = [value for value in pnl_values if value > 0]
     losses = [value for value in pnl_values if value < 0]
@@ -4088,9 +4606,7 @@ def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 def _money_cents(value: Any) -> int:
     """Convert one monetary amount to integer fen using financial half-up rounding."""
-    return int(
-        (Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    )
+    return int((Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _allocate_cents(total_cents: int, quantity: int, remaining_quantity: int) -> int:

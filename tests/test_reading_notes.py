@@ -180,6 +180,44 @@ def test_owner_share_appears_for_logged_in_reader_and_draft_changes_do_not_leak(
     assert client.get(share["href"]).status_code == 404
 
 
+def test_shared_article_navigation_follows_publication_dates(tmp_path) -> None:
+    app, users, owner_id, _ = _app(tmp_path)
+    shares = []
+    for index, title in enumerate(("第一篇", "第二篇", "第三篇"), start=1):
+        payload = _payload(title=title, body=f"{title}正文。")
+        payload["slug"] = f"shared-note-{index}"
+        note = users.reading_notes.save(owner_id, payload)
+        version = users.reading_notes.submit(owner_id, note["note_id"], 1)
+        shares.append(
+            users.reading_notes.share(owner_id, note["note_id"], version["version_id"])
+        )
+
+    with users.connect() as connection:
+        for index, share in enumerate(shares, start=1):
+            connection.execute(
+                "UPDATE user_reading_note_share SET shared_at=? WHERE share_id=?",
+                (f"2099-08-{index:02d} 00:00:00", share["share_id"]),
+            )
+
+    client = TestClient(app)
+    assert client.post(
+        "/login",
+        data={"username": "reader", "password": "Reader-password-123"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    first = client.get(shares[0]["href"])
+    assert f'href="{shares[1]["href"]}"' in first.text
+
+    middle = client.get(shares[1]["href"])
+    assert f'href="{shares[0]["href"]}"' in middle.text
+    assert f'href="{shares[2]["href"]}"' in middle.text
+
+    newest = client.get(shares[2]["href"])
+    assert f'href="{shares[1]["href"]}"' in newest.text
+    assert "已经是最新一篇" in newest.text
+
+
 def test_regular_users_do_not_see_or_open_private_reading_workspace(tmp_path) -> None:
     app, _, _, _ = _app(tmp_path)
     client = TestClient(app)

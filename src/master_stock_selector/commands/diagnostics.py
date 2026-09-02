@@ -38,7 +38,12 @@ def _doctor(args: argparse.Namespace) -> int:
     )
     watchlist = _database_status(
         watchlist_path,
-        required_tables={"stock_method_daily_fact", "watchlist_run_receipt"},
+        required_tables={
+            "stock_method_daily_fact",
+            "watchlist_run_receipt",
+            "brooks_second_leg_daily_fact",
+            "brooks_run_receipt",
+        },
         deep=bool(args.deep),
     )
     users = _user_database_status(user_path)
@@ -46,8 +51,7 @@ def _doctor(args: argparse.Namespace) -> int:
     latest_market_date = (
         _latest_value(
             market_path,
-            "SELECT MAX(trade_date) FROM daily_bars "
-            "WHERE market='ashare' AND adj_type='qfq'",
+            "SELECT MAX(trade_date) FROM daily_bars WHERE market='ashare' AND adj_type='qfq'",
         )
         if market["connected"] and not market["missing_tables"]
         else ""
@@ -60,8 +64,17 @@ def _doctor(args: argparse.Namespace) -> int:
         if watchlist["connected"] and not watchlist["missing_tables"]
         else ""
     )
+    latest_brooks_date = (
+        _latest_value(
+            watchlist_path,
+            "SELECT MAX(as_of_date) FROM brooks_second_leg_daily_fact",
+        )
+        if watchlist["connected"] and not watchlist["missing_tables"]
+        else ""
+    )
     latest_collection = _optional_receipt_rows(market_path, "collection", 1)
     latest_selection = _optional_receipt_rows(watchlist_path, "watchlist", 1)
+    latest_brooks = _optional_receipt_rows(watchlist_path, "brooks", 1)
     freshness = evaluate_freshness(
         market_date=latest_market_date,
         fact_date=latest_fact_date,
@@ -94,6 +107,12 @@ def _doctor(args: argparse.Namespace) -> int:
             and latest_selection[0].get("status") == "SUCCESS"
             and latest_selection[0].get("as_of_date") == latest_fact_date
         ),
+        "brooks_facts": bool(latest_brooks_date and latest_brooks_date == latest_fact_date),
+        "brooks_receipt": bool(
+            latest_brooks
+            and latest_brooks[0].get("status") == "SUCCESS"
+            and latest_brooks[0].get("as_of_date") == latest_brooks_date
+        ),
         "data_freshness": freshness["status"] == "FRESH",
     }
     status = "READY" if all(checks.values()) else "DEGRADED"
@@ -103,6 +122,7 @@ def _doctor(args: argparse.Namespace) -> int:
         "data": {
             "market_date": latest_market_date,
             "watchlist_date": latest_fact_date,
+            "brooks_date": latest_brooks_date,
             "freshness": freshness,
         },
         "databases": {
@@ -113,6 +133,7 @@ def _doctor(args: argparse.Namespace) -> int:
         "latest_runs": {
             "collection": latest_collection[0] if latest_collection else None,
             "watchlist": latest_selection[0] if latest_selection else None,
+            "brooks": latest_brooks[0] if latest_brooks else None,
         },
         "configuration": {
             "tushare_token_configured": bool(os.environ.get("TUSHARE_TOKEN", "").strip()),
@@ -132,6 +153,7 @@ def _runs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             "status": "OK",
             "collections": _receipt_rows(market_path, "collection", limit),
             "watchlist_runs": _receipt_rows(watchlist_path, "watchlist", limit),
+            "brooks_runs": _receipt_rows(watchlist_path, "brooks", limit),
         }
         _print(payload)
         return 0
@@ -145,6 +167,9 @@ def _runs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             row = _receipt_by_id(watchlist_path, "watchlist", run_id)
             kind = "watchlist"
         if row is None:
+            row = _receipt_by_id(watchlist_path, "brooks", run_id)
+            kind = "brooks"
+        if row is None:
             raise ValueError(f"运行凭证不存在：{run_id}")
         _print({"status": "OK", "kind": kind, "run": row})
         return 0
@@ -153,14 +178,18 @@ def _runs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         max_age_days = _positive_int(args.max_age_days, "--max-age-days")
         collections = _receipt_rows(market_path, "collection", 1)
         selections = _receipt_rows(watchlist_path, "watchlist", 1)
+        brooks_runs = _receipt_rows(watchlist_path, "brooks", 1)
         market_date = _latest_value(
             market_path,
-            "SELECT MAX(trade_date) FROM daily_bars "
-            "WHERE market='ashare' AND adj_type='qfq'",
+            "SELECT MAX(trade_date) FROM daily_bars WHERE market='ashare' AND adj_type='qfq'",
         )
         fact_date = _latest_value(
             watchlist_path,
             "SELECT MAX(as_of_date) FROM stock_method_daily_fact",
+        )
+        brooks_date = _latest_value(
+            watchlist_path,
+            "SELECT MAX(as_of_date) FROM brooks_second_leg_daily_fact",
         )
         freshness = evaluate_freshness(
             market_date=market_date,
@@ -169,16 +198,25 @@ def _runs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             expected_date=expected_date,
             max_age_days=max_age_days,
         )
+        brooks_aligned = bool(
+            brooks_date == fact_date
+            and brooks_runs
+            and brooks_runs[0].get("status") == "SUCCESS"
+            and brooks_runs[0].get("as_of_date") == brooks_date
+        )
         payload = {
-            "status": "OK" if freshness["status"] == "FRESH" else "DEGRADED",
+            "status": ("OK" if freshness["status"] == "FRESH" and brooks_aligned else "DEGRADED"),
             "market_date": market_date,
             "watchlist_date": fact_date,
+            "brooks_date": brooks_date,
+            "brooks_aligned": brooks_aligned,
             "freshness": freshness,
             "collection": collections[0] if collections else None,
             "watchlist_run": selections[0] if selections else None,
+            "brooks_run": brooks_runs[0] if brooks_runs else None,
         }
         _print(payload)
-        if bool(args.fail_if_stale) and freshness["status"] != "FRESH":
+        if bool(args.fail_if_stale) and (freshness["status"] != "FRESH" or not brooks_aligned):
             return DEGRADED_EXIT
         return 0
     parser.error("unknown runs action")
@@ -222,10 +260,7 @@ def evaluate_freshness(
             if date.fromisoformat(value).isocalendar()[:2] == current_week
         ]
         eligible = [value for value in same_week_dates if value <= today.isoformat()]
-        if (
-            today.isoformat() in eligible
-            and current.timetz().replace(tzinfo=None) < time(17, 30)
-        ):
+        if today.isoformat() in eligible and current.timetz().replace(tzinfo=None) < time(17, 30):
             eligible.remove(today.isoformat())
         if eligible:
             effective_expected = max(eligible)
@@ -236,9 +271,7 @@ def evaluate_freshness(
             return {
                 "status": status,
                 "reason": (
-                    "RECENT_BY_CALENDAR_AGE"
-                    if status == "FRESH"
-                    else "CALENDAR_AGE_EXCEEDED"
+                    "RECENT_BY_CALENDAR_AGE" if status == "FRESH" else "CALENDAR_AGE_EXCEEDED"
                 ),
                 "expected_date": "",
                 "source": "calendar_age_fallback",
@@ -288,17 +321,13 @@ def _database_status(path: Path, *, required_tables: set[str], deep: bool) -> di
         with _connect_read_only(path) as connection:
             tables = {
                 str(row[0])
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             result["connected"] = True
             result["missing_tables"] = sorted(required_tables - tables)
             result["bytes"] = path.stat().st_size
             if deep:
-                result["quick_check"] = str(
-                    connection.execute("PRAGMA quick_check").fetchone()[0]
-                )
+                result["quick_check"] = str(connection.execute("PRAGMA quick_check").fetchone()[0])
     except (OSError, sqlite3.Error) as exc:
         result["error"] = str(exc)
     return result
@@ -317,11 +346,11 @@ def _optional_receipt_rows(path: Path, kind: str, limit: int) -> list[dict[str, 
 
 
 def _receipt_rows(path: Path, kind: str, limit: int) -> list[dict[str, Any]]:
-    table = (
-        "watchlist_market_collection_receipt"
-        if kind == "collection"
-        else "watchlist_run_receipt"
-    )
+    table = {
+        "collection": "watchlist_market_collection_receipt",
+        "watchlist": "watchlist_run_receipt",
+        "brooks": "brooks_run_receipt",
+    }[kind]
     if not path.is_file():
         raise FileNotFoundError(f"database does not exist: {path}")
     with _connect_read_only(path) as connection:
@@ -338,11 +367,11 @@ def _receipt_rows(path: Path, kind: str, limit: int) -> list[dict[str, Any]]:
 
 
 def _receipt_by_id(path: Path, kind: str, run_id: str) -> dict[str, Any] | None:
-    table = (
-        "watchlist_market_collection_receipt"
-        if kind == "collection"
-        else "watchlist_run_receipt"
-    )
+    table = {
+        "collection": "watchlist_market_collection_receipt",
+        "watchlist": "watchlist_run_receipt",
+        "brooks": "brooks_run_receipt",
+    }[kind]
     if not path.is_file():
         return None
     with _connect_read_only(path) as connection:
@@ -351,9 +380,7 @@ def _receipt_by_id(path: Path, kind: str, run_id: str) -> dict[str, Any] | None:
         ).fetchone()
         if exists is None:
             return None
-        row = connection.execute(
-            f'SELECT * FROM "{table}" WHERE run_id=?', (run_id,)
-        ).fetchone()
+        row = connection.execute(f'SELECT * FROM "{table}" WHERE run_id=?', (run_id,)).fetchone()
     return _decoded_receipt(dict(row), kind) if row is not None else None
 
 

@@ -8,7 +8,7 @@ from .parser_types import ParserRegistrar, SubparserRegistry
 def register_watchlist(subparsers: SubparserRegistry) -> None:
     parser = subparsers.add_parser(
         "watchlist",
-        help="用 Weinstein 与 Minervini 从本地行情生成大师观察池事实",
+        help="生成两法观察池，或独立的 Brooks 第二腿观察事实",
     )
     parser.add_argument("--date", default="", help="数据截止交易日；默认使用本地最新日期")
     parser.add_argument("--from", dest="from_date", default="", help="可选历史重建起点")
@@ -29,6 +29,17 @@ def register_watchlist(subparsers: SubparserRegistry) -> None:
         ),
     )
     parser.add_argument("--apply", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--brooks-only",
+        action="store_true",
+        help="只生成独立 Brooks 强势第一腿—第二腿事实",
+    )
+    mode.add_argument(
+        "--brooks-schema",
+        action="store_true",
+        help="显式创建 Brooks 独立事实表，不计算行情",
+    )
 
 
 REGISTRARS: dict[str, ParserRegistrar] = {"watchlist": register_watchlist}

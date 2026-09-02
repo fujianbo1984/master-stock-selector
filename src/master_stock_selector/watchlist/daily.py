@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .brooks_service import BrooksRunConfig, run_brooks_watchlist
 from .collector import CollectionConfig, MarketProvider, collect_market_data
 from .repository import WatchlistRepository
 from .service import WatchlistRunConfig, run_watchlist
@@ -28,6 +29,12 @@ def run_daily_closed_loop(
         raise ValueError(
             "每日闭环只保存真实当日 OBSERVED 事实；历史数据请使用 watchlist reconstructed"
         )
+    repository = WatchlistRepository(config.watchlist_database)
+    if not repository.brooks_schema_ready():
+        raise ValueError(
+            "Brooks 表尚未初始化；发布前请显式运行 "
+            "watchlist --brooks-schema --apply"
+        )
     collection = collect_market_data(
         CollectionConfig(
             market_database=config.market_database,
@@ -43,26 +50,39 @@ def run_daily_closed_loop(
             "trade_date": target_date,
             "collection": collection,
             "selection": {"state": "NOT_RUN"},
+            "brooks_selection": {"state": "NOT_RUN"},
         }
 
-    repository = WatchlistRepository(config.watchlist_database)
-    if repository.latest_fact_date() >= target_date:
-        return {
-            "status": "SUCCESS",
-            "trade_date": target_date,
-            "collection": collection,
-            "selection": {
-                "state": "REUSED",
-                "as_of_date": target_date,
-            },
+    selection = (
+        {
+            "state": "REUSED",
+            "as_of_date": target_date,
         }
-    selection = run_watchlist(
-        WatchlistRunConfig(
-            market_database=config.market_database,
-            watchlist_database=config.watchlist_database,
-            as_of_date=target_date,
-            from_date=target_date,
-            origin="OBSERVED",
+        if repository.latest_fact_date() >= target_date
+        else run_watchlist(
+            WatchlistRunConfig(
+                market_database=config.market_database,
+                watchlist_database=config.watchlist_database,
+                as_of_date=target_date,
+                from_date=target_date,
+                origin="OBSERVED",
+            )
+        )
+    )
+    brooks_selection = (
+        {
+            "state": "REUSED",
+            "as_of_date": target_date,
+        }
+        if repository.latest_brooks_run_date() >= target_date
+        else run_brooks_watchlist(
+            BrooksRunConfig(
+                market_database=config.market_database,
+                watchlist_database=config.watchlist_database,
+                as_of_date=target_date,
+                from_date=target_date,
+                origin="OBSERVED",
+            )
         )
     )
     return {
@@ -70,4 +90,5 @@ def run_daily_closed_loop(
         "trade_date": target_date,
         "collection": collection,
         "selection": selection,
+        "brooks_selection": brooks_selection,
     }

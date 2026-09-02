@@ -74,9 +74,7 @@ def _seed_diagnostic_databases(tmp_path, trade_date="2026-08-25"):
             );
             """
         )
-        connection.execute(
-            "INSERT INTO daily_bars VALUES ('ashare','qfq',?)", (trade_date,)
-        )
+        connection.execute("INSERT INTO daily_bars VALUES ('ashare','qfq',?)", (trade_date,))
         connection.execute(
             "INSERT INTO watchlist_market_collection_receipt VALUES (?,?,?,?,?)",
             (
@@ -95,6 +93,11 @@ def _seed_diagnostic_databases(tmp_path, trade_date="2026-08-25"):
                 run_id TEXT, as_of_date TEXT, status TEXT, counts_json TEXT,
                 started_at TEXT
             );
+            CREATE TABLE brooks_second_leg_daily_fact (as_of_date TEXT);
+            CREATE TABLE brooks_run_receipt (
+                run_id TEXT, as_of_date TEXT, status TEXT, counts_json TEXT,
+                started_at TEXT
+            );
             """
         )
         connection.execute("INSERT INTO stock_method_daily_fact VALUES (?)", (trade_date,))
@@ -106,6 +109,17 @@ def _seed_diagnostic_databases(tmp_path, trade_date="2026-08-25"):
                 "SUCCESS",
                 json.dumps({"stock_facts": 10}),
                 f"{trade_date}T17:10:00+08:00",
+            ),
+        )
+        connection.execute("INSERT INTO brooks_second_leg_daily_fact VALUES (?)", (trade_date,))
+        connection.execute(
+            "INSERT INTO brooks_run_receipt VALUES (?,?,?,?,?)",
+            (
+                "brooks-test",
+                trade_date,
+                "SUCCESS",
+                json.dumps({"daily_facts": 4}),
+                f"{trade_date}T17:11:00+08:00",
             ),
         )
     UserRepository(users).migrate_schema()
@@ -150,11 +164,17 @@ def test_runs_latest_list_show_and_stale_exit(tmp_path, capsys) -> None:
     listed = json.loads(capsys.readouterr().out)
     assert listed["collections"][0]["run_id"] == "collect-test"
     assert listed["watchlist_runs"][0]["run_id"] == "watchlist-test"
+    assert listed["brooks_runs"][0]["run_id"] == "brooks-test"
 
     assert main(["runs", *databases, "show", "watchlist-test"]) == 0
     shown = json.loads(capsys.readouterr().out)
     assert shown["kind"] == "watchlist"
     assert shown["run"]["counts"] == {"stock_facts": 10}
+
+    assert main(["runs", *databases, "show", "brooks-test"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["kind"] == "brooks"
+    assert shown["run"]["counts"] == {"daily_facts": 4}
 
     assert (
         main(
