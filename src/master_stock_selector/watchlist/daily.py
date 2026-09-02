@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .brooks import BROOKS_POLICY_VERSION
 from .brooks_service import BrooksRunConfig, run_brooks_watchlist
 from .collector import CollectionConfig, MarketProvider, collect_market_data
 from .repository import WatchlistRepository
@@ -74,7 +75,7 @@ def run_daily_closed_loop(
             "state": "REUSED",
             "as_of_date": target_date,
         }
-        if repository.latest_brooks_run_date() >= target_date
+        if repository.latest_brooks_run_date(BROOKS_POLICY_VERSION) >= target_date
         else run_brooks_watchlist(
             BrooksRunConfig(
                 market_database=config.market_database,

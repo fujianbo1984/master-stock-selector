@@ -1919,32 +1919,59 @@ class WatchlistRepository:
                 ],
             )
 
-    def latest_brooks_fact_date(self) -> str:
+    def latest_brooks_fact_date(self, policy_version: str = "") -> str:
         if not self.brooks_schema_ready():
             return ""
         with self.connect() as connection:
-            row = connection.execute(
-                "SELECT MAX(as_of_date) FROM brooks_second_leg_daily_fact"
-            ).fetchone()
+            row = (
+                connection.execute(
+                    "SELECT MAX(as_of_date) FROM brooks_second_leg_daily_fact "
+                    "WHERE policy_version=?",
+                    (policy_version,),
+                ).fetchone()
+                if policy_version
+                else connection.execute(
+                    "SELECT MAX(as_of_date) FROM brooks_second_leg_daily_fact"
+                ).fetchone()
+            )
         return str(row[0] or "") if row else ""
 
-    def latest_brooks_run_date(self) -> str:
+    def latest_brooks_run_date(self, policy_version: str = "") -> str:
         if not self.brooks_schema_ready():
             return ""
         with self.connect() as connection:
-            row = connection.execute("SELECT MAX(as_of_date) FROM brooks_run_receipt").fetchone()
+            row = (
+                connection.execute(
+                    "SELECT MAX(as_of_date) FROM brooks_run_receipt WHERE policy_version=?",
+                    (policy_version,),
+                ).fetchone()
+                if policy_version
+                else connection.execute(
+                    "SELECT MAX(as_of_date) FROM brooks_run_receipt"
+                ).fetchone()
+            )
         return str(row[0] or "") if row else ""
 
-    def brooks_fact_dates(self) -> list[str]:
+    def brooks_fact_dates(self, policy_version: str = "") -> list[str]:
         if not self.brooks_schema_ready():
             return []
         with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT DISTINCT as_of_date FROM brooks_second_leg_daily_fact
-                ORDER BY as_of_date DESC
-                """
-            ).fetchall()
+            rows = (
+                connection.execute(
+                    """
+                    SELECT DISTINCT as_of_date FROM brooks_second_leg_daily_fact
+                    WHERE policy_version=? ORDER BY as_of_date DESC
+                    """,
+                    (policy_version,),
+                ).fetchall()
+                if policy_version
+                else connection.execute(
+                    """
+                    SELECT DISTINCT as_of_date FROM brooks_second_leg_daily_fact
+                    ORDER BY as_of_date DESC
+                    """
+                ).fetchall()
+            )
         return [str(row[0]) for row in rows]
 
     def persist_brooks_run(
@@ -2105,7 +2132,7 @@ class WatchlistRepository:
                 ],
             )
 
-    def brooks_rows(self, as_of_date: str) -> list[dict[str, Any]]:
+    def brooks_rows(self, as_of_date: str, policy_version: str = "") -> list[dict[str, Any]]:
         if not self.brooks_schema_ready():
             return []
         with self.connect() as connection:
@@ -2128,12 +2155,13 @@ class WatchlistRepository:
                       WHERE latest.symbol=f.symbol AND latest.valid_from <= f.as_of_date
                   )
                 WHERE f.as_of_date = ?
+                  AND (? = '' OR f.policy_version = ?)
                 ORDER BY f.state_rank, e.path_efficiency DESC,
                          e.mean_close_location DESC, e.mean_overlap,
                          e.bullish_body_share DESC, e.median_amount20 DESC,
                          f.state_changed_on DESC, f.symbol
                 """,
-                (as_of_date,),
+                (as_of_date, policy_version, policy_version),
             ).fetchall()
         return [
             {
@@ -2143,7 +2171,9 @@ class WatchlistRepository:
             for row in rows
         ]
 
-    def brooks_stock_fact(self, symbol: str, end_date: str) -> dict[str, Any]:
+    def brooks_stock_fact(
+        self, symbol: str, end_date: str, policy_version: str = ""
+    ) -> dict[str, Any]:
         """Return the latest independent Brooks event fact available by end_date."""
 
         if not self.brooks_schema_ready() or not end_date:
@@ -2162,10 +2192,11 @@ class WatchlistRepository:
                 JOIN brooks_impulse_event AS e
                   ON e.event_id=f.event_id AND e.policy_version=f.policy_version
                 WHERE f.symbol=? AND f.as_of_date <= ?
+                  AND (? = '' OR f.policy_version = ?)
                 ORDER BY f.as_of_date DESC, f.state_rank, e.signal_date DESC
                 LIMIT 1
                 """,
-                (symbol, end_date),
+                (symbol, end_date, policy_version, policy_version),
             ).fetchone()
         if row is None:
             return {}

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from statistics import fmean, median
 from typing import Any, Iterable, Mapping, Sequence
 
-BROOKS_POLICY_VERSION = "brooks-second-leg-daily-v1"
+BROOKS_POLICY_VERSION = "brooks-second-leg-daily-v2.1"
 
 STATE_S0 = "S0_IMPULSE"
 STATE_S1 = "S1_TOUCH25"
@@ -331,6 +331,15 @@ def _event_snapshot(
     changed_pos = signal
     terminal = False
 
+    # The immutable event records the first qualifying 3/5/8-day trigger.  While
+    # the event remains in S0, its first leg may continue to expand.  The
+    # effective geometry is frozen only when touch25 is first confirmed (or the
+    # event terminates), so the 40-session de-duplication rule cannot truncate a
+    # still-growing leg.
+    effective_close = event.signal_close
+    effective_high = event.signal_high
+    close_peak_pos = signal
+
     last_touch_scan = min(as_of_pos, signal + 15)
     for pos in range(signal + 1, last_touch_scan + 1):
         if not _bar_structurally_valid(event, bars, pos):
@@ -339,9 +348,15 @@ def _event_snapshot(
             changed_pos = pos
             terminal = True
             break
-        current = _retracement(event, bars[pos].close)
-        maximum = _maximum_retracement(event, bars, pos)
-        if touch_pos is None and 0.25 <= current < 1.0 and maximum < 1.0:
+        if touch_pos is None:
+            if bars[pos].close > effective_close:
+                effective_close = bars[pos].close
+                close_peak_pos = pos
+            if bars[pos].high > effective_high:
+                effective_high = bars[pos].high
+        effective_height = effective_close - event.impulse_start
+        current = _effective_retracement(effective_close, effective_height, bars[pos].close)
+        if touch_pos is None and 0.25 <= current < 1.0:
             touch_pos = pos
             state = STATE_S1
             reason = "TOUCH25_CONFIRMED"
@@ -376,8 +391,12 @@ def _event_snapshot(
             changed_pos = touch_pos + 21
             terminal = True
 
+    leg_end_pos = close_peak_pos
+    effective_height = effective_close - event.impulse_start
+
     if not terminal and h1_pos is not None:
-        h1_anchor = min(bar.low for bar in bars[signal + 1 : h1_pos + 1])
+        h1_anchor_start = min(h1_pos, leg_end_pos + 1)
+        h1_anchor = min(bar.low for bar in bars[h1_anchor_start : h1_pos + 1])
         for pos in range(h1_pos + 1, min(as_of_pos, signal + 30) + 1):
             if bars[pos].low <= event.impulse_start:
                 state = STATE_INVALIDATED
@@ -386,7 +405,7 @@ def _event_snapshot(
                 terminal = True
                 break
             broke_anchor = bars[pos].low < h1_anchor
-            touched_high = bars[pos].high >= event.signal_high
+            touched_high = bars[pos].high >= effective_high
             if h1_failure_pos is None and broke_anchor and touched_high:
                 reason = "AMBIGUOUS_H1_FAILURE_AND_PRIOR_HIGH"
                 break
@@ -403,27 +422,28 @@ def _event_snapshot(
 
     decision_pos = h2_pos if h2_pos is not None else h1_pos if h1_pos is not None else touch_pos
     anchor_end = decision_pos if decision_pos is not None else as_of_pos
+    anchor_start = min(anchor_end, leg_end_pos + 1)
     anchor = (
-        min(bar.low for bar in bars[signal + 1 : anchor_end + 1])
-        if anchor_end > signal
-        else event.signal_close
+        min(bar.low for bar in bars[anchor_start : anchor_end + 1])
+        if anchor_end > leg_end_pos
+        else effective_close
     )
     prior_high_touched = False
     prior_high_closed = False
     mm08_completed = False
     mm10_completed = False
     ambiguous_same_bar = False
-    mm08 = anchor + 0.8 * event.impulse_height
-    mm10 = anchor + event.impulse_height
+    mm08 = anchor + 0.8 * effective_height
+    mm10 = anchor + effective_height
     if decision_pos is not None:
         path_end = changed_pos if terminal else as_of_pos
         for pos in range(decision_pos + 1, path_end + 1):
-            target_hit = bars[pos].high >= event.signal_high or bars[pos].high >= mm08
+            target_hit = bars[pos].high >= effective_high or bars[pos].high >= mm08
             failure_hit = bars[pos].low <= event.impulse_start
             if target_hit and failure_hit:
                 ambiguous_same_bar = True
-            prior_high_touched = prior_high_touched or bars[pos].high >= event.signal_high
-            prior_high_closed = prior_high_closed or bars[pos].close >= event.signal_high
+            prior_high_touched = prior_high_touched or bars[pos].high >= effective_high
+            prior_high_closed = prior_high_closed or bars[pos].close >= effective_high
             mm08_completed = mm08_completed or bars[pos].high >= mm08
             mm10_completed = mm10_completed or bars[pos].high >= mm10
             if not terminal and failure_hit:
@@ -455,6 +475,22 @@ def _event_snapshot(
         changed_pos = as_of_pos
 
     current_bar = bars[as_of_pos]
+    maximum_low_retracement = _effective_maximum_retracement(
+        effective_close,
+        effective_height,
+        bars,
+        close_peak_pos,
+        as_of_pos,
+    )
+    run = _maximum_consecutive_up_run(bars, event.start_pos + 1, leg_end_pos)
+    leg_frozen = touch_pos is not None or terminal
+    leg_status = (
+        "FROZEN_TOUCH25"
+        if touch_pos is not None
+        else "TERMINATED"
+        if terminal
+        else "EXPANDING"
+    )
     next_open_status = _next_open_status(
         event.symbol, decision_pos, as_of_pos, bars, security_states
     )
@@ -469,11 +505,13 @@ def _event_snapshot(
         "h2_date": bars[h2_pos].trade_date if h2_pos is not None else "",
         "bars_after_signal": max(0, as_of_pos - signal),
         "bars_after_touch25": max(0, as_of_pos - touch_pos) if touch_pos is not None else 0,
-        "current_retracement": _retracement(event, current_bar.close),
-        "maximum_low_retracement": _maximum_retracement(event, bars, as_of_pos),
-        "pullback_atr": max(0.0, event.signal_close - anchor) / event.atr20,
+        "current_retracement": _effective_retracement(
+            effective_close, effective_height, current_bar.close
+        ),
+        "maximum_low_retracement": maximum_low_retracement,
+        "pullback_atr": max(0.0, effective_close - anchor) / event.atr20,
         "pullback_low_anchor": anchor,
-        "prior_high": event.signal_high,
+        "prior_high": effective_high,
         "mm_0_8": mm08,
         "mm_1_0": mm10,
         "tight_invalidation": anchor,
@@ -491,6 +529,21 @@ def _event_snapshot(
                 bars[late_h1_pos].trade_date if late_h1_pos is not None else ""
             ),
             "current_close": current_bar.close,
+            "trigger_window_bars": event.duration_bars,
+            "trigger_date": event.signal_date,
+            "trigger_start_date": bars[event.start_pos + 1].trade_date,
+            "effective_leg_start_date": bars[event.start_pos + 1].trade_date,
+            "effective_leg_end_date": bars[leg_end_pos].trade_date,
+            "effective_leg_bars": leg_end_pos - event.start_pos,
+            "effective_signal_close": effective_close,
+            "effective_signal_high": effective_high,
+            "effective_impulse_height": effective_height,
+            "effective_move_atr": effective_height / event.atr20,
+            "leg_frozen": leg_frozen,
+            "leg_status": leg_status,
+            "max_consecutive_up_bars": run[0],
+            "max_consecutive_up_start": run[1],
+            "max_consecutive_up_end": run[2],
         },
     }
 
@@ -623,15 +676,46 @@ def _bar_structurally_valid(event: BrooksImpulse, bars: Sequence[BrooksBar], pos
     )
 
 
-def _retracement(event: BrooksImpulse, close: float) -> float:
-    return max(0.0, event.signal_close - close) / event.impulse_height
-
-
-def _maximum_retracement(event: BrooksImpulse, bars: Sequence[BrooksBar], pos: int) -> float:
-    if pos <= event.signal_pos:
+def _effective_retracement(peak_close: float, height: float, close: float) -> float:
+    if height <= 0:
         return 0.0
-    anchor = min(bar.low for bar in bars[event.signal_pos + 1 : pos + 1])
-    return max(0.0, event.signal_close - anchor) / event.impulse_height
+    return max(0.0, peak_close - close) / height
+
+
+def _effective_maximum_retracement(
+    peak_close: float,
+    height: float,
+    bars: Sequence[BrooksBar],
+    peak_pos: int,
+    as_of_pos: int,
+) -> float:
+    if height <= 0 or as_of_pos <= peak_pos:
+        return 0.0
+    anchor = min(bar.low for bar in bars[peak_pos + 1 : as_of_pos + 1])
+    return max(0.0, peak_close - anchor) / height
+
+
+def _maximum_consecutive_up_run(
+    bars: Sequence[BrooksBar], start_pos: int, end_pos: int
+) -> tuple[int, str, str]:
+    best_count = 0
+    best_start = ""
+    best_end = ""
+    current_count = 0
+    current_start = ""
+    for pos in range(max(1, start_pos), end_pos + 1):
+        if bars[pos].close > bars[pos - 1].close:
+            if current_count == 0:
+                current_start = bars[pos].trade_date
+            current_count += 1
+            if current_count > best_count:
+                best_count = current_count
+                best_start = current_start
+                best_end = bars[pos].trade_date
+        else:
+            current_count = 0
+            current_start = ""
+    return best_count, best_start, best_end
 
 
 def _fact_digest(event: BrooksImpulse, as_of_date: str, snapshot: Mapping[str, Any]) -> str:

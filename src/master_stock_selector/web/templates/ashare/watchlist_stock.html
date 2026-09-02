@@ -37,7 +37,9 @@
     <dl class="ledger-metrics ledger-metrics-dense">
       <div><dt>证据日</dt><dd>{{ brooks.as_of_date }}</dd></div>
       <div><dt>当前状态</dt><dd>{{ brooks.state_label }}</dd></div>
-      <div><dt>第一腿</dt><dd>{{ brooks.duration_bars }}日 · {{ '%.2f'|format(brooks.move_atr) }} ATR</dd></div>
+      <div><dt>首次触发</dt><dd>{{ brooks.duration_bars }}日窗口 · {{ brooks.signal_date }}</dd></div>
+      <div><dt>第一腿扩展</dt><dd>{{ brooks.evidence.effective_leg_bars or brooks.duration_bars }}个交易日 · {{ brooks.evidence.effective_leg_start_date or brooks.start_date }} → {{ brooks.evidence.effective_leg_end_date or brooks.signal_date }}</dd></div>
+      <div><dt>最大连续收涨</dt><dd>{{ brooks.evidence.max_consecutive_up_bars or brooks.duration_bars }}日{% if brooks.evidence.max_consecutive_up_start %} · {{ brooks.evidence.max_consecutive_up_start }} → {{ brooks.evidence.max_consecutive_up_end }}{% endif %}</dd></div>
       <div><dt>路径效率</dt><dd>{{ '%.1f%%'|format(brooks.path_efficiency * 100) }}</dd></div>
       <div><dt>当前回吐</dt><dd>{{ '%.1f%%'|format(brooks.retracement_pct) }}</dd></div>
       <div><dt>H1 / H2</dt><dd>{{ brooks.h1_date or '—' }} / {{ brooks.h2_date or '—' }}</dd></div>

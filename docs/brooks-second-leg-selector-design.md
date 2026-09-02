@@ -71,7 +71,7 @@ Brooks 使用单独的事实表、查询接口和网站页面 `/a/brooks-second-
 
 对每只股票的每个收盘日 `t`，分别检查 `N ∈ {3, 5, 8}`。第一腿起点是 `t-N` 的收盘，质量窗口是 `t-N+1 ... t` 的 N 根 K 线。
 
-### 4.1 冻结公式
+### 4.1 首次触发公式
 
 设 `P0 = C[t-N]`，`P1 = C[t]`，`impulse_height = P1-P0`：
 
@@ -91,6 +91,8 @@ Brooks 使用单独的事实表、查询接口和网站页面 `/a/brooks-second-
 
 这里的“阳线贡献”采用冻结研究合同实际使用的**阳线根数占比**，不改成阳线实体金额占比，否则就不再是同一套规则。
 
+首次触发事件保存当日的 3/5/8 日研究窗口，不把它解释为整轮行情最终持续天数。事件处于 S0 时，系统逐日更新有效第一腿的收盘峰值、前高、实际交易日跨度和最大连续收涨区间；首次 `touch25` 出现时才冻结这套有效结构。扩展过程只使用截至当日的数据，不反写首次触发窗口。
+
 ### 4.2 去重
 
 - 同一收盘日多个窗口合格时，保留最长窗口：`8 > 5 > 3`；
@@ -104,7 +106,7 @@ Brooks 使用单独的事实表、查询接口和网站页面 `/a/brooks-second-
 
 | 状态 | 进入条件 | 网站含义 | 排序层级 |
 | --- | --- | --- | ---: |
-| `S0_IMPULSE` | 第一腿在信号日收盘合格 | 基础观察 | 3 |
+| `S0_IMPULSE` | 第一腿在信号日首次合格，且尚未 touch25 | 基础观察；第一腿可继续扩展 | 3 |
 | `S1_TOUCH25` | 信号后 15 个交易日内首次满足有效 `touch25` | 重点观察，不是买点 | 2 |
 | `S2_H1` | `touch25` 当日或之后、且不晚于信号后第 15 个交易日，首次出现 H1 | 恢复确认候选，不是自动买入 | 1 |
 | `S2_H1_H2_TAG` | H1 失败后出现 H2 | 仍归入 S2 层，只加 H2 标签 | 1 |
@@ -115,11 +117,12 @@ Brooks 使用单独的事实表、查询接口和网站页面 `/a/brooks-second-
 
 ### 5.1 `touch25`
 
-对信号后第 1 至 15 个交易日逐日检查：
+对信号后第 1 至 15 个交易日逐日检查。touch25 之前若出现更高收盘或更高价，先更新有效第一腿；touch25 首次成立后冻结有效第一腿：
 
-- `current_retracement = max(0, signal_close-current_close) / impulse_height`；
-- `pullback_low_anchor = min(low[signal+1 ... decision])`；
-- `maximum_low_retracement = max(0, signal_close-pullback_low_anchor) / impulse_height`；
+- `effective_impulse_height = effective_signal_close-impulse_start`；
+- `current_retracement = max(0, effective_signal_close-current_close) / effective_impulse_height`；
+- `pullback_low_anchor = min(low[effective_leg_end+1 ... decision])`；
+- `maximum_low_retracement = max(0, effective_signal_close-pullback_low_anchor) / effective_impulse_height`；
 - `0.25 <= current_retracement < 1.0`；
 - `maximum_low_retracement < 1.0` 且 `current_close > impulse_start`。
 
@@ -151,9 +154,9 @@ H1 只标记状态恢复。决策日收盘时 `next_open_status=PENDING`；到�
 
 在任一决策日，使用截至当日已知的回调低点锚点 `A`：
 
-- 第一腿前高：`prior_high = signal_day_high`；
-- `MM0.8 = A + 0.8 * impulse_height`；
-- `MM1.0 = A + 1.0 * impulse_height`；
+- 第一腿前高：`prior_high = effective_signal_high`；
+- `MM0.8 = A + 0.8 * effective_impulse_height`；
+- `MM1.0 = A + 1.0 * effective_impulse_height`；
 - 紧失效价：`tight_invalidation = A`，后续低点严格低于 A 才触发；
 - 结构失效价：`structural_invalidation = impulse_start`，后续低点小于等于该价触发。
 
@@ -217,7 +220,7 @@ next_open_status, tradability_reason, evidence_json
 source_digest, origin, policy_version, created_at
 ```
 
-`evidence_json` 保存阈值检查、使用的数据位置和异常原因；高频筛选字段必须是实体列，不能只藏在 JSON 中。
+`evidence_json` 保存阈值检查、使用的数据位置、异常原因，以及 v2 的首次触发/第一腿扩展证据：`trigger_window_bars`、`trigger_date`、`effective_leg_start_date`、`effective_leg_end_date`、`effective_leg_bars`、有效收盘/前高/高度、最大连续收涨区间和冻结状态。高频筛选字段必须是实体列，不能只藏在 JSON 中。
 
 ### 8.3 `brooks_run_receipt`
 
@@ -245,7 +248,7 @@ source_digest, origin, policy_version, created_at
 
 - 顶部四个状态数量：H1、touch25、第一腿、今日失效/完成；
 - 单一状态筛选、日期、行业、代码/名称搜索、最低执行成交额（仅展示过滤）和“含暂停”开关；
-- 主表固定列：状态、代码/名称、第一腿日期与天数、`move_atr`、路径效率、CLV、重叠、回调%、回调 ATR、当前价、前高、MM0.8、MM1.0、紧/结构失效距离、状态年龄；
+- 主表固定列：状态、代码/名称、首次触发窗口与日期、第一腿实际跨度、最大连续收涨区间、有效 `move_atr`、路径效率、CLV、重叠、回调%、回调 ATR、当前价、前高、MM0.8、MM1.0、紧/结构失效距离、状态年龄；
 - 行内展开：逐项阈值证据、H1/H2 日期、次日可成交状态、目标完成状态、暂停/移出原因；
 - 明示文案：“这是结构化观察池，不是买点、收益预测或交易指令”。
 
@@ -257,6 +260,8 @@ source_digest, origin, policy_version, created_at
 
 - 用研究工程的冻结样例验证 ATR、3/5/8 日第一腿及五个质量指标逐项一致；
 - 同日多窗口只保留最长，40 个交易位置冷却边界分别测试 39/40；
+- 首次触发窗口保持不可变；S0 后续上涨扩展有效第一腿，touch25 后即使创新高也不得改写冻结结构；
+- 楚天龙回归样例在 2026-08-24 首次触发 3 日窗口，截至 2026-08-27 的第一腿跨度与最大连续收涨均为 6 个交易日；
 - 零振幅 CLV=0.5，零并集 overlap=1.0；
 - 未来一根 K 的变动不能改变此前任一决策日事实。
 

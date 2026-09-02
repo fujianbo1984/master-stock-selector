@@ -62,7 +62,7 @@ def run_brooks_watchlist(config: BrooksRunConfig) -> dict[str, Any]:
         raise ValueError(
             "Brooks 表尚未初始化；请先运行 watchlist --brooks-schema --apply"
         )
-    latest_run_date = repository.latest_brooks_run_date()
+    latest_run_date = repository.latest_brooks_run_date(BROOKS_POLICY_VERSION)
     if latest_run_date and evaluation_dates[0] <= latest_run_date:
         raise ValueError(
             "Brooks facts are append-only and already exist through "

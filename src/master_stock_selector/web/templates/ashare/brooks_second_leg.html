@@ -8,7 +8,7 @@
   <div class="brooks-page-heading">
     <p class="eyebrow">Al Brooks · 独立日线代理</p>
     <h1>Brooks 第二腿观察池</h1>
-    <p>强势第一腿—第二腿观察池：先识别 3/5/8 日第一腿，再等待回吐与恢复确认。</p>
+    <p>强势第一腿—第二腿观察池：先记录 3/5/8 日首次触发窗口，再跟踪第一腿扩展、回吐与恢复确认。</p>
   </div>
   <div class="brooks-page-status" role="status">
     <span>截至 {{ query_date or '—' }} 收盘</span>
@@ -28,7 +28,7 @@
 <section class="section brooks-workspace">
   <aside class="brooks-stage-rail" aria-label="Brooks 观察链">
     <div class="brooks-stage-heading"><span>观察链</span><small>独立日线事实</small></div>
-    {% for value, code, label, description in [('s0','S0','第一腿','3/5/8 日高质量第一腿'),('s1','S1','回吐25%','首次收盘回吐达到25%'),('s2','S2','H1确认','回调后的恢复确认'),('terminal','—','完成/失效','第二腿完成、失效或超时')] %}
+    {% for value, code, label, description in [('s0','S0','第一腿','首次触发后继续跟踪扩展'),('s1','S1','回吐25%','冻结第一腿并升级观察'),('s2','S2','H1确认','回调后的恢复确认'),('terminal','—','完成/失效','第二腿完成、失效或超时')] %}
     <a class="brooks-stage{% if state == value %} is-current{% endif %}" {% if state == value %}aria-current="page"{% endif %} href="/a/brooks-second-leg?date={{ query_date }}&amp;state={{ value }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}">
       <span class="brooks-stage-code">{{ code }}</span>
       <span class="brooks-stage-copy"><strong>{{ label }}</strong><small>{{ description }}</small></span>
@@ -74,6 +74,7 @@
       <thead><tr><th>状态 / 股票</th><th>第一腿</th><th>质量</th><th>回调</th><th>目标</th><th>失效距离</th><th>状态证据</th></tr></thead>
       <tbody>
       {% for row in rows %}
+      {% set leg = row.evidence or {} %}
       <tr>
         <td data-sort="{{ row.state_rank }}">
           <span class="status-marker status-{{ 'pass' if row.state_rank <= 2 else 'unknown' if row.state == 'PAUSED' else 'fail' if row.state in ['INVALIDATED','STALE'] else 'transition' }}">{{ row.state_label }}</span>
@@ -83,7 +84,7 @@
           </div>
           <small class="table-subline">{{ row.industry or '行业待补' }}</small>
         </td>
-        <td data-sort="{{ row.signal_date }}"><strong>{{ row.duration_bars }}日 · {{ '%.2f'|format(row.move_atr) }} ATR</strong><small class="table-subline">{{ row.start_date }} → {{ row.signal_date }}</small><small class="table-subline">速度 {{ '%.2f'|format(row.speed_atr_per_session) }} ATR/日（不加分）</small></td>
+        <td data-sort="{{ row.signal_date }}"><strong>首次触发 {{ row.duration_bars }}日 · {{ row.signal_date }}</strong><small class="table-subline">第一腿 {{ leg.effective_leg_bars or row.duration_bars }} 个交易日 · {{ leg.effective_leg_start_date or row.start_date }} → {{ leg.effective_leg_end_date or row.signal_date }}</small><small class="table-subline">最大连续收涨 {{ leg.max_consecutive_up_bars or row.duration_bars }} 日{% if leg.max_consecutive_up_start %} · {{ leg.max_consecutive_up_start }} → {{ leg.max_consecutive_up_end }}{% endif %}</small><small class="table-subline">{{ '已冻结' if leg.leg_frozen else '扩展中' }} · {{ '%.2f'|format(leg.effective_move_atr or row.move_atr) }} ATR</small></td>
         <td data-sort="{{ row.path_efficiency }}"><div>效率 <strong>{{ '%.1f%%'|format(row.path_efficiency * 100) }}</strong></div><small class="table-subline">CLV {{ '%.1f%%'|format(row.mean_close_location * 100) }} · 重叠 {{ '%.1f%%'|format(row.mean_overlap * 100) }}</small><small class="table-subline">阳线 {{ row.bullish_body_count }}/{{ row.duration_bars }} · 20日额 {{ '%.2f'|format(row.median_amount20_yi) }}亿</small></td>
         <td data-sort="{{ row.current_retracement }}"><strong>{{ '%.1f%%'|format(row.retracement_pct) }}</strong><small class="table-subline">{{ '%.2f'|format(row.pullback_atr) }} ATR · 锚点 {{ '%.2f'|format(row.pullback_low_anchor) }}</small><small class="table-subline">touch25 {{ row.touch25_date or '—' }}</small></td>
         <td data-sort="{{ row.mm_1_0 }}"><div>现价 <strong>{{ '%.2f'|format(row.current_close) }}</strong></div><small class="table-subline">前高 {{ '%.2f'|format(row.prior_high) }} {% if row.prior_high_touched %}✓{% endif %}</small><small class="table-subline">MM0.8 {{ '%.2f'|format(row.mm_0_8) }} {% if row.mm_0_8_completed %}✓{% endif %} · MM1.0 {{ '%.2f'|format(row.mm_1_0) }} {% if row.mm_1_0_completed %}✓{% endif %}</small></td>
@@ -115,7 +116,7 @@
 <details class="section stock-disclosure methodology-context brooks-method-boundary" role="note">
   <summary><span><strong>冻结方法边界</strong><small>≥3 ATR · 路径效率≥0.75 · CLV≥0.65 · 重叠≤0.35 · 40日冷却</small></span><span class="disclosure-action">展开</span></summary>
   <div class="stock-disclosure-body methodology-context-body">
-    <p>S0 只表示高质量第一腿完成；S1 是首次收盘回吐至少 25%；S2 是回调后出现阳线、CLV≥0.65 且最高价突破前一日高点。H2 只加标签，不提高排序。</p>
+    <p>S0 表示高质量第一腿首次触发，并在 touch25 前继续更新腿部高点、实际跨度与连续收涨天数；S1 是首次收盘回吐至少 25%，同时冻结第一腿结构；S2 是回调后出现阳线、CLV≥0.65 且最高价突破前一日高点。H2 只加标签，不提高排序。</p>
     <p>默认按状态、路径效率、平均 CLV、较低重叠、阳线占比、流动性与新鲜度逐级排序，不生成 0–100 分。第一腿速度、额外 ATR、H2、通道、缩量和振幅收缩均不加分。</p>
     <p class="method-boundary-copy">touch25、H1 和 H2 都不是机械买点；本页不与 Weinstein、Minervini 合成总分。紧失效与结构失效只展示不同风险路径，不代替用户选择止损或仓位。</p>
   </div>

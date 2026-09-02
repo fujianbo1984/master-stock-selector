@@ -157,6 +157,85 @@ def test_brooks_state_machine_moves_touch25_to_h1_and_completion_without_lookahe
     assert by_date[dates[14]]["mm_1_0_completed"] is True
 
 
+def test_chutianlong_first_leg_expands_after_three_day_trigger_and_freezes_at_touch25() -> None:
+    dates = [
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+    ]
+    closes = [10.85, 11.63, 12.79, 14.07, 15.48, 17.03, 18.73, 16.70, 20.00]
+    bars = [
+        _bar(
+            trade_date,
+            close,
+            open_price=close - 0.2,
+            high=close + 0.2,
+            low=close - 0.3,
+        )
+        for trade_date, close in zip(dates, closes, strict=True)
+    ]
+    event = BrooksImpulse(
+        event_id="brooks|003040.SZ|2026-08-24|3",
+        symbol="003040.SZ",
+        signal_pos=3,
+        start_pos=0,
+        signal_date="2026-08-24",
+        start_date="2026-08-19",
+        duration_bars=3,
+        impulse_start=10.85,
+        signal_close=14.07,
+        signal_high=14.27,
+        impulse_height=3.22,
+        atr20=0.65,
+        move_atr=4.95,
+        path_efficiency=1.0,
+        bullish_body_count=3,
+        bullish_body_share=1.0,
+        mean_close_location=0.8,
+        mean_overlap=0.0,
+        speed_atr_per_session=1.65,
+        median_amount20=100_000.0,
+        source_digest="chutianlong-trigger",
+    )
+
+    facts = build_brooks_daily_facts(
+        event,
+        bars,
+        [SecurityState(valid_from=dates[0])],
+        dates[3:],
+        origin="RECONSTRUCTED",
+    )
+    by_date = {row["as_of_date"]: row for row in facts}
+
+    trigger = by_date["2026-08-24"]["evidence"]
+    expanded = by_date["2026-08-27"]["evidence"]
+    frozen = by_date["2026-08-28"]["evidence"]
+    after_touch = by_date["2026-08-31"]["evidence"]
+
+    assert trigger["trigger_window_bars"] == 3
+    assert trigger["effective_leg_bars"] == 3
+    assert expanded["effective_leg_bars"] == 6
+    assert expanded["effective_leg_start_date"] == "2026-08-20"
+    assert expanded["effective_leg_end_date"] == "2026-08-27"
+    assert expanded["max_consecutive_up_bars"] == 6
+    assert expanded["max_consecutive_up_start"] == "2026-08-20"
+    assert expanded["max_consecutive_up_end"] == "2026-08-27"
+    assert expanded["leg_status"] == "EXPANDING"
+
+    assert by_date["2026-08-28"]["state"] == "S1_TOUCH25"
+    assert frozen["leg_status"] == "FROZEN_TOUCH25"
+    assert frozen["effective_leg_end_date"] == "2026-08-27"
+    assert after_touch["effective_leg_end_date"] == "2026-08-27"
+    assert after_touch["effective_signal_close"] == 18.73
+    assert by_date["2026-08-31"]["prior_high"] == 18.93
+
+
 def test_brooks_h2_is_only_a_tag_and_same_bar_target_failure_stays_ambiguous() -> None:
     dates = _dates(15)
     base = [_bar(value, 90.0 + index) for index, value in enumerate(dates[:11])]
@@ -359,7 +438,20 @@ def _event_and_fact() -> tuple[dict[str, object], dict[str, object]]:
         "mm_1_0_completed": False,
         "next_open_status": "PENDING",
         "tradability_reason": "",
-        "evidence": {"current_close": 13.0},
+        "evidence": {
+            "current_close": 13.0,
+            "trigger_window_bars": 8,
+            "trigger_date": "2026-07-31",
+            "effective_leg_start_date": "2026-07-22",
+            "effective_leg_end_date": "2026-07-31",
+            "effective_leg_bars": 8,
+            "effective_move_atr": 4.0,
+            "leg_frozen": True,
+            "leg_status": "FROZEN_TOUCH25",
+            "max_consecutive_up_bars": 6,
+            "max_consecutive_up_start": "2026-07-24",
+            "max_consecutive_up_end": "2026-07-31",
+        },
         "source_digest": "fact-digest",
         "origin": "RECONSTRUCTED",
         "policy_version": BROOKS_POLICY_VERSION,
@@ -401,6 +493,41 @@ def test_brooks_schema_is_explicit_and_repository_keeps_facts_separate(
     assert rows[0]["state"] == "S1_TOUCH25"
     with repository.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM stock_method_daily_fact").fetchone()[0] == 0
+
+
+def test_brooks_repository_keeps_v1_and_v2_separate_on_the_same_date(tmp_path: Path) -> None:
+    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
+    repository.initialize()
+    repository.migrate_brooks_schema()
+    current_event, current_fact = _event_and_fact()
+    legacy_version = "brooks-second-leg-daily-v1"
+    for version, run_id in (
+        (legacy_version, "brooks-v1"),
+        (BROOKS_POLICY_VERSION, "brooks-v2"),
+    ):
+        repository.persist_brooks_run(
+            events=[{**current_event, "policy_version": version}],
+            facts=[{**current_fact, "policy_version": version}],
+            receipt={
+                "run_id": run_id,
+                "as_of_date": "2026-07-31",
+                "from_date": "2026-07-31",
+                "origin": "RECONSTRUCTED",
+                "policy_version": version,
+                "market_database": "/tmp/market.sqlite3",
+                "source_digest": version,
+                "counts": {"daily_facts": 1},
+                "status": "SUCCESS",
+                "started_at": "2026-07-31T17:00:00+08:00",
+                "finished_at": "2026-07-31T17:01:00+08:00",
+            },
+        )
+
+    assert repository.latest_brooks_run_date(legacy_version) == "2026-07-31"
+    assert repository.latest_brooks_run_date(BROOKS_POLICY_VERSION) == "2026-07-31"
+    assert len(repository.brooks_rows("2026-07-31")) == 2
+    assert len(repository.brooks_rows("2026-07-31", legacy_version)) == 1
+    assert len(repository.brooks_rows("2026-07-31", BROOKS_POLICY_VERSION)) == 1
 
 
 def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Path) -> None:
@@ -452,6 +579,9 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "S2" in page.text
     assert "现价" in page.text
     assert "13.00" in page.text
+    assert "首次触发 8日" in page.text
+    assert "第一腿 8 个交易日" in page.text
+    assert "最大连续收涨 6 日" in page.text
     assert "data-download-tradingview-list=\"brooks-results\"" in page.text
 
     filtered = TestClient(app).get("/a/brooks-second-leg?date=2026-07-31&min_amount=2")

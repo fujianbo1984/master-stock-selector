@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from ...watchlist.brooks import BROOKS_POLICY_VERSION
 from ...watchlist.charting import (
     KELTNER_PRESETS,
     default_keltner_preset,
@@ -892,7 +893,7 @@ def build_watchlist_router(
         allowed_states = {"active", "s2", "s1", "s0", "terminal", "paused", "all"}
         if state_mode not in allowed_states:
             raise HTTPException(status_code=422, detail="unsupported Brooks state filter")
-        dates = repository.brooks_fact_dates()
+        dates = repository.brooks_fact_dates(BROOKS_POLICY_VERSION)
         query_date = ""
         if dates:
             if date and date in dates:
@@ -901,7 +902,9 @@ def build_watchlist_router(
                 query_date = next((value for value in dates if value <= date), dates[0])
             else:
                 query_date = dates[0]
-        all_rows = repository.brooks_rows(query_date) if query_date else []
+        all_rows = (
+            repository.brooks_rows(query_date, BROOKS_POLICY_VERSION) if query_date else []
+        )
         state_groups = {
             "s2": {"S2_H1", "S2_H1_H2_TAG"},
             "s1": {"S1_TOUCH25"},
@@ -1343,7 +1346,9 @@ def build_watchlist_router(
             query_date,
             [symbol],
         ).get(symbol.upper(), {})
-        payload["brooks"] = repository.brooks_stock_fact(symbol, query_date)
+        payload["brooks"] = repository.brooks_stock_fact(
+            symbol, query_date, BROOKS_POLICY_VERSION
+        )
         if payload["brooks"]:
             brooks = payload["brooks"]
             brooks["state_label"] = BROOKS_STATE_LABELS.get(str(brooks.get("state") or ""), "未知")
