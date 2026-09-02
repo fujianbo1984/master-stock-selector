@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from statistics import fmean, median
 from typing import Any, Iterable, Mapping, Sequence
 
-BROOKS_POLICY_VERSION = "brooks-second-leg-daily-v2.1"
+BROOKS_POLICY_VERSION = "brooks-strong-h1-daily-v3"
 
 STATE_S0 = "S0_IMPULSE"
 STATE_S1 = "S1_TOUCH25"
@@ -321,152 +321,94 @@ def _event_snapshot(
     as_of_pos: int,
 ) -> dict[str, Any]:
     signal = event.signal_pos
-    touch_pos: int | None = None
-    h1_pos: int | None = None
-    h1_failure_pos: int | None = None
-    h2_pos: int | None = None
-    late_h1_pos: int | None = None
     state = STATE_S0
     reason = "IMPULSE_QUALIFIED"
     changed_pos = signal
     terminal = False
-
-    # The immutable event records the first qualifying 3/5/8-day trigger.  While
-    # the event remains in S0, its first leg may continue to expand.  The
-    # effective geometry is frozen only when touch25 is first confirmed (or the
-    # event terminates), so the 40-session de-duplication rule cannot truncate a
-    # still-growing leg.
     effective_close = event.signal_close
     effective_high = event.signal_high
     close_peak_pos = signal
+    pullback_start_pos: int | None = None
+    pullback_low_pos: int | None = None
+    pullback_cycle = 0
+    cycle_h1_emitted = False
+    last_h1_pos: int | None = None
+    h1_today: dict[str, Any] | None = None
 
-    last_touch_scan = min(as_of_pos, signal + 15)
-    for pos in range(signal + 1, last_touch_scan + 1):
+    # v3 deliberately separates objective market facts from the user's pullback
+    # judgement.  Any completed pullback day opens one cycle; the first H1 proxy
+    # in that cycle is recorded.  A new closing peak resets the cycle, allowing a
+    # later pullback to generate another H1 without using touch25 as a gate.
+    scan_end = min(as_of_pos, signal + 40)
+    for pos in range(signal + 1, scan_end + 1):
         if not _bar_structurally_valid(event, bars, pos):
             state = STATE_INVALIDATED
-            reason = "STRUCTURAL_FAILURE_BEFORE_TOUCH25"
+            reason = "STRUCTURAL_FAILURE"
             changed_pos = pos
             terminal = True
             break
-        if touch_pos is None:
-            if bars[pos].close > effective_close:
-                effective_close = bars[pos].close
-                close_peak_pos = pos
-            if bars[pos].high > effective_high:
-                effective_high = bars[pos].high
-        effective_height = effective_close - event.impulse_start
-        current = _effective_retracement(effective_close, effective_height, bars[pos].close)
-        if touch_pos is None and 0.25 <= current < 1.0:
-            touch_pos = pos
-            state = STATE_S1
-            reason = "TOUCH25_CONFIRMED"
-            changed_pos = pos
-        if touch_pos is not None and h1_pos is None and _is_h1_bar(bars, pos):
-            h1_pos = pos
-            state = STATE_S2
-            reason = "H1_CONFIRMED"
-            changed_pos = pos
-            break
 
-    if not terminal and touch_pos is None and as_of_pos > signal + 15:
+        was_in_pullback = pullback_start_pos is not None
+        if was_in_pullback:
+            if pullback_low_pos is None or bars[pos].low < bars[pullback_low_pos].low:
+                pullback_low_pos = pos
+            if not cycle_h1_emitted and _is_h1_bar(bars, pos):
+                last_h1_pos = pos
+                cycle_h1_emitted = True
+                low_pos = pullback_low_pos if pullback_low_pos is not None else pos
+                height = effective_close - event.impulse_start
+                h1_today = {
+                    "position": pos,
+                    "cycle": pullback_cycle,
+                    "peak_pos": close_peak_pos,
+                    "peak_close": effective_close,
+                    "peak_high": effective_high,
+                    "pullback_start_pos": pullback_start_pos,
+                    "pullback_low_pos": low_pos,
+                    "height": height,
+                }
+
+        if bars[pos].close > effective_close:
+            effective_close = bars[pos].close
+            effective_high = max(effective_high, bars[pos].high)
+            close_peak_pos = pos
+            pullback_start_pos = None
+            pullback_low_pos = None
+            cycle_h1_emitted = False
+        else:
+            effective_high = max(effective_high, bars[pos].high)
+            if pullback_start_pos is None and bars[pos].close < effective_close:
+                pullback_cycle += 1
+                pullback_start_pos = pos
+                pullback_low_pos = pos
+                cycle_h1_emitted = False
+
+    if not terminal and as_of_pos > signal + 40:
         state = STATE_STALE
-        reason = "STALE_NO_TOUCH25"
-        changed_pos = signal + 16
+        reason = "STALE_EVENT_LIFECYCLE_40D"
+        changed_pos = signal + 41
         terminal = True
 
-    if not terminal and touch_pos is not None and h1_pos is None:
-        structural_end = min(as_of_pos, touch_pos + 20)
-        for pos in range(last_touch_scan + 1, structural_end + 1):
-            if not _bar_structurally_valid(event, bars, pos):
-                state = STATE_INVALIDATED
-                reason = "STRUCTURAL_FAILURE_AFTER_TOUCH25"
-                changed_pos = pos
-                terminal = True
-                break
-            if late_h1_pos is None and _is_h1_bar(bars, pos):
-                late_h1_pos = pos
-        if not terminal and as_of_pos > touch_pos + 20:
-            state = STATE_STALE
-            reason = "STALE_NO_H1"
-            changed_pos = touch_pos + 21
-            terminal = True
+    if h1_today is not None and int(h1_today["position"]) != as_of_pos:
+        h1_today = None
 
-    leg_end_pos = close_peak_pos
-    effective_height = effective_close - event.impulse_start
-
-    if not terminal and h1_pos is not None:
-        h1_anchor_start = min(h1_pos, leg_end_pos + 1)
-        h1_anchor = min(bar.low for bar in bars[h1_anchor_start : h1_pos + 1])
-        for pos in range(h1_pos + 1, min(as_of_pos, signal + 30) + 1):
-            if bars[pos].low <= event.impulse_start:
-                state = STATE_INVALIDATED
-                reason = "STRUCTURAL_FAILURE_AFTER_H1"
-                changed_pos = pos
-                terminal = True
-                break
-            broke_anchor = bars[pos].low < h1_anchor
-            touched_high = bars[pos].high >= effective_high
-            if h1_failure_pos is None and broke_anchor and touched_high:
-                reason = "AMBIGUOUS_H1_FAILURE_AND_PRIOR_HIGH"
-                break
-            if h1_failure_pos is None and touched_high:
-                break
-            if h1_failure_pos is None and broke_anchor:
-                h1_failure_pos = pos
-            if h1_failure_pos is not None and _is_h1_bar(bars, pos):
-                h2_pos = pos
-                state = STATE_S2_H2
-                reason = "H2_RESCUE_TAGGED"
-                changed_pos = pos
-                break
-
-    decision_pos = h2_pos if h2_pos is not None else h1_pos if h1_pos is not None else touch_pos
-    anchor_end = decision_pos if decision_pos is not None else as_of_pos
-    anchor_start = min(anchor_end, leg_end_pos + 1)
-    anchor = (
-        min(bar.low for bar in bars[anchor_start : anchor_end + 1])
-        if anchor_end > leg_end_pos
-        else effective_close
-    )
-    prior_high_touched = False
-    prior_high_closed = False
-    mm08_completed = False
-    mm10_completed = False
-    ambiguous_same_bar = False
-    mm08 = anchor + 0.8 * effective_height
-    mm10 = anchor + effective_height
-    if decision_pos is not None:
-        path_end = changed_pos if terminal else as_of_pos
-        for pos in range(decision_pos + 1, path_end + 1):
-            target_hit = bars[pos].high >= effective_high or bars[pos].high >= mm08
-            failure_hit = bars[pos].low <= event.impulse_start
-            if target_hit and failure_hit:
-                ambiguous_same_bar = True
-            prior_high_touched = prior_high_touched or bars[pos].high >= effective_high
-            prior_high_closed = prior_high_closed or bars[pos].close >= effective_high
-            mm08_completed = mm08_completed or bars[pos].high >= mm08
-            mm10_completed = mm10_completed or bars[pos].high >= mm10
-            if not terminal and failure_hit:
-                state = STATE_INVALIDATED
-                reason = (
-                    "AMBIGUOUS_TARGET_AND_STRUCTURAL_FAILURE"
-                    if target_hit
-                    else "STRUCTURAL_FAILURE_AFTER_DECISION"
-                )
-                changed_pos = pos
-                terminal = True
-                break
-            if not terminal and prior_high_touched and mm10_completed:
-                state = STATE_COMPLETED
-                reason = "PRIMARY_PATHS_COMPLETED"
-                changed_pos = pos
-                terminal = True
-                break
-        if not terminal and as_of_pos > decision_pos + 60:
-            state = STATE_STALE
-            reason = "STALE_PATH_CENSORED_60D"
-            changed_pos = decision_pos + 61
-            terminal = True
+    if not terminal:
+        if h1_today is not None:
+            state = STATE_S2
+            reason = "H1_CANDIDATE_TODAY"
+            changed_pos = as_of_pos
+        elif as_of_pos == signal:
+            state = STATE_S0
+            reason = "IMPULSE_QUALIFIED"
+            changed_pos = signal
+        elif pullback_start_pos is not None:
+            state = STATE_S0
+            reason = "PULLBACK_AWAITING_MANUAL_JUDGEMENT"
+            changed_pos = as_of_pos
+        else:
+            state = STATE_S0
+            reason = "STRONG_CONTINUATION"
+            changed_pos = as_of_pos
 
     current_state = security_states[as_of_pos]
     if not terminal and not _security_eligible(current_state):
@@ -475,59 +417,65 @@ def _event_snapshot(
         changed_pos = as_of_pos
 
     current_bar = bars[as_of_pos]
-    maximum_low_retracement = _effective_maximum_retracement(
-        effective_close,
-        effective_height,
-        bars,
-        close_peak_pos,
-        as_of_pos,
+    metric_peak_close = float(h1_today["peak_close"]) if h1_today else effective_close
+    metric_peak_high = float(h1_today["peak_high"]) if h1_today else effective_high
+    metric_peak_pos = int(h1_today["peak_pos"]) if h1_today else close_peak_pos
+    leg_end_pos = metric_peak_pos
+    effective_height = max(metric_peak_close - event.impulse_start, event.impulse_height)
+    active_low_pos = (
+        int(h1_today["pullback_low_pos"])
+        if h1_today
+        else pullback_low_pos
+        if pullback_low_pos is not None
+        else as_of_pos
+    )
+    anchor = bars[active_low_pos].low if active_low_pos > metric_peak_pos else metric_peak_close
+    maximum_low_retracement = max(
+        0.0, (metric_peak_close - anchor) / effective_height
     )
     run = _maximum_consecutive_up_run(bars, event.start_pos + 1, leg_end_pos)
-    leg_frozen = touch_pos is not None or terminal
-    leg_status = (
-        "FROZEN_TOUCH25"
-        if touch_pos is not None
-        else "TERMINATED"
-        if terminal
-        else "EXPANDING"
-    )
-    next_open_status = _next_open_status(
-        event.symbol, decision_pos, as_of_pos, bars, security_states
+    decision_pos = as_of_pos if h1_today is not None else None
+    mm08 = anchor + 0.8 * effective_height
+    mm10 = anchor + effective_height
+    pullback_start = (
+        int(h1_today["pullback_start_pos"])
+        if h1_today
+        else pullback_start_pos
     )
     return {
         "state": state,
         "state_reason": reason,
         "state_rank": STATE_RANKS[state],
         "state_changed_on": bars[changed_pos].trade_date,
-        "touch25_date": bars[touch_pos].trade_date if touch_pos is not None else "",
-        "h1_date": bars[h1_pos].trade_date if h1_pos is not None else "",
-        "h1_failure_date": (bars[h1_failure_pos].trade_date if h1_failure_pos is not None else ""),
-        "h2_date": bars[h2_pos].trade_date if h2_pos is not None else "",
+        "touch25_date": "",
+        "h1_date": current_bar.trade_date if h1_today is not None else "",
+        "h1_failure_date": "",
+        "h2_date": "",
         "bars_after_signal": max(0, as_of_pos - signal),
-        "bars_after_touch25": max(0, as_of_pos - touch_pos) if touch_pos is not None else 0,
+        "bars_after_touch25": 0,
         "current_retracement": _effective_retracement(
-            effective_close, effective_height, current_bar.close
+            metric_peak_close, effective_height, current_bar.close
         ),
         "maximum_low_retracement": maximum_low_retracement,
-        "pullback_atr": max(0.0, effective_close - anchor) / event.atr20,
+        "pullback_atr": max(0.0, metric_peak_close - anchor) / event.atr20,
         "pullback_low_anchor": anchor,
-        "prior_high": effective_high,
+        "prior_high": metric_peak_high,
         "mm_0_8": mm08,
         "mm_1_0": mm10,
         "tight_invalidation": anchor,
         "structural_invalidation": event.impulse_start,
-        "prior_high_touched": prior_high_touched,
-        "prior_high_closed": prior_high_closed,
-        "mm_0_8_completed": mm08_completed,
-        "mm_1_0_completed": mm10_completed,
-        "next_open_status": next_open_status,
+        "prior_high_touched": False,
+        "prior_high_closed": False,
+        "mm_0_8_completed": False,
+        "mm_1_0_completed": False,
+        "next_open_status": _next_open_status(
+            event.symbol, decision_pos, as_of_pos, bars, security_states
+        ),
         "tradability_reason": reason if state == STATE_PAUSED else "",
         "evidence": {
-            "ambiguous_same_bar": ambiguous_same_bar,
-            "decision_date": bars[decision_pos].trade_date if decision_pos is not None else "",
-            "late_h1_diagnostic_date": (
-                bars[late_h1_pos].trade_date if late_h1_pos is not None else ""
-            ),
+            "ambiguous_same_bar": False,
+            "decision_date": current_bar.trade_date if h1_today is not None else "",
+            "late_h1_diagnostic_date": "",
             "current_close": current_bar.close,
             "trigger_window_bars": event.duration_bars,
             "trigger_date": event.signal_date,
@@ -535,15 +483,35 @@ def _event_snapshot(
             "effective_leg_start_date": bars[event.start_pos + 1].trade_date,
             "effective_leg_end_date": bars[leg_end_pos].trade_date,
             "effective_leg_bars": leg_end_pos - event.start_pos,
-            "effective_signal_close": effective_close,
-            "effective_signal_high": effective_high,
+            "effective_signal_close": metric_peak_close,
+            "effective_signal_high": metric_peak_high,
             "effective_impulse_height": effective_height,
             "effective_move_atr": effective_height / event.atr20,
-            "leg_frozen": leg_frozen,
-            "leg_status": leg_status,
+            "leg_frozen": terminal,
+            "leg_status": (
+                "TERMINATED"
+                if terminal
+                else "H1_CANDIDATE"
+                if h1_today is not None
+                else "PULLBACK"
+                if pullback_start_pos is not None
+                else "EXPANDING"
+            ),
             "max_consecutive_up_bars": run[0],
             "max_consecutive_up_start": run[1],
             "max_consecutive_up_end": run[2],
+            "pullback_cycle": int(h1_today["cycle"]) if h1_today else pullback_cycle,
+            "pullback_start_date": bars[pullback_start].trade_date if pullback_start is not None else "",
+            "pullback_bars": as_of_pos - pullback_start + 1 if pullback_start is not None else 0,
+            "h1_candidate_today": h1_today is not None,
+            "h1_clv": _close_location(current_bar) if h1_today is not None else None,
+            "h1_breakout_pct": (
+                current_bar.high / bars[as_of_pos - 1].high - 1
+                if h1_today is not None and bars[as_of_pos - 1].high > 0
+                else None
+            ),
+            "last_h1_date": bars[last_h1_pos].trade_date if last_h1_pos is not None else "",
+            "touch25_manual": True,
         },
     }
 

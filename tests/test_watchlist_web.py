@@ -1418,8 +1418,9 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "股份制银行III（申万2021三级）" in detail.text
     assert detail.text.index("method-evidence-grid") < detail.text.index("manual-review-panel")
     assert "两种方法逐项对照" in detail.text
-    assert "Brooks 第二腿独立证据" in detail.text
-    assert "S1 回吐25%" in detail.text
+    assert "Brooks 强势股与 H1 独立证据" in detail.text
+    assert "最近 H1 / 回调判断" in detail.text
+    assert "/ 人工" in detail.text
     assert "不改变上方两法结论" in detail.text
     assert "异常交易复核" in detail.text
     assert "日线描述性证据 · 不改变 Weinstein 或 Minervini 结论" in detail.text

@@ -981,6 +981,28 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 }
 .brooks-filter-bar label { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 600; }
 .brooks-filter-bar input, .brooks-filter-bar select, .brooks-filter-bar button { width: 100%; min-height: 38px; height: 38px; }
+.brooks-phase-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+.brooks-phase-tab {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 11px 12px 10px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+}
+.brooks-phase-tab:last-child { border-right: 0; }
+.brooks-phase-tab:hover { color: var(--text); background: color-mix(in srgb, var(--accent-soft) 35%, transparent); }
+.brooks-phase-tab.is-current { box-shadow: inset 0 -3px 0 var(--accent); background: color-mix(in srgb, var(--accent-soft) 48%, white); color: var(--text); }
+.brooks-phase-tab span { font-size: 12px; font-weight: 700; }
+.brooks-phase-tab strong { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 17px; line-height: 1; }
+.brooks-phase-tab small { grid-column: 1 / -1; overflow: hidden; font-size: 9px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.brooks-quality-tag { display: inline-flex; margin-left: 4px; padding: 1px 5px; border: 1px solid #2f7d5c; background: var(--success-soft); color: #176145; font-size: 9px; font-weight: 700; vertical-align: 1px; }
 .brooks-results-heading {
   display: flex;
   min-height: 72px;

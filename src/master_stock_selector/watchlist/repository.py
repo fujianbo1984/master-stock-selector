@@ -537,6 +537,9 @@ CREATE INDEX IF NOT EXISTS idx_brooks_daily_state
 ON brooks_second_leg_daily_fact(as_of_date, state, state_rank);
 CREATE INDEX IF NOT EXISTS idx_brooks_daily_symbol
 ON brooks_second_leg_daily_fact(symbol, as_of_date);
+CREATE INDEX IF NOT EXISTS idx_brooks_daily_h1_occurrence
+ON brooks_second_leg_daily_fact(policy_version, h1_date, as_of_date, symbol)
+WHERE h1_date <> '';
 CREATE TABLE IF NOT EXISTS brooks_run_receipt (
     run_id TEXT NOT NULL PRIMARY KEY,
     as_of_date TEXT NOT NULL,
@@ -2162,6 +2165,59 @@ class WatchlistRepository:
                          f.state_changed_on DESC, f.symbol
                 """,
                 (as_of_date, policy_version, policy_version),
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "evidence": json.loads(str(row["evidence_json"] or "{}")),
+            }
+            for row in rows
+        ]
+
+    def brooks_h1_rows(
+        self,
+        end_date: str,
+        policy_version: str,
+        *,
+        lookback_dates: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return one immutable row for each H1 occurrence in recent fact dates."""
+
+        if not self.brooks_schema_ready() or not end_date:
+            return []
+        lookback_dates = max(1, min(int(lookback_dates), 120))
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                WITH recent_dates AS (
+                    SELECT DISTINCT as_of_date
+                    FROM brooks_second_leg_daily_fact
+                    WHERE policy_version=? AND as_of_date <= ?
+                    ORDER BY as_of_date DESC
+                    LIMIT ?
+                )
+                SELECT f.*, e.signal_date, e.start_date, e.duration_bars,
+                       e.impulse_start, e.signal_close, e.signal_high,
+                       e.impulse_height, e.atr20, e.move_atr, e.path_efficiency,
+                       e.bullish_body_count, e.bullish_body_share,
+                       e.mean_close_location, e.mean_overlap,
+                       e.speed_atr_per_session, e.median_amount20,
+                       identity.name, identity.industry
+                FROM brooks_second_leg_daily_fact AS f
+                JOIN recent_dates AS dates ON dates.as_of_date=f.as_of_date
+                JOIN brooks_impulse_event AS e
+                  ON e.event_id=f.event_id AND e.policy_version=f.policy_version
+                LEFT JOIN security_identity_history AS identity
+                  ON identity.symbol=f.symbol AND identity.valid_from=(
+                      SELECT MAX(latest.valid_from)
+                      FROM security_identity_history AS latest
+                      WHERE latest.symbol=f.symbol AND latest.valid_from <= f.as_of_date
+                  )
+                WHERE f.policy_version=? AND f.h1_date=f.as_of_date
+                ORDER BY f.as_of_date DESC, e.median_amount20 DESC,
+                         e.path_efficiency DESC, f.symbol
+                """,
+                (policy_version, end_date, lookback_dates, policy_version),
             ).fetchall()
         return [
             {

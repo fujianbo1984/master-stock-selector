@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date as calendar_date
 from pathlib import Path
 from typing import Any
@@ -52,10 +52,10 @@ STATE_LABELS = {
     "DATA_GAP": "数据中断",
 }
 BROOKS_STATE_LABELS = {
-    "S0_IMPULSE": "S0 第一腿",
-    "S1_TOUCH25": "S1 回吐25%",
-    "S2_H1": "S2 H1确认",
-    "S2_H1_H2_TAG": "S2 H1 · H2标签",
+    "S0_IMPULSE": "持续跟踪",
+    "S1_TOUCH25": "历史 touch25",
+    "S2_H1": "今日 H1",
+    "S2_H1_H2_TAG": "历史 H1/H2",
     "COMPLETED": "主要路径完成",
     "INVALIDATED": "结构失效",
     "STALE": "观察超时",
@@ -390,8 +390,15 @@ def build_watchlist_router(
     ) -> list[dict[str, Any]]:
         if not query_date:
             return []
+        rows = (
+            repository.brooks_h1_rows(
+                query_date, BROOKS_POLICY_VERSION, lookback_dates=20
+            )
+            if state == "history"
+            else repository.brooks_rows(query_date, BROOKS_POLICY_VERSION)
+        )
         return _filter_brooks_rows(
-            repository.brooks_rows(query_date, BROOKS_POLICY_VERSION),
+            rows,
             state=state,
             industry=industry,
             min_amount=min_amount,
@@ -902,13 +909,35 @@ def build_watchlist_router(
     def brooks_second_leg(
         request: Request,
         date: str | None = None,
-        state: str = "active",
+        state: str = "priority",
         industry: str = "",
         min_amount: float = Query(default=0, ge=0, le=10000),
         q: str = "",
+        lookback: int = Query(default=20, ge=1, le=120),
     ) -> HTMLResponse:
-        state_mode = state.lower().strip()
-        allowed_states = {"active", "s2", "s1", "s0", "terminal", "paused", "all"}
+        aliases = {
+            "s2": "h1",
+            "s0": "priority",
+            "s1": "priority",
+            "continuing": "priority",
+            "active": "all",
+        }
+        state_mode = aliases.get(state.lower().strip(), state.lower().strip())
+        allowed_states = {
+            "priority",
+            "watch",
+            "pullback",
+            "immature",
+            "deep",
+            "expanding",
+            "cycle_done",
+            "h1",
+            "new",
+            "history",
+            "terminal",
+            "paused",
+            "all",
+        }
         if state_mode not in allowed_states:
             raise HTTPException(status_code=422, detail="unsupported Brooks state filter")
         dates = repository.brooks_fact_dates(BROOKS_POLICY_VERSION)
@@ -917,30 +946,20 @@ def build_watchlist_router(
             if date and date in dates:
                 query_date = date
             elif date:
-                query_date = next((value for value in dates if value <= date), dates[0])
+                query_date = ""
             else:
                 query_date = dates[0]
-        all_rows = (
+        daily_rows = (
             repository.brooks_rows(query_date, BROOKS_POLICY_VERSION) if query_date else []
         )
-        state_groups = {
-            "s2": {"S2_H1", "S2_H1_H2_TAG"},
-            "s1": {"S1_TOUCH25"},
-            "s0": {"S0_IMPULSE"},
-            "active": {"S2_H1", "S2_H1_H2_TAG", "S1_TOUCH25", "S0_IMPULSE"},
-            "terminal": {"COMPLETED", "INVALIDATED", "STALE"},
-            "paused": {"PAUSED"},
-            "all": {
-                "S2_H1",
-                "S2_H1_H2_TAG",
-                "S1_TOUCH25",
-                "S0_IMPULSE",
-                "COMPLETED",
-                "INVALIDATED",
-                "STALE",
-                "PAUSED",
-            },
-        }
+        history_rows = (
+            repository.brooks_h1_rows(
+                query_date, BROOKS_POLICY_VERSION, lookback_dates=lookback
+            )
+            if query_date
+            else []
+        )
+        all_rows = history_rows if state_mode == "history" else daily_rows
         industry_filter = industry.strip()
         available_industries = sorted(
             {str(row.get("industry") or "") for row in all_rows if row.get("industry")}
@@ -952,10 +971,28 @@ def build_watchlist_router(
             min_amount=min_amount,
             q=q,
         )
+        phases = [_brooks_phase(row) for row in daily_rows]
         counts = {
-            key: sum(str(row.get("state") or "") in values for row in all_rows)
-            for key, values in state_groups.items()
+            phase: phases.count(phase)
+            for phase in {
+                "h1",
+                "new",
+                "expanding",
+                "immature",
+                "watch",
+                "deep",
+                "cycle_done",
+                "terminal",
+                "paused",
+            }
         }
+        counts["priority"] = sum(
+            phase == "watch" and _brooks_priority_quality(row)
+            for row, phase in zip(daily_rows, phases, strict=True)
+        )
+        counts["pullback"] = counts["immature"] + counts["watch"] + counts["deep"]
+        counts["history"] = len(history_rows)
+        counts["all"] = len(daily_rows)
         return render(
             request,
             "ashare/brooks_second_leg.html",
@@ -963,13 +1000,14 @@ def build_watchlist_router(
                 "active": "Brooks 第二腿",
                 "query_date": query_date,
                 "latest_date": dates[0] if dates else "",
-                "date_fallback": date if date and date != query_date else "",
+                "date_missing": date if date and not query_date else "",
                 "schema_ready": repository.brooks_schema_ready(),
                 "state": state_mode,
                 "industry": industry_filter,
                 "available_industries": available_industries,
                 "min_amount": min_amount,
                 "q": q,
+                "lookback": lookback,
                 "rows": filtered,
                 "counts": counts,
             },
@@ -1211,7 +1249,7 @@ def build_watchlist_router(
         nav_next: str = "",
         nav_position: str = "",
         nav_total: str = "",
-        brooks_state: str = "active",
+        brooks_state: str = "h1",
         min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
@@ -1404,7 +1442,7 @@ def build_watchlist_router(
         nav_next: str = "",
         nav_position: str = "",
         nav_total: str = "",
-        brooks_state: str = "active",
+        brooks_state: str = "h1",
         min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
@@ -1529,7 +1567,7 @@ def build_watchlist_router(
         industry: str = "",
         q: str = "",
         section: str = "",
-        brooks_state: str = "active",
+        brooks_state: str = "h1",
         min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
         payload = repository.stock_detail(symbol)
@@ -2822,33 +2860,42 @@ def _filter_brooks_rows(
     min_amount: float,
     q: str,
 ) -> list[dict[str, Any]]:
-    state_groups = {
-        "s2": {"S2_H1", "S2_H1_H2_TAG"},
-        "s1": {"S1_TOUCH25"},
-        "s0": {"S0_IMPULSE"},
-        "active": {"S2_H1", "S2_H1_H2_TAG", "S1_TOUCH25", "S0_IMPULSE"},
-        "terminal": {"COMPLETED", "INVALIDATED", "STALE"},
-        "paused": {"PAUSED"},
-        "all": {
-            "S2_H1",
-            "S2_H1_H2_TAG",
-            "S1_TOUCH25",
-            "S0_IMPULSE",
-            "COMPLETED",
-            "INVALIDATED",
-            "STALE",
-            "PAUSED",
-        },
-    }
     state_mode = state.lower().strip()
-    if state_mode not in state_groups:
-        state_mode = "active"
+    if state_mode == "continuing":
+        state_mode = "priority"
+    if state_mode not in {
+        "priority",
+        "watch",
+        "pullback",
+        "immature",
+        "deep",
+        "expanding",
+        "cycle_done",
+        "h1",
+        "new",
+        "history",
+        "terminal",
+        "paused",
+        "all",
+    }:
+        state_mode = "priority"
     industry_filter = industry.strip()
     needle = q.strip().casefold()
     filtered: list[dict[str, Any]] = []
     for raw in rows:
         row = dict(raw)
-        if str(row.get("state") or "") not in state_groups[state_mode]:
+        phase = _brooks_phase(row)
+        if state_mode == "history":
+            visible = phase == "h1"
+        elif state_mode == "pullback":
+            visible = phase in {"immature", "watch", "deep"}
+        elif state_mode == "priority":
+            visible = phase == "watch" and _brooks_priority_quality(row)
+        elif state_mode == "all":
+            visible = True
+        else:
+            visible = phase == state_mode
+        if not visible:
             continue
         if industry_filter and str(row.get("industry") or "") != industry_filter:
             continue
@@ -2862,8 +2909,22 @@ def _filter_brooks_rows(
         evidence = dict(row.get("evidence") or {})
         current_close = float(evidence.get("current_close") or 0)
         row["current_close"] = current_close
-        row["state_label"] = BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知")
+        row["brooks_phase"] = phase
+        row["priority_quality"] = _brooks_priority_quality(row)
+        row["state_label"] = {
+            "priority": "优先观察",
+            "watch": "H1重点观察",
+            "immature": "回调未成熟",
+            "deep": "深回调/老化",
+            "expanding": "强势扩展",
+            "cycle_done": "本轮H1已过",
+            "h1": "今日 H1",
+            "new": "今日新强势",
+        }.get(phase, BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知"))
         row["retracement_pct"] = float(row.get("current_retracement") or 0) * 100
+        row["maximum_retracement_pct"] = (
+            float(row.get("maximum_low_retracement") or 0) * 100
+        )
         row["tight_risk_pct"] = (
             (current_close - float(row["tight_invalidation"])) / current_close * 100
             if current_close > 0
@@ -2877,7 +2938,63 @@ def _filter_brooks_rows(
         row["median_amount20_yi"] = float(row.get("median_amount20") or 0) / 100000
         row.update(_stock_external_urls(str(row.get("symbol") or "")))
         filtered.append(row)
+    if state_mode in {"priority", "watch"}:
+        filtered.sort(
+            key=lambda row: (
+                not bool(row.get("priority_quality")),
+                -float(row.get("median_amount20") or 0),
+                -float(row.get("path_efficiency") or 0),
+                -float(row.get("mean_close_location") or 0),
+                float(row.get("mean_overlap") or 0),
+                str(row.get("symbol") or ""),
+            )
+        )
     return filtered
+
+
+def _brooks_priority_quality(row: Mapping[str, Any]) -> bool:
+    """Transparent first-leg quality tag used only inside the H1 watch phase."""
+
+    mean_overlap = row.get("mean_overlap")
+    return (
+        float(row.get("path_efficiency") or 0) >= 0.85
+        and float(row.get("mean_close_location") or 0) >= 0.75
+        and float(mean_overlap if mean_overlap is not None else 1.0) <= 0.30
+    )
+
+
+def _brooks_phase(row: Mapping[str, Any]) -> str:
+    """Classify one Brooks fact into one mutually exclusive workload phase."""
+
+    row_state = str(row.get("state") or "")
+    row_date = str(row.get("as_of_date") or "")
+    if bool(row.get("h1_date")) and str(row.get("h1_date")) == row_date:
+        return "h1"
+    if row_state in {"COMPLETED", "INVALIDATED", "STALE"}:
+        return "terminal"
+    if row_state == "PAUSED":
+        return "paused"
+    if str(row.get("signal_date") or "") == row_date:
+        return "new"
+    if row_state != "S0_IMPULSE":
+        return "all"
+
+    evidence = dict(row.get("evidence") or {})
+    pullback_bars = int(evidence.get("pullback_bars") or 0)
+    pullback_start = str(evidence.get("pullback_start_date") or "")
+    last_h1_date = str(evidence.get("last_h1_date") or "")
+    if pullback_bars <= 0:
+        return "expanding"
+    if pullback_start and last_h1_date and last_h1_date >= pullback_start:
+        return "cycle_done"
+
+    maximum_retracement_pct = float(row.get("maximum_low_retracement") or 0) * 100
+    pullback_atr = float(row.get("pullback_atr") or 0)
+    if maximum_retracement_pct >= 50 or pullback_atr >= 3 or pullback_bars > 10:
+        return "deep"
+    if pullback_bars == 1 or maximum_retracement_pct < 15 or pullback_atr < 0.5:
+        return "immature"
+    return "watch"
 
 
 def _stock_navigation(
@@ -2898,7 +3015,7 @@ def _stock_navigation(
     personal_rows: list[dict[str, Any]] | None = None,
     position_rows: list[dict[str, Any]] | None = None,
     brooks_rows: list[dict[str, Any]] | None = None,
-    brooks_state: str = "active",
+    brooks_state: str = "h1",
     min_amount: float = 0,
     nav_previous: str = "",
     nav_next: str = "",
@@ -2978,7 +3095,7 @@ def _stock_navigation(
         "focus-candidates": "我的重点观察",
         "personal-observations": "我的观察",
         "open-positions": "当前持仓",
-        "brooks-results": "Brooks 第二腿观察池",
+        "brooks-results": "强势股与 H1 观察池",
     }
     empty: dict[str, Any] = {
         "query": query,
