@@ -77,14 +77,44 @@
 {% if grill %}<section class="section panel plan-grill-panel">
   <div class="section-heading"><div><p class="eyebrow">草稿 revision {{ grill.revision }}</p><h2>逐项确认规则</h2></div><span class="plan-progress">已确认 {{ grill.progress.confirmed }} / {{ grill.progress.total }}</span></div>
   {% if next_question.status == 'QUESTION' %}<article class="settings-card plan-question-card"><p class="settings-section-index">{{ next_question.question.section }}</p><h3>{{ next_question.question.title }}</h3><p>{{ next_question.question.prompt }}</p><p class="muted">{{ next_question.question.why }}</p><form method="post" action="/a/plan/grill/{{ grill.session_id }}/answer" class="settings-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="question_id" value="{{ next_question.question.question_id }}"><input type="hidden" name="revision" value="{{ grill.revision }}">{% if next_question.question.choices %}<label>你的明确决定<select name="value" required>{% for choice in next_question.question.choices %}<option value="{{ choice.value }}">{{ choice.label }}</option>{% endfor %}</select></label>{% else %}<label>你的明确决定<textarea name="value" rows="7" required>{{ grill.answers.get(next_question.question.question_id, {}).get('value', '') }}</textarea></label>{% endif %}<button class="button" type="submit">确认并继续</button></form></article>
-  {% else %}<div class="plan-ready"><div><h3>规则讨论已完成</h3><p>校验：{{ validation.status }}；{{ validation.blocking_issues|length }} 个待解决项。</p></div>{% if validation.status == 'READY' %}<form method="post" action="/a/plan/grill/{{ grill.session_id }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}"><button class="button" type="submit">确认并发布冻结版本</button></form>{% endif %}</div>{% if validation.warnings %}<ul class="plan-risk-list">{% for warning in validation.warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul>{% endif %}{% endif %}
+  {% else %}<div class="plan-ready"><div><h3>公共规则已确认</h3><p>可继续编辑下方形态卡；校验：{{ validation.status }}。</p></div>{% if validation.status == 'READY' %}<form method="post" action="/a/plan/grill/{{ grill.session_id }}/publish"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}"><button class="button" type="submit">确认并发布冻结版本</button></form>{% endif %}</div>{% if validation.warnings %}<ul class="plan-risk-list">{% for warning in validation.warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul>{% endif %}{% endif %}
+
+  <div class="plan-setup-editor" id="setup-editor">
+    <div class="section-heading"><div><p class="eyebrow">动态形态目录</p><h2>交易形态</h2></div><span class="muted">显示代码可改，内部 ID 保持不变</span></div>
+    <p class="reading-note">添加、修改或归档形态只影响当前草稿。发布后，新成交绑定当时的名称、代码与形态评估周期；历史成交不被改写。</p>
+    <div class="plan-setup-editor-list">
+      {% for setup in grill.setups %}
+      <details class="plan-setup-editor-card"{% if setup.code == 'C2' %} open{% endif %}>
+        <summary><span><strong>{{ setup.code }}</strong> {{ setup.name }}</span><span class="tag{% if setup.status == 'ARCHIVED' %} tag-caution{% endif %}">{{ '已归档' if setup.status == 'ARCHIVED' else ('已启用' if setup.enabled else '已停用') }}</span></summary>
+        <form method="post" action="/a/plan/grill/{{ grill.session_id }}/setups/save" class="settings-form plan-setup-card-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}"><input type="hidden" name="setup_id" value="{{ setup.setup_id }}">
+          <label>显示代码<input name="code" maxlength="12" value="{{ setup.code }}" required></label><label>形态名称<input name="name" maxlength="60" value="{{ setup.name }}" required></label><label>排序<input name="order" type="number" min="1" value="{{ setup.order }}" required></label><label class="plan-setup-enabled"><input name="enabled" type="checkbox"{% if setup.enabled %} checked{% endif %}> 启用于新成交</label>
+          <label class="plan-setup-wide">完整规则（可与下方分项二选一）<textarea name="rules" rows="5">{{ setup.rules }}</textarea></label>
+          {% for key, label in setup_field_labels.items() %}<label class="plan-setup-wide">{{ label }}<textarea name="{{ key }}" rows="2">{{ setup[key] }}</textarea></label>{% endfor %}
+          <div class="trade-form-actions plan-setup-wide"><button class="button" type="submit">{{ '恢复并保存' if setup.status == 'ARCHIVED' else '保存形态' }}</button></div>
+        </form>
+        {% if setup.status != 'ARCHIVED' %}<form method="post" action="/a/plan/grill/{{ grill.session_id }}/setups/{{ setup.setup_id }}/archive" class="plan-setup-archive-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}"><button class="text-button" type="submit">归档形态</button></form>{% endif %}
+      </details>
+      {% endfor %}
+    </div>
+    <details class="plan-setup-editor-card plan-setup-new-card">
+      <summary><span><strong>＋</strong> 添加交易形态</span><span class="disclosure-action">展开</span></summary>
+      <form method="post" action="/a/plan/grill/{{ grill.session_id }}/setups/save" class="settings-form plan-setup-card-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="revision" value="{{ grill.revision }}">
+        <label>显示代码<input name="code" maxlength="12" placeholder="例如 C3" required></label><label>形态名称<input name="name" maxlength="60" required></label><label>排序<input name="order" type="number" min="1" value="{{ grill.setups|length + 1 }}" required></label><label class="plan-setup-enabled"><input name="enabled" type="checkbox" checked> 启用于新成交</label>
+        <label class="plan-setup-wide">完整规则<textarea name="rules" rows="5" placeholder="可直接写完整执行合同，或使用下方分项字段。"></textarea></label>
+        {% for key, label in setup_field_labels.items() %}<label class="plan-setup-wide">{{ label }}<textarea name="{{ key }}" rows="2"></textarea></label>{% endfor %}
+        <div class="trade-form-actions plan-setup-wide"><button class="button" type="submit">添加形态</button></div>
+      </form>
+    </details>
+  </div>
 </section>{% endif %}
 
 {% if plan %}
 <section class="section plan-contract-layout">
   <aside class="panel plan-contract-index" aria-label="交易计划目录"><p class="eyebrow">当前合同</p><h2>{{ plan.version_number }}</h2><div class="plan-contract-stats"><span><strong>{{ plan.confirmed_rule_count }}</strong> 条已确认规则</span><span><strong>{{ plan.display_sections|length }}</strong> 层执行合同</span></div><nav>{% for section in plan.display_sections %}<a href="#plan-{{ section.key }}"><span>{{ section.eyebrow }}</span><strong>{{ section.title }}</strong><small>{{ section.rules|length }} 条</small></a>{% endfor %}<a href="#plan-risk-profile"><span>边界</span><strong>风险画像</strong><small>{{ plan.risk_profile|length }} 项</small></a></nav><p class="plan-contract-note">页面由冻结版本中的已确认答案逐条生成；标题与代码标签只改善阅读，不改写原始版本。</p></aside>
   <div class="plan-contract-content">
-    {% for section in plan.display_sections %}<article id="plan-{{ section.key }}" class="panel plan-layer"><header><div><p class="eyebrow">{{ section.eyebrow }}</p><h2>{{ section.title }}</h2></div><span>{{ section.rules|length }} 条规则</span></header><dl class="plan-rule-list">{% for rule in section.rules %}<div id="rule-{{ rule.id|replace('.', '-') }}"><dt><span>{{ '%02d'|format(loop.index) }}</span>{{ rule.title }}</dt><dd>{{ rule.value }}</dd></div>{% endfor %}</dl></article>{% endfor %}
+    {% for section in plan.display_sections %}<article id="plan-{{ section.key }}" class="panel plan-layer"><header><div><p class="eyebrow">{{ section.eyebrow }}</p><h2>{{ section.title }}</h2></div><span>{{ plan.setup_cards|length if section.key == 'setups' else section.rules|length }} 项</span></header><dl class="plan-rule-list">{% for rule in section.rules %}<div id="rule-{{ rule.id|replace('.', '-') }}"><dt><span>{{ '%02d'|format(loop.index) }}</span>{{ rule.title }}</dt><dd>{{ rule.value }}</dd></div>{% endfor %}</dl>{% if section.key == 'setups' %}<div class="plan-setup-contract-list">{% for setup in plan.setup_cards %}<section class="plan-setup-contract-card"><header><span class="sr-only">{{ setup.code }} {{ setup.name }}</span><strong>{{ setup.code }}</strong><h3>{{ setup.name }}</h3>{% if not setup.enabled %}<span class="tag tag-caution">已停用</span>{% endif %}</header>{% if setup.rules %}<p>{{ setup.rules }}</p>{% endif %}{% if setup.display_fields %}<dl>{% for field in setup.display_fields %}<div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>{% endfor %}</dl>{% endif %}</section>{% endfor %}</div>{% endif %}</article>{% endfor %}
     {% if plan.risk_profile %}<article id="plan-risk-profile" class="panel plan-risk-profile"><header><div><p class="eyebrow">已确认边界</p><h2>风险画像</h2></div><span class="tag tag-caution">不阻止发布</span></header><p class="reading-note">由已确认规则确定性派生，不修改冻结版本内容。</p><ul class="plan-risk-list">{% for warning in plan.risk_profile %}<li>{{ warning.message }}</li>{% endfor %}</ul></article>{% endif %}
   </div>
 </section>

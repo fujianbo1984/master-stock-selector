@@ -69,26 +69,21 @@ def test_demo_grill_publishes_frozen_private_version(tmp_path: Path) -> None:
     frozen = json.dumps(current["content"], ensure_ascii=False, sort_keys=True)
     assert hashlib.sha256(frozen.encode()).hexdigest() == current["content_hash"]
     setup_layer = current["content"]["layers"]["setups"]
-    assert {"A1.rules", "A3.rules", "B1.rules", "B2.rules", "C1.rules"} <= set(
+    assert {"A1.rules", "A3.rules", "B1.rules", "B2.rules", "C1.rules", "C2.rules"} <= set(
         setup_layer
     )
     assert "至少60个交易日" in setup_layer["C1.rules"]["value"]
     assert "分别记录子类型" in setup_layer["C1.rules"]["value"]
     assert [item["setup_id"] for item in current["setup_catalog"] if item["enabled"]] == [
-        "A1", "A3", "B1", "B2", "C1"
+        "A1", "A3", "B1", "B2", "C1", "C2"
     ]
     setup_section = next(
         section for section in current["display_sections"] if section["key"] == "setups"
     )
-    assert [rule["title"] for rule in setup_section["rules"]] == [
-        "A1 突破前入场",
-        "A3 首次回调",
-        "B1 简单回调",
-        "B2 复杂回调",
-        "C1 区间失败测试",
-        "重入与叠加",
-        "启用形态",
-    ]
+    assert [rule["title"] for rule in setup_section["rules"]] == ["重入与叠加"]
+    assert next(item for item in current["setup_cards"] if item["code"] == "C2")[
+        "name"
+    ] == "底部区间突破后的首次回调"
     risk_section = next(
         section for section in current["display_sections"] if section["key"] == "risk"
     )
@@ -163,7 +158,7 @@ def test_only_site_owner_can_share_plan_and_viewers_see_sanitized_page(
     assert 'data-plan-share-statement' in share_dialog.text
     assert 'data-plan-share-count>0 / 300' in share_dialog.text
     assert 'data-plan-share-submit disabled' in share_dialog.text
-    assert 'app.css?v=20260902-brooks-phase-v4' in share_dialog.text
+    assert 'app.css?v=20260904-dynamic-plan-v1' in share_dialog.text
 
     assert (
         viewer.post(
@@ -528,6 +523,210 @@ def test_personal_plan_controls_trade_setup_options_and_other_is_default(tmp_pat
             alice, traded_on="2026-08-01", symbol="000002.SZ", side="BUY",
             quantity=100, price=10, fee=0, method="MANUAL", plan_setup_id="A3",
         )
+
+
+def test_dynamic_setup_keeps_stable_identity_snapshots_and_can_be_archived(
+    tmp_path: Path,
+) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    _published_demo(repository, user_id)
+
+    draft = repository.trading_plans.start(user_id, from_version="current")
+    saved = repository.trading_plans.save_setup(
+        user_id,
+        draft["session_id"],
+        {
+            "code": "D1",
+            "name": "自定义突破",
+            "enabled": True,
+            "order": 20,
+            "structure": "三次收缩后靠近压力位",
+            "trigger": "突破信号K线高点",
+            "initial_stop": "结构低点下方",
+            "first_target": "1R减半",
+        },
+        expected_revision=draft["revision"],
+    )
+    custom = next(item for item in saved["setups"] if item["code"] == "D1")
+    setup_id = custom["setup_id"]
+    revision = _confirm_all(repository, user_id, draft["session_id"])
+    first = repository.trading_plans.publish(user_id, draft["session_id"], revision)
+    first_plan = repository.trading_plans.current(user_id)
+    first_setup = next(item for item in first_plan["setup_catalog"] if item["setup_id"] == setup_id)
+
+    old_trade_id = repository.record_trade(
+        user_id, traded_on="2026-08-01", symbol="000001.SZ", side="BUY",
+        quantity=100, price=10, fee=0, method="MANUAL", plan_setup_id=setup_id,
+        stop_price=9,
+    )
+    rename = repository.trading_plans.start(user_id, from_version="current")
+    renamed_card = {**first_setup, "code": "D2", "name": "自定义突破修订"}
+    renamed = repository.trading_plans.save_setup(
+        user_id,
+        rename["session_id"],
+        renamed_card,
+        expected_revision=rename["revision"],
+    )
+    second = repository.trading_plans.publish(
+        user_id, rename["session_id"], renamed["revision"]
+    )
+    second_plan = repository.trading_plans.current(user_id)
+    second_setup = next(item for item in second_plan["setup_catalog"] if item["setup_id"] == setup_id)
+    assert second["evaluation_cycle"] == first["evaluation_cycle"]
+    assert second_setup["evaluation_cycle_id"] == first_setup["evaluation_cycle_id"]
+    assert repository.trade_execution(user_id, old_trade_id)["setup_code_snapshot"] == "D1"
+    assert {item["value"] for item in repository.trade_setup_options(user_id)} >= {setup_id}
+
+    archive = repository.trading_plans.start(user_id, from_version="current")
+    archived = repository.trading_plans.archive_setup(
+        user_id,
+        archive["session_id"],
+        setup_id,
+        expected_revision=archive["revision"],
+    )
+    repository.trading_plans.publish(
+        user_id, archive["session_id"], archived["revision"]
+    )
+    assert setup_id not in {item["value"] for item in repository.trade_setup_options(user_id)}
+    with pytest.raises(ValueError, match="未启用"):
+        repository.record_trade(
+            user_id, traded_on="2026-08-02", symbol="000002.SZ", side="BUY",
+            quantity=100, price=10, fee=0, method="MANUAL", plan_setup_id=setup_id,
+        )
+
+
+def test_setup_cycles_restart_only_for_changed_setup_or_common_execution_rule(
+    tmp_path: Path,
+) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    _published_demo(repository, user_id)
+    base = repository.trading_plans.current(user_id)
+    base_cycles = {
+        item["setup_id"]: item["evaluation_cycle_id"] for item in base["setup_catalog"]
+    }
+
+    c2_draft = repository.trading_plans.start(user_id, from_version="current")
+    c2 = next(item for item in c2_draft["setups"] if item["setup_id"] == "C2")
+    c2["rules"] += " 新增：入场前必须保留区间上沿截图。"
+    updated = repository.trading_plans.save_setup(
+        user_id,
+        c2_draft["session_id"],
+        c2,
+        expected_revision=c2_draft["revision"],
+    )
+    repository.trading_plans.publish(
+        user_id, c2_draft["session_id"], updated["revision"]
+    )
+    changed = repository.trading_plans.current(user_id)
+    changed_cycles = {
+        item["setup_id"]: item["evaluation_cycle_id"] for item in changed["setup_catalog"]
+    }
+    assert changed_cycles["A1"] == base_cycles["A1"]
+    assert changed_cycles["C2"] != base_cycles["C2"]
+
+    common = repository.trading_plans.start(user_id, from_version="current")
+    repository.trading_plans.answer(
+        user_id,
+        common["session_id"],
+        {
+            "question_id": "execution.entry",
+            "expected_revision": common["revision"],
+            "decision": {
+                "state": "CONFIRMED",
+                "value": "公共买入规则实质修改：仅使用下一交易日有效的条件单。",
+            },
+        },
+    )
+    common_status = repository.trading_plans.status(user_id, common["session_id"])
+    repository.trading_plans.publish(
+        user_id, common["session_id"], common_status["revision"]
+    )
+    final = repository.trading_plans.current(user_id)
+    final_cycles = {
+        item["setup_id"]: item["evaluation_cycle_id"] for item in final["setup_catalog"]
+    }
+    assert all(final_cycles[key] != changed_cycles[key] for key in changed_cycles)
+
+
+def test_c2_generic_observation_is_frozen_with_trade(tmp_path: Path) -> None:
+    repository = UserRepository(tmp_path / "users.sqlite3")
+    repository.initialize()
+    user_id = repository.create_user("owner", "Secure-password-123")
+    _published_demo(repository, user_id)
+    repository.save_setup_observation(
+        user_id,
+        "000001.SZ",
+        "C2",
+        {
+            "status": "READY",
+            "as_of_date": "2026-08-01",
+            "structure_started_on": "2026-04-01",
+            "signal_on": "2026-07-20",
+            "reference_low": "9",
+            "reference_high": "12",
+            "trigger_price": "12.51",
+            "invalidation_price": "11.99",
+            "summary": "长期区间突破第一腿后，首次回调收盘仍在上沿之上。",
+        },
+    )
+    buy_id = repository.record_trade(
+        user_id, traded_on="2026-08-02", symbol="000001.SZ", side="BUY",
+        quantity=100, price=12.6, fee=0, method="MANUAL", plan_setup_id="C2",
+        stop_price=11.9,
+    )
+    repository.clear_setup_observation(user_id, "000001.SZ", "C2")
+    trade = repository.trade_execution(user_id, buy_id)
+    assert trade["setup_code_snapshot"] == "C2"
+    assert trade["snapshot"]["setup_observation"]["status"] == "READY"
+    assert "首次回调" in trade["snapshot"]["setup_observation"]["evidence"]["summary"]
+    assert repository.setup_observations(user_id, "000001.SZ") == []
+
+
+def test_dynamic_plan_editor_and_c2_observation_are_available_on_web(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    repository = client.app.state.user_repository
+    user = repository.session_user(client.cookies.get(SESSION_COOKIE))
+    assert user is not None
+    _published_demo(repository, user.user_id)
+    draft = repository.trading_plans.start(user.user_id, from_version="current")
+
+    editor = client.get(f"/a/plan?session={draft['session_id']}")
+    assert editor.status_code == 200
+    assert 'id="setup-editor"' in editor.text
+    assert "动态形态目录" in editor.text
+    assert "C2" in editor.text
+    assert "底部区间突破后的首次回调" in editor.text
+    assert "/setups/save" in editor.text
+
+    stock = client.get("/a/stocks/000001.SZ?date=2026-08-01")
+    assert stock.status_code == 200
+    assert "按形态保存入场前证据" in stock.text
+    assert "/setups/C2/observation" in stock.text
+    response = client.post(
+        "/a/stocks/000001.SZ/setups/C2/observation",
+        data={
+            "csrf_token": _csrf(client),
+            "status": "READY",
+            "as_of_date": "2026-08-01",
+            "structure_started_on": "2026-04-01",
+            "signal_on": "2026-07-20",
+            "reference_low": "9",
+            "reference_high": "12",
+            "trigger_price": "12.51",
+            "invalidation_price": "11.99",
+            "summary": "突破后首次回调未收回区间。",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("#setup-observations")
+    saved = repository.setup_observations(user.user_id, "000001.SZ")
+    assert saved[0]["setup_id"] == "C2"
+    assert saved[0]["status"] == "READY"
 
 
 def test_c1_trade_freezes_manual_structure_and_reviews_variants_separately(tmp_path: Path):

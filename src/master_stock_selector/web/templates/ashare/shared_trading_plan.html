@@ -37,8 +37,9 @@
   <div class="plan-contract-content">
     {% for section in plan.display_sections %}
     <article id="shared-plan-{{ section.key }}" class="panel plan-layer">
-      <header><div><p class="eyebrow">{{ section.eyebrow }}</p><h2>{{ section.title }}</h2></div><span>{{ section.rules|length }} 条规则</span></header>
+      <header><div><p class="eyebrow">{{ section.eyebrow }}</p><h2>{{ section.title }}</h2></div><span>{{ plan.setup_cards|length if section.key == 'setups' else section.rules|length }} 项</span></header>
       <dl class="plan-rule-list">{% for rule in section.rules %}<div><dt><span>{{ '%02d'|format(loop.index) }}</span>{{ rule.title }}</dt><dd>{{ rule.value }}</dd></div>{% endfor %}</dl>
+      {% if section.key == 'setups' %}<div class="plan-setup-contract-list">{% for setup in plan.setup_cards %}<section class="plan-setup-contract-card"><header><span class="sr-only">{{ setup.code }} {{ setup.name }}</span><strong>{{ setup.code }}</strong><h3>{{ setup.name }}</h3>{% if not setup.enabled %}<span class="tag tag-caution">已停用</span>{% endif %}</header>{% if setup.rules %}<p>{{ setup.rules }}</p>{% endif %}{% if setup.display_fields %}<dl>{% for field in setup.display_fields %}<div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>{% endfor %}</dl>{% endif %}</section>{% endfor %}</div>{% endif %}
     </article>
     {% endfor %}
     {% if plan.risk_profile %}

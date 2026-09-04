@@ -643,6 +643,24 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .trade-exit-field > label { align-self: end; }
 .trade-form [hidden] { display: none; }
 .trade-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; border-top: 1px solid var(--line); }
+.setup-observation-summary-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.setup-observation-summary-list article { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); background: var(--panel-soft); }
+.setup-observation-summary-list header { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 7px; align-items: baseline; }
+.setup-observation-summary-list header strong { color: var(--accent); font-family: Georgia, "Times New Roman", serif; }
+.setup-observation-summary-list header em { color: var(--muted); font-size: 9px; font-style: normal; }
+.setup-observation-summary-list p { margin: 0; color: var(--text); font-size: 11px; line-height: 1.65; }
+.setup-observation-summary-list small { color: var(--muted); font-size: 9px; }
+.setup-observation-forms { display: grid; gap: 10px; }
+.setup-observation-form-card { border: 1px solid var(--line); background: var(--panel-soft); }
+.setup-observation-form-card > summary { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 11px 13px; cursor: pointer; list-style: none; }
+.setup-observation-form-card > summary::-webkit-details-marker { display: none; }
+.setup-observation-form-card > summary strong { color: var(--accent); font-family: Georgia, "Times New Roman", serif; }
+.setup-observation-form-card > summary span { color: var(--muted); font-size: 9px; }
+.setup-observation-form-card[open] > summary { border-bottom: 1px solid var(--line); }
+.setup-observation-form-card .trade-form { padding: 14px; }
+.setup-observation-form-card .trade-form label:nth-child(n) { grid-column: span 3; }
+.setup-observation-form-card .trade-form .review-note,
+.setup-observation-form-card .trade-form .trade-form-actions { grid-column: 1 / -1; }
 .empty { padding: 26px; border: 1px dashed var(--line); color: var(--muted); text-align: center; background: white; }
 .notes-panel p, .reading-note { margin-bottom: 0; }
 .stock-identity-card, .industry-stock-context, .manual-review-panel, .trade-journal-panel { margin-bottom: 12px; }
@@ -2215,6 +2233,24 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .plan-question-card { max-width: 980px; margin: 0 auto; border-left: 3px solid var(--accent); box-shadow: none; }
 .plan-ready { display: flex; justify-content: space-between; gap: 20px; align-items: center; }
 .plan-ready h3, .plan-ready p { margin: 0; }
+.plan-setup-editor { display: grid; gap: 14px; margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line-strong); }
+.plan-setup-editor > .reading-note { margin: 0; }
+.plan-setup-editor-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.plan-setup-editor-card { position: relative; border: 1px solid var(--line); background: var(--panel-soft); }
+.plan-setup-editor-card > summary { display: flex; min-height: 54px; cursor: pointer; list-style: none; justify-content: space-between; gap: 14px; align-items: center; padding: 11px 13px; }
+.plan-setup-editor-card > summary::-webkit-details-marker { display: none; }
+.plan-setup-editor-card > summary strong { display: inline-grid; min-width: 34px; color: var(--accent); font-family: Georgia, "Times New Roman", serif; font-size: 15px; }
+.plan-setup-editor-card[open] { grid-column: 1 / -1; background: var(--panel); }
+.plan-setup-editor-card[open] > summary { border-bottom: 1px solid var(--line); }
+.plan-setup-card-form { display: grid; grid-template-columns: 150px minmax(240px, 1fr) 90px 170px; gap: 12px; padding: 16px; }
+.plan-setup-card-form label { display: grid; align-content: start; gap: 6px; font-size: 10px; font-weight: 700; }
+.plan-setup-card-form textarea { line-height: 1.6; }
+.plan-setup-card-form .plan-setup-wide { grid-column: 1 / -1; }
+.plan-setup-enabled { grid-template-columns: 18px 1fr !important; align-items: center; padding-top: 24px; }
+.plan-setup-enabled input { width: 16px; min-height: 16px; margin: 0; accent-color: var(--accent); }
+.plan-setup-archive-form { display: flex; justify-content: flex-end; padding: 0 16px 14px; }
+.plan-setup-archive-form .text-button { color: var(--danger); }
+.plan-setup-new-card { margin-top: 2px; border-style: dashed; }
 
 .plan-contract-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 14px; align-items: start; }
 .plan-contract-index { position: sticky; top: 12px; padding: 18px; }
@@ -2241,6 +2277,16 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .plan-rule-list dt { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; align-content: start; font-weight: 700; }
 .plan-rule-list dt span { color: var(--accent); font-family: Georgia, "Times New Roman", serif; font-size: 10px; font-variant-numeric: tabular-nums; line-height: 1.9; }
 .plan-rule-list dd { margin: 0; color: #403a35; line-height: 1.85; white-space: pre-line; }
+.plan-setup-contract-list { display: grid; gap: 12px; padding: 0 0 22px; }
+.plan-setup-contract-card { border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--panel-soft); }
+.plan-setup-contract-card > header { display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+.plan-setup-contract-card > header strong { color: var(--accent); font-family: Georgia, "Times New Roman", serif; font-size: 16px; }
+.plan-setup-contract-card > header h3 { margin: 0; font-size: 14px; }
+.plan-setup-contract-card > p { margin: 0; padding: 15px; line-height: 1.85; white-space: pre-line; }
+.plan-setup-contract-card > dl { display: grid; margin: 0; padding: 0 15px 15px; }
+.plan-setup-contract-card > dl > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 18px; padding: 10px 0; border-top: 1px solid var(--line); }
+.plan-setup-contract-card dt { color: var(--muted); font-size: 10px; font-weight: 700; }
+.plan-setup-contract-card dd { margin: 0; line-height: 1.7; white-space: pre-line; }
 
 .plan-risk-profile { border-left: 3px solid var(--warning); padding-bottom: 20px; }
 .plan-risk-profile .reading-note { margin: 15px 0 8px; color: var(--muted); font-size: 11px; }

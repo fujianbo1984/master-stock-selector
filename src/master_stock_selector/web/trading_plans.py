@@ -15,9 +15,43 @@ from .plan_setups import PLAN_SETUP_DEFINITIONS, plan_setup_choices_text
 if TYPE_CHECKING:
     from .users import UserRepository
 
-GRILL_VERSION = "trading-plan-grill/2"
-SCHEMA_VERSION = "trading-plan/3"
+GRILL_VERSION = "trading-plan-grill/3"
+SCHEMA_VERSION = "trading-plan/4"
 ANSWER_STATES = {"CONFIRMED", "PROPOSED", "DEFERRED", "NOT_APPLICABLE"}
+
+SETUP_TEXT_FIELDS = (
+    "eligibility",
+    "structure",
+    "trigger",
+    "invalidation",
+    "initial_stop",
+    "first_target",
+    "management",
+    "reentry",
+    "evidence",
+)
+SETUP_FIELD_LABELS = {
+    "eligibility": "适用范围",
+    "structure": "结构定义",
+    "trigger": "触发条件",
+    "invalidation": "候选失效",
+    "initial_stop": "初始止损",
+    "first_target": "第一目标",
+    "management": "后续管理",
+    "reentry": "重入与重叠",
+    "evidence": "入场前证据",
+}
+SETUP_CYCLE_FIELDS = (
+    "eligibility", "structure", "trigger", "invalidation", "initial_stop",
+    "first_target", "management", "reentry", "rules",
+)
+COMMON_CYCLE_QUESTION_IDS = frozenset(
+    {
+        "scope.market", "scope.universe", "trend.background", "risk.risk_percent",
+        "risk.position_sizing", "risk.equity_base", "risk.reset", "risk.rounding",
+        "risk.slippage", "execution.entry", "execution.exit", "setup.reentry",
+    }
+)
 
 ANSWER_VALUE_LABELS = {
     "FULL_R": "每笔使用完整 1R",
@@ -107,6 +141,12 @@ QUESTIONS = tuple(
             "C1 区间失败测试",
             "C1区间、失败测试、强下跌后二次入场、初始止损和第一目标是什么？",
         ),
+        (
+            "setups",
+            "C2.rules",
+            "C2 底部区间突破后的首次回调",
+            "C2区间、突破第一腿、首次回调、初始止损和第一目标是什么？",
+        ),
         ("setups", "setup.reentry", "重入与叠加", "止损后重入、A1+A3和B1转B2如何处理？"),
         ("setups", "setup.enabled", "启用形态", "启用哪些交易形态？"),
     )
@@ -137,8 +177,9 @@ DEMO_ANSWERS = {
     "B1.rules": "既有上升趋势中的一段受控逆势回调，没有明显强劲下行动量，以高1等简单回调转强；不要求前高至少提供1R空间。初始止损=回调最低点－入场前一交易日TradingView ATR(14)；第一目标为实际1R并卖出一半。",
     "B2.rules": "两段清晰逆势运动的高2、楔形或显性/隐藏ABCD复杂回调；计划触发价至前高空间至少为计划1R；初始止损=第二腿最低点－0.01元；第一目标=前一摆动高点并卖出一半。高开后即使到前高不足1R仍交易并以前高为目标；若成交价已超前高，T+1次日仍在前高上方立即卖一半，否则等待重回前高。",
     "C1.rules": "C1只分析当日Minervini或Weinstein观察池内股票。以信号日可见数据人工确认至少60个交易日的横向区间；本次测试前至少有两个相隔不少于10个交易日、落在同一支撑带的历史摆动低点，并有可辨认上沿。盘中跌破支撑带下沿、收盘重新进入带内后，下一交易日突破失败测试K线最高价0.01元买入。初始止损=本次失败测试最低价－信号日TradingView ATR(14)；实际1R卖出一半，剩余仓位按公共移动止损规则处理。若测试前连续至少3根阴线且累计下跌不少于2 ATR，不做首次承接；等待至少反弹1 ATR后再次下探，第二次测试低点不低于首次低点0.25 ATR以上且收盘重新进入支撑带，下一交易日突破第二次测试K线最高价0.01元买入；止损=两次测试最低价－第二次信号日ATR(14)。首次与二次均归入C1，但分别记录子类型。区间有效向下破位、向上突破或公司行动造成价格尺度不连续时取消观察。",
-    "setup.reentry": "同一形态止损后，重新评估合格可完整1R重入并独立统计；持有A1后形成A3可再加完整1R并分别管理统计；B1止损后形成B2可重新完整1R入场；B1未止损但演化B2则不增加B2仓位。C1强下跌后的二次测试不是新方案，按C1二次入场子类型记录；C1止损后只有重新形成完整合格结构才可重入。同一股票多方案持仓时，行业集中度仍按1只股票计算。",
-    "setup.enabled": "A1,A3,B1,B2,C1",
+    "C2.rules": "符合基础A股股票池，不强制事先满足Minervini或Weinstein Stage 2。突破日前已存在至少60个交易日的横向区间，上下沿均有至少两次可辨认互动，上沿必须使用突破前可见数据确定。日线收盘有效站上上沿并形成可辨认向上第一腿后，只等待突破后第一次受控回调，不追第一腿末端。允许盘中测试上沿；入场前若日线收盘重新回到区间内部，候选失效。回调结束后突破恢复信号K线最高价+0.01元买入；初始止损=首次回调最低点-0.01元。实际1R卖出一半，余仓按公共结构低点移动止损。区间上沿只负责入场前取消，成交后由初始止损和公共退出规则管理。C2独立统计，不并入A3，不进入“两法同时符合”。",
+    "setup.reentry": "同一形态止损后，重新评估合格可完整1R重入并独立统计；持有A1后形成A3可再加完整1R并分别管理统计；B1止损后形成B2可重新完整1R入场；B1未止损但演化B2则不增加B2仓位。C1强下跌后的二次测试不是新方案，按C1二次入场子类型记录；C1止损后只有重新形成完整合格结构才可重入。C2止损后必须重新形成合格突破和首次回调，不得将同一回调反复计为新C2。同一股票多方案持仓时，行业集中度仍按1只股票计算。",
+    "setup.enabled": "A1,A3,B1,B2,C1,C2",
 }
 
 
@@ -336,9 +377,13 @@ class TradingPlanService:
                     raise ValueError("来源版本不存在")
                 base_content = json.loads(str(base_row["content_json"]))
                 answers = {
-                    key: {**value, "state": "PROPOSED"}
+                    key: {**value, "state": "CONFIRMED"}
                     for key, value in base_content.get("answers", {}).items()
+                    if key != "__setups__"
                 }
+                answers["__setups__"] = base_content.get(
+                    "setup_catalog", base_content.get("setups", [])
+                )
                 try:
                     self._setup_catalog(answers)
                 except ValueError:
@@ -393,6 +438,7 @@ class TradingPlanService:
         if not row:
             return None
         answers = json.loads(str(row["answers_json"]))
+        setups = self._setup_catalog(answers)
         return {
             "session_id": session_id,
             "status": row["status"],
@@ -403,7 +449,11 @@ class TradingPlanService:
             "change_goal": row["change_goal"],
             "published_version_id": row["published_version_id"],
             "progress": {
-                "confirmed": sum(1 for v in answers.values() if v.get("state") == "CONFIRMED"),
+                "confirmed": sum(
+                    1
+                    for v in answers.values()
+                    if isinstance(v, Mapping) and v.get("state") == "CONFIRMED"
+                ),
                 "total": len(QUESTIONS),
                 "unresolved": sum(
                     1
@@ -412,6 +462,7 @@ class TradingPlanService:
                 ),
             },
             "answers": answers,
+            "setups": setups,
         }
 
     def next(self, user_id: str, session_id: str) -> dict[str, Any]:
@@ -515,6 +566,170 @@ class TradingPlanService:
             )
         return self.next(user_id, session_id)
 
+    def save_setup(
+        self,
+        user_id: str,
+        session_id: str,
+        payload: Mapping[str, Any],
+        *,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Add or update one setup card inside an active version draft."""
+
+        if (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 1
+        ):
+            raise ValueError("expected_revision 必须为正整数")
+        setup_id = str(payload.get("setup_id") or "").strip() or (
+            "S" + uuid4().hex.upper()
+        )
+        with self.users.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute(
+                "SELECT * FROM user_plan_grill_session WHERE session_id=? AND user_id=?",
+                (session_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Grill 会话不存在")
+            if str(row["status"]) != "ACTIVE":
+                raise PlanConflict("已发布或关闭的 Grill 会话不可修改")
+            if expected_revision != int(row["revision"]):
+                raise PlanConflict("草稿已被其他操作更新")
+            answers = json.loads(str(row["answers_json"]))
+            catalog = self._setup_catalog(answers)
+            existing = next(
+                (item for item in catalog if str(item["setup_id"]) == setup_id), None
+            )
+            card: dict[str, Any] = {
+                **(existing or {}),
+                "setup_id": setup_id,
+                "code": str(payload.get("code") or "").strip().upper(),
+                "name": str(payload.get("name") or "").strip(),
+                "enabled": str(payload.get("enabled") or "").lower()
+                in {"1", "true", "on", "yes"},
+                "status": "ACTIVE",
+                "order": payload.get("order") or (existing or {}).get("order") or len(catalog) + 1,
+                "rules": str(payload.get("rules") or "").strip(),
+            }
+            for field in SETUP_TEXT_FIELDS:
+                card[field] = str(payload.get(field) or "").strip()
+            if not card["rules"] and not all(
+                card[field] for field in ("structure", "trigger", "initial_stop", "first_target")
+            ):
+                raise ValueError("请填写完整规则，或至少填写结构、触发、初始止损和第一目标")
+            if existing is None:
+                catalog.append(card)
+            else:
+                catalog[catalog.index(existing)] = card
+            answers["__setups__"] = self._validated_setup_catalog(catalog)
+            revision = int(row["revision"]) + 1
+            self._write_setup_draft_event(
+                c,
+                session_id=session_id,
+                user_id=user_id,
+                answers=answers,
+                expected_revision=expected_revision,
+                revision=revision,
+                setup_id=setup_id,
+                event_type="SETUP_SAVE",
+                value=card,
+            )
+        return self.status(user_id, session_id) or {}
+
+    def archive_setup(
+        self,
+        user_id: str,
+        session_id: str,
+        setup_id: str,
+        *,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        if (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 1
+        ):
+            raise ValueError("expected_revision 必须为正整数")
+        with self.users.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute(
+                "SELECT * FROM user_plan_grill_session WHERE session_id=? AND user_id=?",
+                (session_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Grill 会话不存在")
+            if str(row["status"]) != "ACTIVE":
+                raise PlanConflict("已发布或关闭的 Grill 会话不可修改")
+            if expected_revision != int(row["revision"]):
+                raise PlanConflict("草稿已被其他操作更新")
+            answers = json.loads(str(row["answers_json"]))
+            catalog = self._setup_catalog(answers)
+            match = next(
+                (item for item in catalog if str(item["setup_id"]) == setup_id), None
+            )
+            if match is None:
+                raise ValueError("交易形态不存在")
+            match["status"] = "ARCHIVED"
+            match["enabled"] = False
+            answers["__setups__"] = self._validated_setup_catalog(catalog)
+            revision = int(row["revision"]) + 1
+            self._write_setup_draft_event(
+                c,
+                session_id=session_id,
+                user_id=user_id,
+                answers=answers,
+                expected_revision=expected_revision,
+                revision=revision,
+                setup_id=setup_id,
+                event_type="SETUP_ARCHIVE",
+                value=match,
+            )
+        return self.status(user_id, session_id) or {}
+
+    @staticmethod
+    def _write_setup_draft_event(
+        connection: Any,
+        *,
+        session_id: str,
+        user_id: str,
+        answers: Mapping[str, Any],
+        expected_revision: int,
+        revision: int,
+        setup_id: str,
+        event_type: str,
+        value: Mapping[str, Any],
+    ) -> None:
+        cursor = connection.execute(
+            """UPDATE user_plan_grill_session
+            SET answers_json=?,revision=?,updated_at=CURRENT_TIMESTAMP
+            WHERE session_id=? AND user_id=? AND status='ACTIVE' AND revision=?""",
+            (
+                json.dumps(answers, ensure_ascii=False),
+                revision,
+                session_id,
+                user_id,
+                expected_revision,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise PlanConflict("草稿已被其他操作更新")
+        connection.execute(
+            """INSERT INTO user_plan_grill_event(
+                event_id,session_id,question_id,event_type,value_json,revision,actor_type
+            ) VALUES(?,?,?,?,?,?,?)""",
+            (
+                uuid4().hex,
+                session_id,
+                f"setup:{setup_id}",
+                event_type,
+                json.dumps(value, ensure_ascii=False),
+                revision,
+                "USER_WEB",
+            ),
+        )
+
     def validate(self, user_id: str, session_id: str) -> dict[str, Any]:
         status = self.status(user_id, session_id)
         if not status:
@@ -525,7 +740,9 @@ class TradingPlanService:
         ]
         conflicts = []
         try:
-            self._setup_catalog(answers)
+            catalog = self._setup_catalog(answers)
+            if not any(item.get("enabled") for item in catalog):
+                raise ValueError("至少需要启用一种交易形态")
         except ValueError as exc:
             conflicts.append(
                 {
@@ -596,7 +813,7 @@ class TradingPlanService:
                 raise PlanConflict("当前计划已有新版本，请从最新版本重新开始 Grill")
             prior_row = (
                 c.execute(
-                    "SELECT version_number, evaluation_cycle_id "
+                    "SELECT version_number, evaluation_cycle_id, content_json "
                     "FROM user_trading_plan_version WHERE version_id=?",
                     (prior_id,),
                 ).fetchone()
@@ -616,6 +833,21 @@ class TradingPlanService:
                 else uuid4().hex
             )
             content = report["content"]
+            prior_content = (
+                json.loads(str(prior_row["content_json"])) if prior_row is not None else {}
+            )
+            content["setup_catalog"] = self._setup_cycles_for_publish(
+                content.get("setup_catalog", []),
+                prior_content,
+                fallback_cycle=(
+                    str(prior_row["evaluation_cycle_id"]) if prior_row is not None else ""
+                ),
+                initial_cycle=cycle,
+                common_rules_changed=self._common_cycle_rules_changed(
+                    prior_content.get("answers", {}), content.get("answers", {})
+                ),
+            )
+            content["setups"] = content["setup_catalog"]
             raw = json.dumps(content, ensure_ascii=False, sort_keys=True)
             digest = hashlib.sha256(raw.encode()).hexdigest()
             if prior_id:
@@ -699,6 +931,9 @@ class TradingPlanService:
 
     @staticmethod
     def _setup_catalog(answers: Mapping[str, Any]) -> list[dict[str, Any]]:
+        explicit = answers.get("__setups__")
+        if isinstance(explicit, list):
+            return TradingPlanService._validated_setup_catalog(explicit)
         decision = answers.get("setup.enabled", {})
         raw = str(decision.get("value") or "") if isinstance(decision, Mapping) else ""
         tokens = [token for token in re.split(r"[\s,，、;；]+", raw.upper()) if token]
@@ -711,17 +946,121 @@ class TradingPlanService:
         enabled = set(tokens)
         catalog: list[dict[str, Any]] = []
         for code, definition in PLAN_SETUP_DEFINITIONS.items():
-            rule = answers.get(str(definition["rule_id"]), {})
+            rule_id = str(definition["rule_id"])
+            if rule_id not in answers and code not in enabled:
+                # Do not inject setup definitions added by newer software into an
+                # older frozen version that never contained them.
+                continue
+            rule = answers.get(rule_id, {})
             catalog.append(
                 {
                     "setup_id": code,
                     "code": code,
                     "name": str(definition["name"]),
                     "enabled": code in enabled,
+                    "status": "ACTIVE",
+                    "order": len(catalog) + 1,
                     "rules": str(rule.get("value") or "") if isinstance(rule, Mapping) else "",
+                    **{field: "" for field in SETUP_TEXT_FIELDS},
                 }
             )
         return catalog
+
+    @staticmethod
+    def _validated_setup_catalog(raw_catalog: list[Any]) -> list[dict[str, Any]]:
+        catalog: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        seen_codes: set[str] = set()
+        for index, raw in enumerate(raw_catalog):
+            if not isinstance(raw, Mapping):
+                raise ValueError("交易形态格式不正确")
+            setup_id = str(raw.get("setup_id") or "").strip()
+            code = str(raw.get("code") or "").strip().upper()
+            name = str(raw.get("name") or "").strip()
+            status = str(raw.get("status") or "ACTIVE").strip().upper()
+            if not setup_id or len(setup_id) > 64:
+                raise ValueError("交易形态缺少稳定内部ID")
+            if not re.fullmatch(r"[A-Z][A-Z0-9_-]{0,11}", code):
+                raise ValueError("形态代码需以大写字母开头，最长12位")
+            if not name or len(name) > 60:
+                raise ValueError("形态名称必填且不能超过60字")
+            if setup_id in seen_ids:
+                raise ValueError("形态内部ID不能重复")
+            if code in seen_codes:
+                raise ValueError(f"形态代码不能重复：{code}")
+            if status not in {"ACTIVE", "ARCHIVED"}:
+                raise ValueError("形态状态不正确")
+            seen_ids.add(setup_id)
+            seen_codes.add(code)
+            item: dict[str, Any] = {
+                "setup_id": setup_id,
+                "code": code,
+                "name": name,
+                "enabled": bool(raw.get("enabled", True)) and status == "ACTIVE",
+                "status": status,
+                "order": int(raw.get("order") or index + 1),
+                "rules": str(raw.get("rules") or "").strip()[:8000],
+            }
+            for field in SETUP_TEXT_FIELDS:
+                item[field] = str(raw.get(field) or "").strip()[:2000]
+            cycle_id = str(raw.get("evaluation_cycle_id") or "").strip()
+            if cycle_id:
+                item["evaluation_cycle_id"] = cycle_id
+            catalog.append(item)
+        catalog.sort(key=lambda item: (int(item["order"]), str(item["code"])))
+        return catalog
+
+    @staticmethod
+    def _common_cycle_rules_changed(
+        old_answers: Mapping[str, Any], new_answers: Mapping[str, Any]
+    ) -> bool:
+        return any(
+            (old_answers.get(identifier) or {}).get("value")
+            != (new_answers.get(identifier) or {}).get("value")
+            for identifier in COMMON_CYCLE_QUESTION_IDS
+        )
+
+    @staticmethod
+    def _setup_cycle_signature(setup: Mapping[str, Any]) -> tuple[str, ...]:
+        return tuple(str(setup.get(field) or "").strip() for field in SETUP_CYCLE_FIELDS)
+
+    @classmethod
+    def _setup_cycles_for_publish(
+        cls,
+        catalog: list[Mapping[str, Any]],
+        prior_content: Mapping[str, Any],
+        *,
+        fallback_cycle: str,
+        initial_cycle: str,
+        common_rules_changed: bool,
+    ) -> list[dict[str, Any]]:
+        prior_catalog = prior_content.get("setup_catalog", prior_content.get("setups", []))
+        prior_by_id = {
+            str(item.get("setup_id")): item
+            for item in prior_catalog
+            if isinstance(item, Mapping) and item.get("setup_id")
+        }
+        result: list[dict[str, Any]] = []
+        for raw in catalog:
+            item = dict(raw)
+            previous = prior_by_id.get(str(item["setup_id"]))
+            previous_cycle = (
+                str(previous.get("evaluation_cycle_id") or fallback_cycle)
+                if previous is not None
+                else ""
+            )
+            changed = (
+                previous is None
+                or common_rules_changed
+                or cls._setup_cycle_signature(previous) != cls._setup_cycle_signature(item)
+            )
+            item["evaluation_cycle_id"] = (
+                initial_cycle
+                if previous is None and not prior_by_id
+                else (uuid4().hex if changed else previous_cycle)
+            )
+            result.append(item)
+        return result
 
     @staticmethod
     def _warnings(answers: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -815,6 +1154,24 @@ class TradingPlanService:
                 identifier, {}
             ).get("value"):
                 return "SUBSTANTIVE"
+        base_setups = {
+            str(item.get("setup_id")): item for item in base.get("setup_catalog", [])
+        }
+        current_setups = {
+            str(item.get("setup_id")): item for item in self._setup_catalog(current_answers)
+        }
+        if set(base_setups) != set(current_setups):
+            return "SUBSTANTIVE"
+        for setup_id, current_setup in current_setups.items():
+            base_setup = base_setups[setup_id]
+            if self._setup_cycle_signature(base_setup) != self._setup_cycle_signature(
+                current_setup
+            ):
+                return "SUBSTANTIVE"
+            if bool(base_setup.get("enabled")) != bool(current_setup.get("enabled")):
+                return "SUBSTANTIVE"
+            if str(base_setup.get("status")) != str(current_setup.get("status")):
+                return "SUBSTANTIVE"
         return "MINOR"
 
     def _version(self, row: Any) -> dict[str, Any]:
@@ -825,7 +1182,9 @@ class TradingPlanService:
         value["content"] = json.loads(str(value.pop("content_json")))
         answers = value["content"].get("answers", {})
         catalog = value["content"].get("setup_catalog")
-        if not isinstance(catalog, list):
+        if isinstance(catalog, list):
+            catalog = [dict(item) for item in catalog if isinstance(item, Mapping)]
+        else:
             try:
                 catalog = self._setup_catalog(answers)
             except ValueError:
@@ -845,7 +1204,16 @@ class TradingPlanService:
                     "value": ",".join(code for code in PLAN_SETUP_DEFINITIONS if code in codes),
                 }
                 catalog = self._setup_catalog(compatible_answers)
+        for setup in catalog:
+            setup["display_fields"] = [
+                {"key": field, "label": SETUP_FIELD_LABELS[field], "value": setup.get(field)}
+                for field in SETUP_TEXT_FIELDS
+                if setup.get(field)
+            ]
         value["setup_catalog"] = catalog
+        value["setup_cards"] = [
+            setup for setup in catalog if str(setup.get("status") or "ACTIVE") == "ACTIVE"
+        ]
         value["risk_profile"] = self._warnings(answers)
         value["display_sections"] = self._display_sections(answers)
         value["confirmed_rule_count"] = sum(
@@ -871,6 +1239,10 @@ class TradingPlanService:
             for question in QUESTIONS:
                 layer = "operations" if question["section"] == "execution" else question["section"]
                 if layer != section_key:
+                    continue
+                if section_key == "setups" and (
+                    question["id"].endswith(".rules") or question["id"] == "setup.enabled"
+                ):
                     continue
                 decision = answers.get(question["id"], {})
                 raw_value = decision.get("value") if isinstance(decision, Mapping) else ""

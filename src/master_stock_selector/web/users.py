@@ -1,38 +1,27 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import math
-import secrets
+import re
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from time import time
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
-from ..watchlist.repository import (
+from ..trade_domain import (
     DEFAULT_TRADE_SETUP,
     TRADE_METHOD_LABELS,
     TRADE_SETUP_ALIASES,
     TRADE_SETUP_LABELS,
-    _aggregate_completed_trades,
-    _match_trade_executions,
-    _open_quantity,
-    _summarize_open_lots,
-    _trade_statistics,
 )
 from .plan_setups import (
     PLAN_SETUP_BY_TRADE_SETUP,
-    PLAN_SETUP_CODES,
     TRADE_SETUP_BY_PLAN_SETUP,
-    plan_setup_choices_text,
 )
 
 SESSION_COOKIE = "masterstock_session"
@@ -68,7 +57,7 @@ C1_STRUCTURE_STATE_LABELS = {
     "INVALID": "结构失效",
 }
 C1_ENTRY_VARIANT_LABELS = {"FIRST": "首次入场", "SECOND": "二次入场"}
-USER_SCHEMA_VERSION = 12
+USER_SCHEMA_VERSION = 13
 OBSERVATION_TAG_MAX_COUNT = 8
 OBSERVATION_TAG_MAX_LENGTH = 20
 DEFAULT_ACCESS_LOG_RETENTION_DAYS = 90
@@ -80,6 +69,7 @@ USER_REQUIRED_TABLES = frozenset(
         "user_trade_batch",
         "user_api_audit",
         "user_stock_review",
+        "user_setup_observation",
         "user_trade_execution",
         "user_chart_drawing",
         "user_access_log",
@@ -107,6 +97,7 @@ USER_REQUIRED_INDEXES = frozenset(
         "idx_user_reading_version_note",
         "idx_user_reading_share_note_status",
         "idx_user_reading_share_active",
+        "idx_user_setup_observation_updated",
     }
 )
 
@@ -132,6 +123,7 @@ def _setup_assignment(
             "setup_name_snapshot": TRADE_SETUP_LABELS.get(normalized_method, normalized_method),
             "other_setup_note": "",
             "setup_method": normalized_method,
+            "evaluation_cycle_id": None,
         }
     if explicit_code:
         requested = explicit_code
@@ -147,8 +139,13 @@ def _setup_assignment(
             (
                 item
                 for item in plan.get("setup_catalog", [])
-                if str(item.get("setup_id") or "").upper() == requested
+                if requested
+                in {
+                    str(item.get("setup_id") or "").upper(),
+                    str(item.get("code") or "").upper(),
+                }
                 and bool(item.get("enabled"))
+                and str(item.get("status") or "ACTIVE").upper() == "ACTIVE"
             ),
             None,
         )
@@ -163,6 +160,10 @@ def _setup_assignment(
             "setup_name_snapshot": str(match.get("name") or code),
             "other_setup_note": "",
             "setup_method": TRADE_SETUP_BY_PLAN_SETUP.get(code, DEFAULT_TRADE_SETUP),
+            "evaluation_cycle_id": str(
+                match.get("evaluation_cycle_id") or plan.get("evaluation_cycle_id") or ""
+            )
+            or None,
         }
     return {
         "setup_kind": "OTHER",
@@ -173,6 +174,7 @@ def _setup_assignment(
         "other_setup_note": str(other_setup_note or "").strip()[:300],
         # Kept only for the legacy CHECK-constrained compatibility column.
         "setup_method": DEFAULT_TRADE_SETUP,
+        "evaluation_cycle_id": None,
     }
 
 
@@ -187,6 +189,7 @@ def _decorate_setup(item: dict[str, Any]) -> None:
     else:
         setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
         item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
+
 
 USER_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS user_account (
@@ -263,6 +266,21 @@ CREATE TABLE IF NOT EXISTS user_stock_review (
     PRIMARY KEY (user_id, symbol),
     FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS user_setup_observation (
+    user_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    setup_id TEXT NOT NULL,
+    plan_version_id TEXT,
+    setup_code_snapshot TEXT NOT NULL,
+    setup_name_snapshot TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('WATCH', 'READY', 'INVALID')),
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, symbol, setup_id),
+    FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_setup_observation_updated
+ON user_setup_observation(user_id, updated_at DESC);
 CREATE TABLE IF NOT EXISTS user_trade_execution (
     execution_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -490,10 +508,19 @@ class UserRepository:
     """Account and private-workspace storage; user_id is the tenant boundary."""
 
     def __init__(self, path: str | Path):
+        from .user_database import UserDatabase
+        from .user_identity import UserIdentityStore
+        from .user_observations import UserObservationStore
+        from .user_trades import UserTradeStore
+
         self.path = Path(path)
         self.password_hasher = PasswordHasher()
         self._trading_plans: TradingPlanService | None = None
         self._reading_notes: ReadingNoteService | None = None
+        self.database = UserDatabase(self)
+        self.identity = UserIdentityStore(self)
+        self.observations = UserObservationStore(self)
+        self.trades = UserTradeStore(self)
 
     @property
     def trading_plans(self) -> TradingPlanService:
@@ -512,615 +539,32 @@ class UserRepository:
         return self._reading_notes
 
     def connect(self, *, read_only: bool = False) -> sqlite3.Connection:
-        if read_only:
-            connection = sqlite3.connect(f"file:{self.path.resolve()}?mode=ro", uri=True, timeout=5)
-        else:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            connection = sqlite3.connect(self.path, timeout=5)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=5000")
-        if not read_only:
-            connection.execute("PRAGMA synchronous=NORMAL")
-        return connection
+        return self.database.connect(read_only=read_only)
 
     def initialize(self) -> None:
         """Create or migrate a user database explicitly (tests/provisioning only)."""
-        self.migrate_schema()
+        self.database.initialize()
 
     def schema_status(self) -> dict[str, Any]:
-        if not self.path.is_file():
-            return {
-                "status": "MISSING",
-                "compatible": False,
-                "schema_version": None,
-                "required_version": USER_SCHEMA_VERSION,
-                "missing_tables": sorted(USER_REQUIRED_TABLES),
-                "missing_columns": [
-                    "user_trade_execution.source_ref",
-                    "user_trade_execution.revision",
-                    "user_trade_execution.plan_version_id",
-                    "user_trade_execution.evaluation_cycle_id",
-                    "user_trade_execution.setup_code",
-                    "user_trade_execution.initial_stop_price",
-                    "user_trade_execution.setup_kind",
-                    "user_trade_execution.plan_setup_id",
-                    "user_trade_execution.setup_code_snapshot",
-                    "user_trade_execution.setup_name_snapshot",
-                    "user_trade_execution.other_setup_note",
-                    "user_chart_drawing.content_text",
-                    "user_chart_drawing.interval_scope",
-                    "user_plan_grill_session.published_version_id",
-                    "user_plan_grill_session.head_version_id_at_start",
-                    "user_reading_note.assets_json",
-                    "user_reading_note_version.assets_json",
-                    "user_stock_review.c1_record_json",
-                    "user_stock_review.tags_json",
-                ],
-                "missing_indexes": sorted(USER_REQUIRED_INDEXES),
-            }
-        try:
-            with self.connect(read_only=True) as connection:
-                quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
-                tables = {
-                    str(row[0])
-                    for row in connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table'"
-                    )
-                }
-                trade_columns = {
-                    str(row[1])
-                    for row in connection.execute("PRAGMA table_info(user_trade_execution)")
-                }
-                grill_columns = {
-                    str(row[1])
-                    for row in connection.execute("PRAGMA table_info(user_plan_grill_session)")
-                }
-                drawing_columns = {
-                    str(row[1])
-                    for row in connection.execute("PRAGMA table_info(user_chart_drawing)")
-                }
-                reading_note_columns = {
-                    str(row[1])
-                    for row in connection.execute("PRAGMA table_info(user_reading_note)")
-                }
-                reading_version_columns = {
-                    str(row[1])
-                    for row in connection.execute(
-                        "PRAGMA table_info(user_reading_note_version)"
-                    )
-                }
-                indexes = {
-                    str(row[0])
-                    for row in connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type='index'"
-                    )
-                }
-                review_row = connection.execute(
-                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
-                ).fetchone()
-                review_table_sql = str(review_row[0] if review_row is not None else "")
-                review_columns = {
-                    str(row[1])
-                    for row in connection.execute("PRAGMA table_info(user_stock_review)")
-                }
-                trade_row = connection.execute(
-                    "SELECT sql FROM sqlite_master "
-                    "WHERE type='table' AND name='user_trade_execution'"
-                ).fetchone()
-                trade_table_sql = str(trade_row[0] if trade_row is not None else "")
-                drawing_row = connection.execute(
-                    "SELECT sql FROM sqlite_master "
-                    "WHERE type='table' AND name='user_chart_drawing'"
-                ).fetchone()
-                drawing_table_sql = str(drawing_row[0] if drawing_row is not None else "")
-                schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        except sqlite3.Error as exc:
-            return {
-                "status": "ERROR",
-                "compatible": False,
-                "schema_version": None,
-                "required_version": USER_SCHEMA_VERSION,
-                "error": type(exc).__name__,
-            }
-        missing_tables = sorted(USER_REQUIRED_TABLES - tables)
-        missing_columns = sorted(
-            f"user_trade_execution.{column}"
-            for column in {
-                "source_ref",
-                "revision",
-                "plan_version_id",
-                "evaluation_cycle_id",
-                "setup_code",
-                "initial_stop_price",
-                "setup_kind",
-                "plan_setup_id",
-                "setup_code_snapshot",
-                "setup_name_snapshot",
-                "other_setup_note",
-            }
-            - trade_columns
-        )
-        if "published_version_id" not in grill_columns:
-            missing_columns.append("user_plan_grill_session.published_version_id")
-        if "head_version_id_at_start" not in grill_columns:
-            missing_columns.append("user_plan_grill_session.head_version_id_at_start")
-        if "user_stock_review" in tables and "c1_record_json" not in review_columns:
-            missing_columns.append("user_stock_review.c1_record_json")
-        if "user_stock_review" in tables and "tags_json" not in review_columns:
-            missing_columns.append("user_stock_review.tags_json")
-        for column in {"content_text", "interval_scope"} - drawing_columns:
-            missing_columns.append(f"user_chart_drawing.{column}")
-        if "user_reading_note" in tables and "assets_json" not in reading_note_columns:
-            missing_columns.append("user_reading_note.assets_json")
-        if (
-            "user_reading_note_version" in tables
-            and "assets_json" not in reading_version_columns
-        ):
-            missing_columns.append("user_reading_note_version.assets_json")
-        missing_indexes = sorted(USER_REQUIRED_INDEXES - indexes)
-        legacy_observation_states = (
-            "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql
-        )
-        legacy_trade_setups = bool(trade_table_sql) and "'FAILED_TEST'" not in trade_table_sql
-        legacy_chart_drawings = bool(drawing_table_sql) and "'text'" not in drawing_table_sql
-        compatible = (
-            quick_check == "ok"
-            and not missing_tables
-            and not missing_columns
-            and not missing_indexes
-            and not legacy_observation_states
-            and not legacy_trade_setups
-            and not legacy_chart_drawings
-            and schema_version == USER_SCHEMA_VERSION
-        )
-        return {
-            "status": "READY" if compatible else "MIGRATION_REQUIRED",
-            "compatible": compatible,
-            "quick_check": quick_check,
-            "schema_version": schema_version,
-            "required_version": USER_SCHEMA_VERSION,
-            "missing_tables": missing_tables,
-            "missing_columns": missing_columns,
-            "missing_indexes": missing_indexes,
-            "legacy_observation_states": legacy_observation_states,
-            "legacy_trade_setups": legacy_trade_setups,
-            "legacy_chart_drawings": legacy_chart_drawings,
-        }
+        return self.database.schema_status()
 
     def require_schema(self) -> None:
-        status = self.schema_status()
-        if not status["compatible"]:
-            raise RuntimeError(
-                "用户数据库结构不兼容；Web 启动不会自动迁移。"
-                "请先运行 scripts/manage_users.sh schema-check，"
-                "确认后显式执行 schema-migrate --apply。"
-                f" 当前状态：{status['status']}"
-            )
+        self.database.require_schema()
 
     def migrate_schema(self) -> dict[str, Any]:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute("PRAGMA secure_delete=ON")
-            trade_table_exists = (
-                connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_trade_execution'"
-                ).fetchone()
-                is not None
-            )
-            trade_columns = {
-                str(row[1]) for row in connection.execute("PRAGMA table_info(user_trade_execution)")
-            }
-            trade_row = connection.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_trade_execution'"
-            ).fetchone()
-            trade_table_sql = str(trade_row[0] if trade_row is not None else "")
-            review_row = connection.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
-            ).fetchone()
-            review_table_sql = str(review_row[0] if review_row is not None else "")
-            review_columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(user_stock_review)")
-            }
-            drawing_row = connection.execute(
-                "SELECT sql FROM sqlite_master "
-                "WHERE type='table' AND name='user_chart_drawing'"
-            ).fetchone()
-            drawing_table_sql = str(drawing_row[0] if drawing_row is not None else "")
-            reading_note_columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(user_reading_note)")
-            }
-            reading_version_columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(user_reading_note_version)")
-            }
-            migration_statements: list[str] = []
-            if review_columns and "c1_record_json" not in review_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_stock_review "
-                    "ADD COLUMN c1_record_json TEXT NOT NULL DEFAULT '{}';"
-                )
-            if review_columns and "tags_json" not in review_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_stock_review "
-                    "ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]';"
-                )
-            if reading_note_columns and "assets_json" not in reading_note_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_reading_note "
-                    "ADD COLUMN assets_json TEXT NOT NULL DEFAULT '{}';"
-                )
-            if reading_version_columns and "assets_json" not in reading_version_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_reading_note_version "
-                    "ADD COLUMN assets_json TEXT NOT NULL DEFAULT '{}';"
-                )
-            if trade_table_exists and "source_ref" not in trade_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_trade_execution ADD COLUMN source_ref TEXT;"
-                )
-            if trade_table_exists and "revision" not in trade_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_trade_execution "
-                    "ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);"
-                )
-            for column, definition in (
-                ("plan_version_id", "TEXT"),
-                ("evaluation_cycle_id", "TEXT"),
-                ("setup_code", "TEXT"),
-                (
-                    "setup_kind",
-                    "TEXT NOT NULL DEFAULT 'LEGACY' "
-                    "CHECK (setup_kind IN ('PLAN', 'OTHER', 'LEGACY'))",
-                ),
-                ("plan_setup_id", "TEXT"),
-                ("setup_code_snapshot", "TEXT NOT NULL DEFAULT ''"),
-                ("setup_name_snapshot", "TEXT NOT NULL DEFAULT ''"),
-                ("other_setup_note", "TEXT NOT NULL DEFAULT ''"),
-            ):
-                if trade_table_exists and column not in trade_columns:
-                    migration_statements.append(
-                        f"ALTER TABLE user_trade_execution ADD COLUMN {column} {definition};"
-                    )
-            if trade_table_exists and "setup_kind" not in trade_columns:
-                migration_statements.extend(
-                    [
-                        """UPDATE user_trade_execution
-                        SET setup_kind=CASE
-                                WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                     AND setup_code IN ('A1','A3','B1','B2','C1') THEN 'PLAN'
-                                WHEN side='BUY' THEN 'LEGACY'
-                                ELSE 'OTHER'
-                            END,
-                            plan_setup_id=CASE
-                                WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                     AND setup_code IN ('A1','A3','B1','B2','C1') THEN setup_code
-                                ELSE NULL
-                            END,
-                            setup_code_snapshot=CASE
-                                WHEN side='BUY' THEN COALESCE(setup_code, '') ELSE '' END,
-                            setup_name_snapshot=CASE
-                                WHEN side='BUY' AND plan_version_id IS NOT NULL THEN
-                                    CASE setup_code
-                                        WHEN 'A1' THEN '突破前入场'
-                                        WHEN 'A3' THEN '首次回调'
-                                        WHEN 'B1' THEN '简单回调'
-                                        WHEN 'B2' THEN '复杂回调'
-                                        WHEN 'C1' THEN '区间失败测试'
-                                        ELSE setup_method
-                                    END
-                                ELSE CASE setup_method
-                                    WHEN 'FAILED_TEST' THEN '失败测试'
-                                    WHEN 'PULLBACK_SUPPORT' THEN '简单回调'
-                                    WHEN 'LOWER_TIMEFRAME_BREAKOUT' THEN '低周期突破入场'
-                                    WHEN 'COMPLEX_PULLBACK' THEN '复杂回调'
-                                    WHEN 'ANTI' THEN 'Anti（趋势转换首次回调）'
-                                    WHEN 'PRE_BREAKOUT_BASE' THEN '突破前基底入场'
-                                    WHEN 'POST_BREAKOUT_FIRST_PULLBACK' THEN '突破后回调'
-                                    WHEN 'FAILED_BREAKOUT' THEN '失败突破'
-                                    ELSE setup_method
-                                END
-                            END;""",
-                    ]
-                )
-            if trade_table_exists and "initial_stop_price" not in trade_columns:
-                migration_statements.extend(
-                    [
-                        "ALTER TABLE user_trade_execution ADD COLUMN initial_stop_price REAL;",
-                        "UPDATE user_trade_execution SET initial_stop_price=stop_price WHERE side='BUY';",
-                    ]
-                )
-            session_columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(user_plan_grill_session)")
-            }
-            if session_columns and "published_version_id" not in session_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_plan_grill_session ADD COLUMN published_version_id TEXT;"
-                )
-            if session_columns and "head_version_id_at_start" not in session_columns:
-                migration_statements.append(
-                    "ALTER TABLE user_plan_grill_session ADD COLUMN head_version_id_at_start TEXT;"
-                )
-            if drawing_table_sql and "'text'" not in drawing_table_sql:
-                migration_statements.extend(
-                    [
-                        "DROP INDEX IF EXISTS idx_user_chart_symbol;",
-                        "ALTER TABLE user_chart_drawing RENAME TO user_chart_drawing_legacy;",
-                        """CREATE TABLE user_chart_drawing (
-                            drawing_id TEXT PRIMARY KEY,
-                            user_id TEXT NOT NULL,
-                            symbol TEXT NOT NULL,
-                            price_scale_id TEXT NOT NULL,
-                            tool TEXT NOT NULL CHECK (
-                                tool IN ('trendline', 'horizontal', 'text')
-                            ),
-                            anchors_json TEXT NOT NULL,
-                            content_text TEXT NOT NULL DEFAULT '',
-                            interval_scope TEXT NOT NULL DEFAULT 'both'
-                                CHECK (interval_scope IN ('day', 'week', 'both')),
-                            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (user_id) REFERENCES user_account(user_id)
-                                ON DELETE CASCADE
-                        );""",
-                        """INSERT INTO user_chart_drawing(
-                            drawing_id, user_id, symbol, price_scale_id, tool,
-                            anchors_json, content_text, interval_scope, created_at, updated_at
-                        )
-                        SELECT drawing_id, user_id, symbol, price_scale_id, tool,
-                               anchors_json, '', 'both', created_at, updated_at
-                        FROM user_chart_drawing_legacy;""",
-                        "DROP TABLE user_chart_drawing_legacy;",
-                    ]
-                )
-            if "'DROPPED'" in review_table_sql or "'UNREVIEWED'" in review_table_sql:
-                migration_statements.extend(
-                    [
-                        "ALTER TABLE user_stock_review RENAME TO user_stock_review_legacy;",
-                        """CREATE TABLE user_stock_review (
-                            user_id TEXT NOT NULL,
-                            symbol TEXT NOT NULL,
-                            manual_state TEXT NOT NULL CHECK (
-                                manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
-                            ),
-                            note TEXT NOT NULL DEFAULT '',
-                            tags_json TEXT NOT NULL DEFAULT '[]',
-                            c1_record_json TEXT NOT NULL DEFAULT '{}',
-                            reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            PRIMARY KEY (user_id, symbol),
-                            FOREIGN KEY (user_id) REFERENCES user_account(user_id)
-                                ON DELETE CASCADE
-                        );""",
-                        """INSERT INTO user_stock_review(
-                            user_id, symbol, manual_state, note, tags_json,
-                            c1_record_json, reviewed_at
-                        )
-                        SELECT user_id, symbol,
-                               CASE manual_state
-                                   WHEN 'DROPPED' THEN 'ARCHIVED'
-                                   ELSE manual_state
-                               END,
-                               note, tags_json, c1_record_json, reviewed_at
-                        FROM user_stock_review_legacy
-                        WHERE manual_state IN ('WATCH', 'FOCUS', 'DROPPED');""",
-                        "DROP TABLE user_stock_review_legacy;",
-                    ]
-                )
-            if trade_table_exists and "'FAILED_TEST'" not in trade_table_sql:
-                migration_statements.extend(
-                    [
-                        "ALTER TABLE user_trade_execution RENAME TO user_trade_execution_legacy;",
-                        """CREATE TABLE user_trade_execution (
-                            execution_id TEXT PRIMARY KEY,
-                            user_id TEXT NOT NULL,
-                            traded_on TEXT NOT NULL,
-                            traded_at TEXT NOT NULL DEFAULT '',
-                            source_ref TEXT,
-                            symbol TEXT NOT NULL,
-                            side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
-                            quantity INTEGER NOT NULL CHECK (quantity > 0),
-                            price REAL NOT NULL CHECK (price > 0),
-                            fee REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
-                            method TEXT NOT NULL CHECK (
-                                method IN ('WEINSTEIN', 'MINERVINI', 'MANUAL')
-                            ),
-                            setup_method TEXT NOT NULL DEFAULT 'PULLBACK_SUPPORT'
-                                CHECK (setup_method IN (
-                                    'FAILED_TEST', 'PULLBACK_SUPPORT',
-                                    'LOWER_TIMEFRAME_BREAKOUT', 'COMPLEX_PULLBACK',
-                                    'ANTI', 'PRE_BREAKOUT_BASE',
-                                    'POST_BREAKOUT_FIRST_PULLBACK', 'FAILED_BREAKOUT'
-                                )),
-                            stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
-                            initial_stop_price REAL CHECK (
-                                initial_stop_price IS NULL OR initial_stop_price > 0
-                            ),
-                            rationale TEXT NOT NULL DEFAULT '',
-                            invalidation TEXT NOT NULL DEFAULT '',
-                            exit_reason TEXT NOT NULL DEFAULT '',
-                            market_context TEXT NOT NULL DEFAULT '',
-    observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
-    plan_version_id TEXT,
-    evaluation_cycle_id TEXT,
-    setup_code TEXT,
-    setup_kind TEXT NOT NULL DEFAULT 'LEGACY'
-        CHECK (setup_kind IN ('PLAN', 'OTHER', 'LEGACY')),
-    plan_setup_id TEXT,
-    setup_code_snapshot TEXT NOT NULL DEFAULT '',
-    setup_name_snapshot TEXT NOT NULL DEFAULT '',
-    other_setup_note TEXT NOT NULL DEFAULT '',
-                            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
-                            FOREIGN KEY (user_id) REFERENCES user_account(user_id)
-                                ON DELETE CASCADE
-                        );""",
-                        """INSERT INTO user_trade_execution(
-                            execution_id, user_id, traded_on, traded_at, source_ref,
-                            symbol, side, quantity, price, fee, method, setup_method,
-                            stop_price, initial_stop_price, rationale, invalidation, exit_reason,
-                            market_context, observation_snapshot_json, created_at,
-                            updated_at, revision, setup_kind, plan_setup_id,
-                            setup_code_snapshot, setup_name_snapshot, other_setup_note
-                        )
-                        SELECT execution_id, user_id, traded_on, traded_at, source_ref,
-                               symbol, side, quantity, price, fee, method,
-                               CASE setup_method
-                                   WHEN 'BREAKOUT' THEN 'POST_BREAKOUT_FIRST_PULLBACK'
-                                   WHEN 'PULLBACK' THEN 'PULLBACK_SUPPORT'
-                                   ELSE setup_method
-                               END,
-                               stop_price,
-                               CASE WHEN side='BUY' THEN stop_price ELSE NULL END,
-                               rationale, invalidation, exit_reason,
-                               market_context, observation_snapshot_json, created_at,
-                               updated_at, revision,
-                               CASE
-                                   WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                        AND setup_code IN ('A1','A3','B1','B2','C1') THEN 'PLAN'
-                                   WHEN side='BUY' THEN 'LEGACY'
-                                   ELSE 'OTHER'
-                               END,
-                               CASE
-                                   WHEN side='BUY' AND plan_version_id IS NOT NULL
-                                        AND setup_code IN ('A1','A3','B1','B2','C1') THEN setup_code
-                                   ELSE NULL
-                               END,
-                               CASE WHEN side='BUY' THEN COALESCE(setup_code, '') ELSE '' END,
-                               CASE setup_method
-                                   WHEN 'BREAKOUT' THEN '突破后回调'
-                                   WHEN 'PULLBACK' THEN '简单回调'
-                                   ELSE setup_method
-                               END,
-                               ''
-                        FROM user_trade_execution_legacy;""",
-                        "DROP TABLE user_trade_execution_legacy;",
-                    ]
-                )
-            migration_sql = "\n".join(
-                [
-                    "BEGIN IMMEDIATE;",
-                    USER_SCHEMA_SQL,
-                    *migration_statements,
-                    USER_SCHEMA_SQL,
-                    "DROP INDEX IF EXISTS idx_user_access_user_occurred;",
-                    "DROP INDEX IF EXISTS idx_user_access_path_occurred;",
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_trade_source_ref "
-                    "ON user_trade_execution(user_id, source_ref) "
-                    "WHERE source_ref IS NOT NULL AND source_ref <> '';",
-                    f"PRAGMA user_version={USER_SCHEMA_VERSION};",
-                    "COMMIT;",
-                ]
-            )
-            try:
-                connection.executescript(migration_sql)
-            except Exception:
-                connection.rollback()
-                raise
-        try:
-            self.path.chmod(0o600)
-        except OSError:
-            pass
-        status = self.schema_status()
-        if not status["compatible"]:
-            raise RuntimeError(f"用户数据库迁移后仍不兼容：{status}")
-        return status
-
-    @staticmethod
-    def _migrate_observation_states(connection: sqlite3.Connection) -> None:
-        row = connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_stock_review'"
-        ).fetchone()
-        table_sql = str(row["sql"] if row is not None else "")
-        if "'DROPPED'" not in table_sql and "'UNREVIEWED'" not in table_sql:
-            return
-        columns = {
-            str(column[1])
-            for column in connection.execute("PRAGMA table_info(user_stock_review)")
-        }
-        c1_expression = "c1_record_json" if "c1_record_json" in columns else "'{}'"
-        tags_expression = "tags_json" if "tags_json" in columns else "'[]'"
-        connection.execute("ALTER TABLE user_stock_review RENAME TO user_stock_review_legacy")
-        connection.execute(
-            """CREATE TABLE user_stock_review (
-                user_id TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                manual_state TEXT NOT NULL CHECK (
-                    manual_state IN ('WATCH', 'FOCUS', 'ARCHIVED')
-                ),
-                note TEXT NOT NULL DEFAULT '',
-                tags_json TEXT NOT NULL DEFAULT '[]',
-                c1_record_json TEXT NOT NULL DEFAULT '{}',
-                reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, symbol),
-                FOREIGN KEY (user_id) REFERENCES user_account(user_id) ON DELETE CASCADE
-            )"""
-        )
-        connection.execute(
-            f"""INSERT INTO user_stock_review(
-                user_id, symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
-            )
-            SELECT user_id, symbol,
-                   CASE manual_state WHEN 'DROPPED' THEN 'ARCHIVED' ELSE manual_state END,
-                   note, {tags_expression}, {c1_expression}, reviewed_at
-            FROM user_stock_review_legacy
-            WHERE manual_state IN ('WATCH', 'FOCUS', 'DROPPED')
-            """
-        )
-        connection.execute("DROP TABLE user_stock_review_legacy")
+        return self.database.migrate_schema()
 
     def create_user(self, username: str, password: str, display_name: str = "") -> str:
-        normalized = _normalize_username(username)
-        _validate_password(password)
-        user_id = uuid4().hex
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO user_account(
-                    user_id, username, password_hash, display_name, status
-                ) VALUES (?, ?, ?, ?, 'ACTIVE')
-                """,
-                (user_id, normalized, self.password_hasher.hash(password), display_name.strip()),
-            )
-        return user_id
+        return self.identity.create_user(username, password, display_name)
 
     def list_users(self) -> list[dict[str, Any]]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT user_id, username, display_name, status, created_at, last_login_at
-                FROM user_account ORDER BY created_at, username
-                """
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return self.identity.list_users()
 
     def active_user_by_username(self, username: str) -> dict[str, Any] | None:
-        """Resolve one active account without exposing password or session data."""
-        with self.connect(read_only=True) as connection:
-            row = connection.execute(
-                """
-                SELECT user_id, username, display_name
-                FROM user_account
-                WHERE username=? COLLATE NOCASE AND status='ACTIVE'
-                """,
-                (_normalize_username(username),),
-            ).fetchone()
-        return dict(row) if row is not None else None
+        return self.identity.active_user_by_username(username)
 
     def readiness(self) -> dict[str, Any]:
-        try:
-            with self.connect(read_only=True) as connection:
-                quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
-            return {
-                "connected": quick_check == "ok",
-                "quick_check": quick_check,
-            }
-        except sqlite3.Error as exc:
-            return {"connected": False, "quick_check": "error", "error": type(exc).__name__}
+        return self.identity.readiness()
 
     def record_access(
         self,
@@ -1136,339 +580,51 @@ class UserRepository:
         path: str,
         status_code: int,
     ) -> str:
-        """Append a minimal page/API access event without query or browser metadata."""
-        access_id = uuid4().hex
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO user_access_log(
-                    access_id, user_id, client_ip, country_code, country_name,
-                    region_name, city_name, location_source, method, path, status_code
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    access_id,
-                    user_id,
-                    client_ip[:45],
-                    country_code[:8],
-                    country_name[:80],
-                    region_name[:80],
-                    city_name[:80],
-                    location_source[:32],
-                    method[:12].upper(),
-                    path[:500],
-                    int(status_code),
-                ),
-            )
-        return access_id
-
-    def access_log_maintenance_status(
-        self,
-        *,
-        retention_days: int = DEFAULT_ACCESS_LOG_RETENTION_DAYS,
-        as_of: date | None = None,
-    ) -> dict[str, Any]:
-        """Preview raw access rows eligible for anonymous rollup and deletion."""
-        cutoff = _access_log_cutoff(retention_days, as_of)
-        with self.connect(read_only=True) as connection:
-            row = connection.execute(
-                """SELECT COUNT(*), COUNT(DISTINCT substr(occurred_at, 1, 10))
-                FROM user_access_log
-                WHERE occurred_at < ?""",
-                (cutoff,),
-            ).fetchone()
-        return {
-            "status": "dry-run",
-            "retention_days": retention_days,
-            "cutoff_date": cutoff,
-            "eligible_rows": int(row[0]),
-            "eligible_dates": int(row[1]),
-        }
-
-    def maintain_access_log(
-        self,
-        *,
-        retention_days: int = DEFAULT_ACCESS_LOG_RETENTION_DAYS,
-        as_of: date | None = None,
-    ) -> dict[str, Any]:
-        """Roll up and delete expired raw access rows, one UTC date per transaction."""
-        cutoff = _access_log_cutoff(retention_days, as_of)
-        rows_deleted = 0
-        summary_rows = 0
-        processed_dates: list[str] = []
-        with self.connect() as connection:
-            connection.execute("PRAGMA secure_delete=ON")
-            connection.create_function(
-                "access_path_group", 1, _access_path_group, deterministic=True
-            )
-            dates = [
-                str(row[0])
-                for row in connection.execute(
-                    """SELECT DISTINCT substr(occurred_at, 1, 10)
-                    FROM user_access_log
-                    WHERE occurred_at < ?
-                    ORDER BY 1""",
-                    (cutoff,),
-                )
-            ]
-            for summary_date in dates:
-                next_date = (date.fromisoformat(summary_date) + timedelta(days=1)).isoformat()
-                connection.execute("BEGIN IMMEDIATE")
-                try:
-                    connection.execute(
-                        "DELETE FROM user_access_daily_summary WHERE summary_date=?",
-                        (summary_date,),
-                    )
-                    connection.execute(
-                        """INSERT INTO user_access_daily_summary(
-                            summary_date, country_code, region_name, path_group,
-                            method, status_class, request_count, unique_ip_count,
-                            summarized_at
-                        )
-                        SELECT substr(occurred_at, 1, 10), country_code, region_name,
-                               access_path_group(path), method,
-                               CAST(status_code / 100 AS INTEGER) * 100,
-                               COUNT(*), COUNT(DISTINCT client_ip), CURRENT_TIMESTAMP
-                        FROM user_access_log
-                        WHERE occurred_at >= ? AND occurred_at < ?
-                        GROUP BY 1, 2, 3, 4, 5, 6""",
-                        (summary_date, next_date),
-                    )
-                    summary_rows += int(
-                        connection.execute(
-                            "SELECT COUNT(*) FROM user_access_daily_summary WHERE summary_date=?",
-                            (summary_date,),
-                        ).fetchone()[0]
-                    )
-                    cursor = connection.execute(
-                        "DELETE FROM user_access_log WHERE occurred_at >= ? AND occurred_at < ?",
-                        (summary_date, next_date),
-                    )
-                    rows_deleted += int(cursor.rowcount)
-                    connection.commit()
-                except Exception:
-                    connection.rollback()
-                    raise
-                processed_dates.append(summary_date)
-            connection.execute("PRAGMA optimize")
-            quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
-        return {
-            "status": "maintained",
-            "retention_days": retention_days,
-            "cutoff_date": cutoff,
-            "processed_dates": processed_dates,
-            "rows_deleted": rows_deleted,
-            "summary_rows": summary_rows,
-            "quick_check": quick_check,
-        }
-
-    def set_user_status(self, username: str, status: str) -> None:
-        normalized_status = status.upper()
-        if normalized_status not in {"ACTIVE", "DISABLED"}:
-            raise ValueError("用户状态必须为 ACTIVE 或 DISABLED")
-        with self.connect() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE user_account SET status=?, updated_at=CURRENT_TIMESTAMP
-                WHERE username=? COLLATE NOCASE
-                """,
-                (normalized_status, _normalize_username(username)),
-            )
-            if cursor.rowcount != 1:
-                raise ValueError("用户不存在")
-            if normalized_status == "DISABLED":
-                connection.execute(
-                    """
-                    UPDATE user_session SET revoked_at_epoch=?
-                    WHERE user_id=(SELECT user_id FROM user_account
-                                   WHERE username=? COLLATE NOCASE)
-                      AND revoked_at_epoch IS NULL
-                    """,
-                    (int(time()), _normalize_username(username)),
-                )
-                connection.execute(
-                    """
-                    UPDATE user_api_token SET revoked_at_epoch=?
-                    WHERE user_id=(SELECT user_id FROM user_account
-                                   WHERE username=? COLLATE NOCASE)
-                      AND revoked_at_epoch IS NULL
-                    """,
-                    (int(time()), _normalize_username(username)),
-                )
-
-    def reset_password(self, username: str, password: str) -> None:
-        _validate_password(password)
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT user_id FROM user_account WHERE username=? COLLATE NOCASE",
-                (_normalize_username(username),),
-            ).fetchone()
-            if row is None:
-                raise ValueError("用户不存在")
-            connection.execute(
-                """
-                UPDATE user_account SET password_hash=?, updated_at=CURRENT_TIMESTAMP
-                WHERE user_id=?
-                """,
-                (self.password_hasher.hash(password), str(row["user_id"])),
-            )
-            connection.execute(
-                """
-                UPDATE user_session SET revoked_at_epoch=?
-                WHERE user_id=? AND revoked_at_epoch IS NULL
-                """,
-                (int(time()), str(row["user_id"])),
-            )
-            connection.execute(
-                """
-                UPDATE user_api_token SET revoked_at_epoch=?
-                WHERE user_id=? AND revoked_at_epoch IS NULL
-                """,
-                (int(time()), str(row["user_id"])),
-            )
-
-    def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:
-        """Change a password and revoke every existing session and API token."""
-        _validate_password(new_password)
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT password_hash FROM user_account
-                WHERE user_id=? AND status='ACTIVE'
-                """,
-                (user_id,),
-            ).fetchone()
-            if row is None:
-                return False
-            try:
-                verified = self.password_hasher.verify(str(row["password_hash"]), current_password)
-            except (VerifyMismatchError, InvalidHashError):
-                return False
-            if not verified:
-                return False
-            if current_password == new_password:
-                raise ValueError("新密码不能与当前密码相同")
-            connection.execute(
-                """
-                UPDATE user_account SET password_hash=?, updated_at=CURRENT_TIMESTAMP
-                WHERE user_id=?
-                """,
-                (self.password_hasher.hash(new_password), user_id),
-            )
-            connection.execute(
-                """
-                UPDATE user_session SET revoked_at_epoch=?
-                WHERE user_id=? AND revoked_at_epoch IS NULL
-                """,
-                (int(time()), user_id),
-            )
-            connection.execute(
-                """
-                UPDATE user_api_token SET revoked_at_epoch=?
-                WHERE user_id=? AND revoked_at_epoch IS NULL
-                """,
-                (int(time()), user_id),
-            )
-        return True
-
-    def authenticate(self, username: str, password: str) -> dict[str, str] | None:
-        normalized = _normalize_username(username)
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM user_account WHERE username=? COLLATE NOCASE",
-                (normalized,),
-            ).fetchone()
-            if row is None or str(row["status"]) != "ACTIVE":
-                return None
-            try:
-                verified = self.password_hasher.verify(str(row["password_hash"]), password)
-            except (VerifyMismatchError, InvalidHashError):
-                return None
-            if not verified:
-                return None
-            if self.password_hasher.check_needs_rehash(str(row["password_hash"])):
-                connection.execute(
-                    "UPDATE user_account SET password_hash=? WHERE user_id=?",
-                    (self.password_hasher.hash(password), str(row["user_id"])),
-                )
-            connection.execute(
-                "UPDATE user_account SET last_login_at=CURRENT_TIMESTAMP WHERE user_id=?",
-                (str(row["user_id"]),),
-            )
-        return {
-            "user_id": str(row["user_id"]),
-            "username": str(row["username"]),
-            "display_name": str(row["display_name"] or ""),
-        }
-
-    def create_session(self, user_id: str) -> tuple[str, str]:
-        raw_token = secrets.token_urlsafe(32)
-        csrf_secret = secrets.token_urlsafe(32)
-        now = int(time())
-        with self.connect() as connection:
-            connection.execute(
-                "DELETE FROM user_session WHERE expires_at_epoch < ? OR revoked_at_epoch IS NOT NULL",
-                (now,),
-            )
-            connection.execute(
-                """
-                INSERT INTO user_session(
-                    session_id_hash, user_id, csrf_secret,
-                    created_at_epoch, last_seen_epoch, expires_at_epoch
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    _token_hash(raw_token),
-                    user_id,
-                    csrf_secret,
-                    now,
-                    now,
-                    now + SESSION_IDLE_SECONDS,
-                ),
-            )
-        return raw_token, csrf_secret
-
-    def session_user(self, raw_token: str | None) -> AuthenticatedUser | None:
-        if not raw_token:
-            return None
-        now = int(time())
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT account.user_id, account.username, account.display_name,
-                       session.csrf_secret, session.last_seen_epoch
-                FROM user_session AS session
-                JOIN user_account AS account ON account.user_id=session.user_id
-                WHERE session.session_id_hash=? AND session.revoked_at_epoch IS NULL
-                  AND session.expires_at_epoch>=? AND account.status='ACTIVE'
-                """,
-                (_token_hash(raw_token), now),
-            ).fetchone()
-            if row is None:
-                return None
-            if now - int(row["last_seen_epoch"]) >= 3600:
-                connection.execute(
-                    "UPDATE user_session SET last_seen_epoch=? WHERE session_id_hash=?",
-                    (now, _token_hash(raw_token)),
-                )
-        return AuthenticatedUser(
-            user_id=str(row["user_id"]),
-            username=str(row["username"]),
-            display_name=str(row["display_name"] or ""),
-            csrf_token=str(row["csrf_secret"]),
+        return self.identity.record_access(
+            user_id=user_id,
+            client_ip=client_ip,
+            country_code=country_code,
+            country_name=country_name,
+            region_name=region_name,
+            city_name=city_name,
+            location_source=location_source,
+            method=method,
+            path=path,
+            status_code=status_code,
         )
 
+    def access_log_maintenance_status(
+        self, *, retention_days: int = DEFAULT_ACCESS_LOG_RETENTION_DAYS, as_of: date | None = None
+    ) -> dict[str, Any]:
+        return self.identity.access_log_maintenance_status(
+            retention_days=retention_days, as_of=as_of
+        )
+
+    def maintain_access_log(
+        self, *, retention_days: int = DEFAULT_ACCESS_LOG_RETENTION_DAYS, as_of: date | None = None
+    ) -> dict[str, Any]:
+        return self.identity.maintain_access_log(retention_days=retention_days, as_of=as_of)
+
+    def set_user_status(self, username: str, status: str) -> None:
+        return self.identity.set_user_status(username, status)
+
+    def reset_password(self, username: str, password: str) -> None:
+        return self.identity.reset_password(username, password)
+
+    def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:
+        return self.identity.change_password(user_id, current_password, new_password)
+
+    def authenticate(self, username: str, password: str) -> dict[str, str] | None:
+        return self.identity.authenticate(username, password)
+
+    def create_session(self, user_id: str) -> tuple[str, str]:
+        return self.identity.create_session(user_id)
+
+    def session_user(self, raw_token: str | None) -> AuthenticatedUser | None:
+        return self.identity.session_user(raw_token)
+
     def revoke_session(self, raw_token: str | None) -> None:
-        if not raw_token:
-            return
-        with self.connect() as connection:
-            connection.execute(
-                """
-                UPDATE user_session SET revoked_at_epoch=?
-                WHERE session_id_hash=? AND revoked_at_epoch IS NULL
-                """,
-                (int(time()), _token_hash(raw_token)),
-            )
+        return self.identity.revoke_session(raw_token)
 
     def create_api_token(
         self,
@@ -1478,123 +634,20 @@ class UserRepository:
         expires_days: int = API_TOKEN_DEFAULT_EXPIRES_DAYS,
         scopes: Sequence[str] = tuple(sorted(API_TOKEN_SCOPES)),
     ) -> tuple[str, dict[str, Any]]:
-        normalized_name = name.strip()
-        normalized_scopes = tuple(sorted({scope.strip() for scope in scopes if scope.strip()}))
-        if not normalized_name or len(normalized_name) > 80:
-            raise ValueError("Token 名称长度必须为 1 至 80 个字符")
-        if expires_days < 1 or expires_days > API_TOKEN_MAX_EXPIRES_DAYS:
-            raise ValueError(
-                f"Token 有效期必须为 1 至 {API_TOKEN_MAX_EXPIRES_DAYS} 天"
-            )
-        if not normalized_scopes or not set(normalized_scopes).issubset(API_TOKEN_SCOPES):
-            raise ValueError("Token 权限范围不正确")
-        token_id = uuid4().hex
-        raw_token = API_TOKEN_PREFIX + secrets.token_urlsafe(32)
-        now = int(time())
-        expires_at = now + expires_days * 24 * 60 * 60
-        prefix = raw_token[:12]
-        with self.connect() as connection:
-            account = connection.execute(
-                "SELECT status FROM user_account WHERE user_id=?", (user_id,)
-            ).fetchone()
-            if account is None or str(account["status"]) != "ACTIVE":
-                raise ValueError("用户不存在或已停用")
-            connection.execute(
-                """
-                INSERT INTO user_api_token(
-                    token_id, user_id, name, token_prefix, token_hash, scopes_json,
-                    created_at_epoch, expires_at_epoch
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    token_id,
-                    user_id,
-                    normalized_name,
-                    prefix,
-                    _token_hash(raw_token),
-                    json.dumps(normalized_scopes, ensure_ascii=False),
-                    now,
-                    expires_at,
-                ),
-            )
-        return raw_token, {
-            "token_id": token_id,
-            "name": normalized_name,
-            "token_prefix": prefix,
-            "scopes": list(normalized_scopes),
-            "created_at_epoch": now,
-            "expires_at_epoch": expires_at,
-        }
+        return self.identity.create_api_token(
+            user_id, name, expires_days=expires_days, scopes=scopes
+        )
 
     def list_api_tokens(self, user_id: str) -> list[dict[str, Any]]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT token_id, name, token_prefix, scopes_json, created_at_epoch,
-                       expires_at_epoch, last_used_epoch, revoked_at_epoch
-                FROM user_api_token WHERE user_id=?
-                ORDER BY created_at_epoch DESC, token_id
-                """,
-                (user_id,),
-            ).fetchall()
-        result: list[dict[str, Any]] = []
-        now = int(time())
-        for row in rows:
-            item = dict(row)
-            item["scopes"] = json.loads(str(item.pop("scopes_json")))
-            item["active"] = (
-                item["revoked_at_epoch"] is None and int(item["expires_at_epoch"]) >= now
-            )
-            result.append(item)
-        return result
+        return self.identity.list_api_tokens(user_id)
 
     def revoke_api_token(self, user_id: str, token_id: str) -> bool:
-        with self.connect() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE user_api_token SET revoked_at_epoch=?
-                WHERE user_id=? AND token_id=? AND revoked_at_epoch IS NULL
-                """,
-                (int(time()), user_id, token_id),
-            )
-        return cursor.rowcount == 1
+        return self.identity.revoke_api_token(user_id, token_id)
 
     def api_token_user(
         self, raw_token: str | None, required_scope: str | None = None
     ) -> ApiTokenPrincipal | None:
-        if not raw_token or not raw_token.startswith(API_TOKEN_PREFIX):
-            return None
-        now = int(time())
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT token.token_id, token.user_id, token.scopes_json,
-                       token.last_used_epoch, account.username, account.display_name
-                FROM user_api_token AS token
-                JOIN user_account AS account ON account.user_id=token.user_id
-                WHERE token.token_hash=? AND token.revoked_at_epoch IS NULL
-                  AND token.expires_at_epoch>=? AND account.status='ACTIVE'
-                """,
-                (_token_hash(raw_token), now),
-            ).fetchone()
-            if row is None:
-                return None
-            scopes = tuple(str(scope) for scope in json.loads(str(row["scopes_json"])))
-            if required_scope is not None and required_scope not in scopes:
-                return None
-            last_used = row["last_used_epoch"]
-            if last_used is None or now - int(last_used) >= 60:
-                connection.execute(
-                    "UPDATE user_api_token SET last_used_epoch=? WHERE token_id=?",
-                    (now, str(row["token_id"])),
-                )
-        return ApiTokenPrincipal(
-            user_id=str(row["user_id"]),
-            username=str(row["username"]),
-            display_name=str(row["display_name"] or ""),
-            token_id=str(row["token_id"]),
-            scopes=scopes,
-        )
+        return self.identity.api_token_user(raw_token, required_scope)
 
     def audit_api_action(
         self,
@@ -1605,98 +658,26 @@ class UserRepository:
         outcome: str,
         details: Mapping[str, Any] | None = None,
     ) -> None:
-        with self.connect() as connection:
-            self._insert_api_audit(
-                connection,
-                principal,
-                action=action,
-                request_id=request_id,
-                outcome=outcome,
-                details=details,
-            )
-
-    @staticmethod
-    def _insert_api_audit(
-        connection: sqlite3.Connection,
-        principal: ApiTokenPrincipal,
-        *,
-        action: str,
-        request_id: str,
-        outcome: str,
-        details: Mapping[str, Any] | None = None,
-    ) -> None:
-        connection.execute(
-            """
-            INSERT INTO user_api_audit(
-                audit_id, user_id, token_id, action, request_id, outcome, details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                uuid4().hex,
-                principal.user_id,
-                principal.token_id,
-                action,
-                request_id,
-                outcome,
-                json.dumps(details or {}, ensure_ascii=False, sort_keys=True),
-            ),
+        return self.identity.audit_api_action(
+            principal, action=action, request_id=request_id, outcome=outcome, details=details
         )
 
     @staticmethod
     def csrf_valid(user: AuthenticatedUser, supplied: str | None) -> bool:
-        return bool(supplied) and hmac.compare_digest(user.csrf_token, str(supplied))
+        from .user_identity import UserIdentityStore
+
+        return UserIdentityStore.csrf_valid(user, supplied)
 
     def reviews_for_symbols(
         self, user_id: str, symbols: Sequence[str]
     ) -> dict[str, dict[str, Any]]:
-        normalized = sorted({symbol.upper() for symbol in symbols if symbol})
-        if not normalized:
-            return {}
-        placeholders = ",".join("?" for _ in normalized)
-        with self.connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
-                FROM user_stock_review
-                WHERE user_id=? AND symbol IN ({placeholders})
-                """,
-                (user_id, *normalized),
-            ).fetchall()
-        return {str(row["symbol"]): _review_value(row) for row in rows}
+        return self.observations.reviews_for_symbols(user_id, symbols)
 
     def reviews_for_user(self, user_id: str) -> list[dict[str, Any]]:
-        """Return the user's stocks that currently belong to their observation workspace."""
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
-                FROM user_stock_review
-                WHERE user_id=?
-                ORDER BY reviewed_at DESC, symbol
-                """,
-                (user_id,),
-            ).fetchall()
-        return [_review_value(row) for row in rows]
+        return self.observations.reviews_for_user(user_id)
 
     def review(self, user_id: str, symbol: str) -> dict[str, Any]:
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT symbol, manual_state, note, tags_json, c1_record_json, reviewed_at
-                FROM user_stock_review WHERE user_id=? AND symbol=?
-                """,
-                (user_id, symbol.upper()),
-            ).fetchone()
-        if row is not None:
-            return _review_value(row)
-        return {
-            "symbol": symbol.upper(),
-            "manual_state": "UNREVIEWED",
-            "note": "",
-            "tags": [],
-            "c1_record": {},
-            "reviewed_at": "",
-        }
+        return self.observations.review(user_id, symbol)
 
     def save_review(
         self,
@@ -1706,51 +687,7 @@ class UserRepository:
         note: str,
         tags: str | Sequence[str] | None = None,
     ) -> None:
-        state = manual_state.upper()
-        if state == "UNREVIEWED":
-            with self.connect() as connection:
-                connection.execute(
-                    "DELETE FROM user_stock_review WHERE user_id=? AND symbol=?",
-                    (user_id, symbol.upper()),
-                )
-            return
-        if state not in {"WATCH", "FOCUS", "ARCHIVED"}:
-            raise ValueError(f"unsupported manual state: {manual_state}")
-        normalized_tags = normalize_observation_tags(tags) if tags is not None else None
-        with self.connect() as connection:
-            if normalized_tags is None:
-                connection.execute(
-                    """
-                    INSERT INTO user_stock_review(
-                        user_id, symbol, manual_state, note, reviewed_at
-                    ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(user_id, symbol) DO UPDATE SET
-                        manual_state=excluded.manual_state,
-                        note=excluded.note,
-                        reviewed_at=CURRENT_TIMESTAMP
-                    """,
-                    (user_id, symbol.upper(), state, note.strip()),
-                )
-            else:
-                connection.execute(
-                    """
-                    INSERT INTO user_stock_review(
-                        user_id, symbol, manual_state, note, tags_json, reviewed_at
-                    ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(user_id, symbol) DO UPDATE SET
-                        manual_state=excluded.manual_state,
-                        note=excluded.note,
-                        tags_json=excluded.tags_json,
-                        reviewed_at=CURRENT_TIMESTAMP
-                    """,
-                    (
-                        user_id,
-                        symbol.upper(),
-                        state,
-                        note.strip(),
-                        json.dumps(normalized_tags, ensure_ascii=False),
-                    ),
-                )
+        return self.observations.save_review(user_id, symbol, manual_state, note, tags)
 
     def add_observations(
         self,
@@ -1761,112 +698,33 @@ class UserRepository:
         tags: str | Sequence[str] | None = None,
         request_id: str,
     ) -> dict[str, Any]:
-        """Add many observations atomically without changing existing reviews."""
-        normalized = list(dict.fromkeys(symbol.upper().strip() for symbol in symbols if symbol))
-        if not normalized:
-            raise ValueError("股票代码不能为空")
-        normalized_tags = normalize_observation_tags(tags if tags is not None else ())
-        placeholders = ",".join("?" for _ in normalized)
-        with self.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = {
-                str(row["symbol"])
-                for row in connection.execute(
-                    f"""SELECT symbol FROM user_stock_review
-                    WHERE user_id=? AND symbol IN ({placeholders})""",
-                    (principal.user_id, *normalized),
-                ).fetchall()
-            }
-            added = [symbol for symbol in normalized if symbol not in existing]
-            connection.executemany(
-                """INSERT INTO user_stock_review(
-                    user_id, symbol, manual_state, note, tags_json, reviewed_at
-                ) VALUES (?, ?, 'WATCH', ?, ?, CURRENT_TIMESTAMP)""",
-                [
-                    (
-                        principal.user_id,
-                        symbol,
-                        note.strip(),
-                        json.dumps(normalized_tags, ensure_ascii=False),
-                    )
-                    for symbol in added
-                ],
-            )
-            results = [
-                {
-                    "symbol": symbol,
-                    "status": "ALREADY_PRESENT" if symbol in existing else "ADDED",
-                }
-                for symbol in normalized
-            ]
-            self._insert_api_audit(
-                connection,
-                principal,
-                action="observations.batch",
-                request_id=request_id,
-                outcome="COMMITTED",
-                details={
-                    "requested": len(normalized),
-                    "added": len(added),
-                    "already_present": len(existing),
-                },
-            )
-        return {
-            "request_id": request_id,
-            "status": "COMMITTED",
-            "requested": len(normalized),
-            "added": len(added),
-            "already_present": len(existing),
-            "results": results,
-        }
+        return self.observations.add_observations(
+            principal, symbols, note=note, tags=tags, request_id=request_id
+        )
 
     def save_c1_record(
         self, user_id: str, symbol: str, payload: Mapping[str, Any]
     ) -> dict[str, Any]:
-        record = _validated_c1_record(payload)
-        encoded = json.dumps(record, ensure_ascii=False, sort_keys=True)
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO user_stock_review(
-                    user_id, symbol, manual_state, note, c1_record_json, reviewed_at
-                ) VALUES (?, ?, 'WATCH', '', ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(user_id, symbol) DO UPDATE SET
-                    c1_record_json=excluded.c1_record_json,
-                    reviewed_at=CURRENT_TIMESTAMP
-                """,
-                (user_id, symbol.upper(), encoded),
-            )
-        return record
+        return self.observations.save_c1_record(user_id, symbol, payload)
 
     def clear_c1_record(self, user_id: str, symbol: str) -> None:
-        with self.connect() as connection:
-            connection.execute(
-                """UPDATE user_stock_review
-                SET c1_record_json='{}', reviewed_at=CURRENT_TIMESTAMP
-                WHERE user_id=? AND symbol=?""",
-                (user_id, symbol.upper()),
-            )
+        return self.observations.clear_c1_record(user_id, symbol)
+
+    def setup_observations(self, user_id: str, symbol: str) -> list[dict[str, Any]]:
+        return self.observations.setup_observations(user_id, symbol)
+
+    def save_setup_observation(
+        self, user_id: str, symbol: str, setup_id: str, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return self.observations.save_setup_observation(user_id, symbol, setup_id, payload)
+
+    def clear_setup_observation(self, user_id: str, symbol: str, setup_id: str) -> None:
+        return self.observations.clear_setup_observation(user_id, symbol, setup_id)
 
     def trade_setup_options(
         self, user_id: str, *, plan_version_id: str | None = None
     ) -> list[dict[str, str]]:
-        plan = (
-            self.trading_plans.show(user_id, plan_version_id)
-            if plan_version_id
-            else self.trading_plans.current(user_id)
-        )
-        options = [{"value": OTHER_SETUP_ID, "label": OTHER_SETUP_LABEL}]
-        if plan is not None:
-            options.extend(
-                {
-                    "value": str(item["setup_id"]),
-                    "label": f"{item['code']} · {item['name']}",
-                }
-                for item in plan.get("setup_catalog", [])
-                if item.get("enabled")
-            )
-        return options
+        return self.observations.trade_setup_options(user_id, plan_version_id=plan_version_id)
 
     def record_trade(
         self,
@@ -1893,259 +751,38 @@ class UserRepository:
         plan_setup_id: str = OTHER_SETUP_ID,
         other_setup_note: str = "",
     ) -> str:
-        compatibility_setup = setup_method or DEFAULT_TRADE_SETUP
-        values = _validated_trade_values(
+        return self.trades.record_trade(
+            user_id,
             traded_on=traded_on,
             traded_at=traded_at,
+            symbol=symbol,
             side=side,
             quantity=quantity,
             price=price,
             fee=fee,
             method=method,
-            setup_method=compatibility_setup,
+            setup_method=setup_method,
             stop_price=stop_price,
+            rationale=rationale,
+            invalidation=invalidation,
+            exit_reason=exit_reason,
+            market_context=market_context,
+            observation_snapshot=observation_snapshot,
+            permit_unmatched_sell=permit_unmatched_sell,
+            plan_version_id=plan_version_id,
+            setup_code=setup_code,
+            plan_setup_id=plan_setup_id,
+            other_setup_note=other_setup_note,
         )
-        normalized_symbol = symbol.upper().strip()
-        if not normalized_symbol or "." not in normalized_symbol:
-            raise ValueError("股票代码格式不正确")
-        execution_id = uuid4().hex
-        with self.connect() as connection:
-            plan = (
-                self.trading_plans.show(user_id, plan_version_id)
-                if plan_version_id
-                else self.trading_plans.current(user_id)
-            )
-            if values["side"] == "SELL":
-                plan = None
-            if plan_version_id and plan is None:
-                raise ValueError("计划版本不存在或不属于当前用户")
-            assignment = _setup_assignment(
-                plan,
-                plan_setup_id=plan_setup_id,
-                setup_code=setup_code,
-                setup_method=setup_method,
-                other_setup_note=other_setup_note,
-            )
-            values["setup_method"] = assignment["setup_method"]
-            frozen_snapshot = dict(observation_snapshot or {})
-            if values["side"] == "BUY" and assignment["plan_setup_id"] == "C1":
-                review_row = connection.execute(
-                    """SELECT c1_record_json FROM user_stock_review
-                    WHERE user_id=? AND symbol=?""",
-                    (user_id, normalized_symbol),
-                ).fetchone()
-                if review_row is not None:
-                    try:
-                        c1_record = json.loads(str(review_row["c1_record_json"] or "{}"))
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        c1_record = {}
-                    if isinstance(c1_record, dict) and c1_record:
-                        frozen_snapshot["c1_record"] = c1_record
-            existing_rows = self._trade_rows(connection, user_id, normalized_symbol)
-            candidate = {
-                "execution_id": execution_id,
-                "traded_on": traded_on,
-                "traded_at": values["traded_at"],
-                "symbol": normalized_symbol,
-                "side": values["side"],
-                "quantity": quantity,
-                "price": price,
-                "fee": fee,
-                "method": values["method"],
-                "setup_method": values["setup_method"],
-                "stop_price": values["stop_price"],
-            }
-            if values["side"] == "SELL":
-                try:
-                    _match_trade_executions([*existing_rows, candidate])
-                except ValueError as exc:
-                    if not permit_unmatched_sell:
-                        available = _open_quantity(existing_rows)
-                        raise ValueError(f"卖出数量超过可复盘持仓：可用 {available} 股") from exc
-            connection.execute(
-                """
-                INSERT INTO user_trade_execution(
-                    execution_id, user_id, traded_on, traded_at, symbol, side,
-                    quantity, price, fee, method, setup_method, stop_price,
-                    initial_stop_price,
-                    rationale, invalidation, exit_reason, market_context,
-                    observation_snapshot_json, plan_version_id, evaluation_cycle_id, setup_code
-                    , setup_kind, plan_setup_id, setup_code_snapshot,
-                    setup_name_snapshot, other_setup_note
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    execution_id,
-                    user_id,
-                    traded_on,
-                    values["traded_at"],
-                    normalized_symbol,
-                    values["side"],
-                    quantity,
-                    price,
-                    fee,
-                    values["method"],
-                    values["setup_method"],
-                    values["stop_price"],
-                    values["stop_price"] if values["side"] == "BUY" else None,
-                    rationale.strip(),
-                    invalidation.strip(),
-                    exit_reason.strip(),
-                    market_context.strip(),
-                    json.dumps(frozen_snapshot, ensure_ascii=False, sort_keys=True),
-                    plan["version_id"] if plan else None,
-                    plan["evaluation_cycle_id"] if plan else None,
-                    assignment["setup_code"] if values["side"] == "BUY" else None,
-                    assignment["setup_kind"] if values["side"] == "BUY" else "OTHER",
-                    assignment["plan_setup_id"] if values["side"] == "BUY" else None,
-                    assignment["setup_code_snapshot"] if values["side"] == "BUY" else "",
-                    assignment["setup_name_snapshot"] if values["side"] == "BUY" else "",
-                    assignment["other_setup_note"] if values["side"] == "BUY" else "",
-                ),
-            )
-        return execution_id
 
     def trade_review(self, user_id: str, names: Mapping[str, str]) -> dict[str, Any]:
-        with self.connect() as connection:
-            rows = self._trade_rows(connection, user_id)
-            version_rows = connection.execute(
-                """SELECT version.version_id, version.version_number
-                FROM user_trading_plan_version AS version
-                JOIN user_trading_plan AS plan ON plan.plan_id=version.plan_id
-                WHERE plan.user_id=?""",
-                (user_id,),
-            ).fetchall()
-        version_labels = {
-            str(row["version_id"]): str(row["version_number"]) for row in version_rows
-        }
-        for row in rows:
-            row["snapshot"] = json.loads(str(row.pop("observation_snapshot_json") or "{}"))
-        closed, open_lots, unmatched_sells = _match_trade_executions(
-            rows, permit_unmatched_sells=True
-        )
-        completed_lots = _aggregate_completed_trades(closed, open_lots)
-        open_positions = _summarize_open_lots(open_lots)
-        for collection in (rows, completed_lots, open_positions, unmatched_sells):
-            for item in collection:
-                symbol = str(item["symbol"])
-                item["stock_name"] = names.get(symbol, "名称待补")
-                _decorate_setup(item)
-        by_plan_setup: dict[str, dict[str, Any]] = {}
-        for item in completed_lots:
-            if item.get("setup_kind") != "PLAN" or not item.get("plan_setup_id"):
-                continue
-            cycle_id = str(item.get("evaluation_cycle_id") or "UNBOUND")
-            setup_id = str(item["plan_setup_id"])
-            setup_code = item.get("setup_code_snapshot") or item.get("setup_code") or setup_id
-            key = f"{cycle_id}:{setup_id}"
-            by_plan_setup.setdefault(
-                key,
-                {
-                    "evaluation_cycle_id": item.get("evaluation_cycle_id"),
-                    "plan_version_ids": set(),
-                    "setup_code": setup_code,
-                    "setup_name": item.get("setup_name_snapshot") or setup_code,
-                    "trades": [],
-                },
-            )
-            group = by_plan_setup[key]
-            if item.get("plan_version_id"):
-                group["plan_version_ids"].add(str(item["plan_version_id"]))
-            group["trades"].append(item)
-        for value in by_plan_setup.values():
-            version_ids = sorted(value.pop("plan_version_ids"))
-            value["plan_version_ids"] = version_ids
-            value["plan_versions"] = [version_labels.get(item, item) for item in version_ids]
-            trades = value.pop("trades")
-            value["summary"] = _trade_statistics(trades)
-            value["by_entry_variant"] = {}
-            if str(value.get("setup_code") or "") == "C1":
-                for variant, label in C1_ENTRY_VARIANT_LABELS.items():
-                    matching = [
-                        item
-                        for item in trades
-                        if str(
-                            (item.get("snapshot", {}).get("c1_record") or {}).get(
-                                "entry_variant"
-                            )
-                            or ""
-                        )
-                        == variant
-                    ]
-                    if matching:
-                        value["by_entry_variant"][variant] = {
-                            "label": label,
-                            "summary": _trade_statistics(matching),
-                        }
-            value["sample_state"] = (
-                "样本不足：少于 30 个可计算R的完整买入批次。"
-                if value["summary"].get("r_count", 0) < 30
-                else "样本达到本计划的 30 个可计算R完整买入批次初步评价门槛。"
-            )
-        completed_lot_summary = _trade_statistics(completed_lots)
-        realized_summary = {
-            "net_pnl": sum(
-                int(item.get("pnl_cents", round(float(item["pnl"]) * 100)))
-                for item in closed
-            )
-            / 100,
-            "matched_quantity": sum(int(item["quantity"]) for item in closed),
-            "fifo_fragment_count": len(closed),
-            "sell_execution_count": len(
-                {str(item["sell_execution_id"]) for item in closed}
-            ),
-        }
-        return {
-            "executions": list(reversed(rows)),
-            "completed_lots": list(reversed(completed_lots)),
-            "closed_fragments": list(reversed(closed)),
-            "open_positions": open_positions,
-            "unmatched_sells": list(reversed(unmatched_sells)),
-            "realized_summary": realized_summary,
-            "completed_lot_summary": completed_lot_summary,
-            "completed_lots_by_setup": {
-                label: _trade_statistics(
-                    [item for item in completed_lots if item["setup_label"] == label]
-                )
-                for label in dict.fromkeys(item["setup_label"] for item in completed_lots)
-            },
-            "other_count": sum(
-                1 for item in completed_lots if item.get("setup_kind") == "OTHER"
-            ),
-            "legacy_count": sum(
-                1 for item in completed_lots if item.get("setup_kind") == "LEGACY"
-            ),
-            "by_plan_setup": by_plan_setup,
-            "completed_lot_sample_state": (
-                "样本不足：少于 20 个完整买入批次，仅展示描述统计。"
-                if len(completed_lots) < 20
-                else "完整买入批次达到基础复盘门槛；仍不构成策略有效性或买卖建议。"
-            ),
-        }
+        return self.trades.trade_review(user_id, names)
 
     def trade_symbols(self, user_id: str) -> set[str]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                "SELECT DISTINCT symbol FROM user_trade_execution WHERE user_id=?",
-                (user_id,),
-            ).fetchall()
-        return {str(row["symbol"]) for row in rows}
+        return self.trades.trade_symbols(user_id)
 
     def trade_execution(self, user_id: str, execution_id: str) -> dict[str, Any] | None:
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM user_trade_execution
-                WHERE user_id=? AND execution_id=?
-                """,
-                (user_id, execution_id),
-            ).fetchone()
-        if row is None:
-            return None
-        item = dict(row)
-        item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
-        _decorate_setup(item)
-        return item
+        return self.trades.trade_execution(user_id, execution_id)
 
     def update_trade(
         self,
@@ -2169,7 +806,9 @@ class UserRepository:
         market_context: str = "",
         observation_snapshot: Mapping[str, Any] | None = None,
     ) -> None:
-        values = _validated_trade_values(
+        return self.trades.update_trade(
+            user_id,
+            execution_id,
             traded_on=traded_on,
             traded_at=traded_at,
             side=side,
@@ -2177,132 +816,16 @@ class UserRepository:
             price=price,
             fee=fee,
             method=method,
-            setup_method=setup_method or DEFAULT_TRADE_SETUP,
+            setup_method=setup_method,
+            plan_setup_id=plan_setup_id,
+            other_setup_note=other_setup_note,
             stop_price=stop_price,
+            rationale=rationale,
+            invalidation=invalidation,
+            exit_reason=exit_reason,
+            market_context=market_context,
+            observation_snapshot=observation_snapshot,
         )
-        with self.connect() as connection:
-            current = connection.execute(
-                """
-                SELECT * FROM user_trade_execution
-                WHERE user_id=? AND execution_id=?
-                """,
-                (user_id, execution_id),
-            ).fetchone()
-            if current is None:
-                raise ValueError("成交记录不存在")
-            if values["side"] == "SELL":
-                plan_version_id = None
-                evaluation_cycle_id = None
-                assignment = _setup_assignment(None)
-            elif str(current["side"]) == "BUY":
-                plan_version_id = current["plan_version_id"]
-                evaluation_cycle_id = current["evaluation_cycle_id"]
-                plan = (
-                    self.trading_plans.show(user_id, str(plan_version_id))
-                    if plan_version_id
-                    else None
-                )
-                if plan_setup_id == "LEGACY" and str(current["setup_kind"]) == "LEGACY":
-                    assignment = {
-                        "setup_kind": "LEGACY",
-                        "plan_setup_id": None,
-                        "setup_code": current["setup_code"],
-                        "setup_code_snapshot": current["setup_code_snapshot"],
-                        "setup_name_snapshot": current["setup_name_snapshot"],
-                        "other_setup_note": "",
-                        "setup_method": current["setup_method"],
-                    }
-                else:
-                    requested_setup = str(plan_setup_id or "").strip().upper()
-                    if (
-                        plan is None
-                        and requested_setup not in {"", OTHER_SETUP_ID}
-                    ) or (plan is None and setup_method):
-                        plan = self.trading_plans.current(user_id)
-                        plan_version_id = plan["version_id"] if plan else None
-                        evaluation_cycle_id = plan["evaluation_cycle_id"] if plan else None
-                    assignment = _setup_assignment(
-                        plan,
-                        plan_setup_id=plan_setup_id,
-                        setup_method=setup_method,
-                        other_setup_note=other_setup_note,
-                    )
-            else:
-                plan = self.trading_plans.current(user_id)
-                plan_version_id = plan["version_id"] if plan else None
-                evaluation_cycle_id = plan["evaluation_cycle_id"] if plan else None
-                assignment = _setup_assignment(
-                    plan,
-                    plan_setup_id=plan_setup_id,
-                    setup_method=setup_method,
-                    other_setup_note=other_setup_note,
-                )
-            values["setup_method"] = assignment["setup_method"]
-            rows = self._trade_rows(connection, user_id)
-            for row in rows:
-                if str(row["execution_id"]) == execution_id:
-                    row.update(
-                        {
-                            "traded_on": traded_on,
-                            "traded_at": values["traded_at"],
-                            "side": values["side"],
-                            "quantity": quantity,
-                            "price": price,
-                            "fee": fee,
-                            "method": values["method"],
-                            "setup_method": values["setup_method"],
-                            "stop_price": values["stop_price"],
-                            "plan_version_id": plan_version_id,
-                            "evaluation_cycle_id": evaluation_cycle_id,
-                            "setup_code": assignment["setup_code"],
-                            "setup_kind": assignment["setup_kind"],
-                            "plan_setup_id": assignment["plan_setup_id"],
-                            "setup_code_snapshot": assignment["setup_code_snapshot"],
-                            "setup_name_snapshot": assignment["setup_name_snapshot"],
-                            "other_setup_note": assignment["other_setup_note"],
-                        }
-                    )
-                    break
-            _match_trade_executions(rows)
-            connection.execute(
-                """
-                UPDATE user_trade_execution SET
-                    traded_on=?, traded_at=?, side=?, quantity=?, price=?, fee=?,
-                    method=?, setup_method=?, stop_price=?, rationale=?, invalidation=?,
-                    exit_reason=?, market_context=?, observation_snapshot_json=?,
-                    plan_version_id=?, evaluation_cycle_id=?, setup_code=?,
-                    setup_kind=?, plan_setup_id=?, setup_code_snapshot=?,
-                    setup_name_snapshot=?, other_setup_note=?,
-                    revision=revision + 1, updated_at=CURRENT_TIMESTAMP
-                WHERE user_id=? AND execution_id=?
-                """,
-                (
-                    traded_on,
-                    values["traded_at"],
-                    values["side"],
-                    quantity,
-                    price,
-                    fee,
-                    values["method"],
-                    values["setup_method"],
-                    values["stop_price"],
-                    rationale.strip(),
-                    invalidation.strip(),
-                    exit_reason.strip(),
-                    market_context.strip(),
-                    json.dumps(observation_snapshot or {}, ensure_ascii=False, sort_keys=True),
-                    plan_version_id,
-                    evaluation_cycle_id,
-                    assignment["setup_code"],
-                    assignment["setup_kind"],
-                    assignment["plan_setup_id"],
-                    assignment["setup_code_snapshot"],
-                    assignment["setup_name_snapshot"],
-                    assignment["other_setup_note"],
-                    user_id,
-                    execution_id,
-                ),
-            )
 
     def trade_executions(
         self,
@@ -2312,28 +835,14 @@ class UserRepository:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> list[dict[str, Any]]:
-        normalized_symbol = symbol.upper().strip() if symbol else None
-        with self.connect() as connection:
-            rows = self._trade_rows(connection, user_id, normalized_symbol, date_to)
-        if date_from:
-            date.fromisoformat(date_from)
-            rows = [row for row in rows if str(row["traded_on"]) >= date_from]
-        if date_to:
-            date.fromisoformat(date_to)
-        for row in rows:
-            row["snapshot"] = json.loads(str(row.pop("observation_snapshot_json") or "{}"))
-            _decorate_setup(row)
-        return list(reversed(rows))
+        return self.trades.trade_executions(
+            user_id, symbol=symbol, date_from=date_from, date_to=date_to
+        )
 
     def validate_trade_batch(
         self, user_id: str, trades: Sequence[Mapping[str, Any]]
     ) -> dict[str, Any]:
-        with self.connect() as connection:
-            report, _ = self._prepare_trade_batch(connection, user_id, trades)
-        for item in report["results"]:
-            if item["status"] == "READY":
-                item.pop("execution_id", None)
-        return report
+        return self.trades.validate_trade_batch(user_id, trades)
 
     def record_trade_batch(
         self,
@@ -2344,143 +853,13 @@ class UserRepository:
         principal: ApiTokenPrincipal,
         request_id: str,
     ) -> dict[str, Any]:
-        if principal.user_id != user_id:
-            raise ValueError("Token 与交易用户不匹配")
-        key = idempotency_key.strip()
-        if not key or len(key) > 128:
-            raise ValueError("Idempotency-Key 长度必须为 1 至 128 个字符")
-        request_payload = [{str(k): v for k, v in trade.items()} for trade in trades]
-        request_hash = _token_hash(
-            json.dumps(
-                request_payload,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
+        return self.trades.record_trade_batch(
+            user_id,
+            trades,
+            idempotency_key=idempotency_key,
+            principal=principal,
+            request_id=request_id,
         )
-        with self.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            previous = connection.execute(
-                """
-                SELECT request_hash, response_json FROM user_trade_batch
-                WHERE user_id=? AND idempotency_key=?
-                """,
-                (user_id, key),
-            ).fetchone()
-            if previous is not None:
-                if not hmac.compare_digest(str(previous["request_hash"]), request_hash):
-                    raise ValueError("同一 Idempotency-Key 不能用于不同交易批次")
-                response = json.loads(str(previous["response_json"]))
-                response["replayed"] = True
-                self._insert_api_audit(
-                    connection,
-                    principal,
-                    action="trades.batch",
-                    request_id=request_id,
-                    outcome="COMMITTED",
-                    details={
-                        "batch_id": response["batch_id"],
-                        "created": response["created"],
-                        "duplicates": response["duplicates"],
-                        "replayed": True,
-                    },
-                )
-                return response
-            report, candidates = self._prepare_trade_batch(connection, user_id, trades)
-            if report["rejected"]:
-                raise TradeBatchValidationError(report)
-            for candidate in candidates:
-                connection.execute(
-                    """
-                    INSERT INTO user_trade_execution(
-                        execution_id, user_id, traded_on, traded_at, source_ref, symbol, side,
-                        quantity, price, fee, method, setup_method, stop_price,
-                        initial_stop_price,
-                        rationale, invalidation, exit_reason, market_context,
-                        observation_snapshot_json, plan_version_id, evaluation_cycle_id, setup_code,
-                        setup_kind, plan_setup_id, setup_code_snapshot,
-                        setup_name_snapshot, other_setup_note
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        candidate["execution_id"],
-                        user_id,
-                        candidate["traded_on"],
-                        candidate["traded_at"],
-                        candidate["source_ref"],
-                        candidate["symbol"],
-                        candidate["side"],
-                        candidate["quantity"],
-                        candidate["price"],
-                        candidate["fee"],
-                        candidate["method"],
-                        candidate["setup_method"],
-                        candidate["stop_price"],
-                        candidate["stop_price"] if candidate["side"] == "BUY" else None,
-                        candidate["rationale"],
-                        candidate["invalidation"],
-                        candidate["exit_reason"],
-                        candidate["market_context"],
-                        json.dumps(
-                            candidate.get("observation_snapshot") or {},
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            allow_nan=False,
-                        ),
-                        candidate.get("plan_version_id"),
-                        candidate.get("evaluation_cycle_id"),
-                        candidate.get("setup_code"),
-                        candidate.get("setup_kind", "OTHER"),
-                        candidate.get("plan_setup_id"),
-                        candidate.get("setup_code_snapshot", ""),
-                        candidate.get("setup_name_snapshot", ""),
-                        candidate.get("other_setup_note", ""),
-                    ),
-                )
-            results = []
-            for item in report["results"]:
-                result = dict(item)
-                if result["status"] == "READY":
-                    result["status"] = "CREATED"
-                results.append(result)
-            response = {
-                "batch_id": uuid4().hex,
-                "status": "COMMITTED",
-                "created": report["ready"],
-                "duplicates": report["duplicates"],
-                "rejected": 0,
-                "replayed": False,
-                "results": results,
-            }
-            connection.execute(
-                """
-                INSERT INTO user_trade_batch(
-                    batch_id, user_id, idempotency_key, request_hash, response_json
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    response["batch_id"],
-                    user_id,
-                    key,
-                    request_hash,
-                    json.dumps(response, ensure_ascii=False, sort_keys=True),
-                ),
-            )
-            self._insert_api_audit(
-                connection,
-                principal,
-                action="trades.batch",
-                request_id=request_id,
-                outcome="COMMITTED",
-                details={
-                    "batch_id": response["batch_id"],
-                    "created": response["created"],
-                    "duplicates": response["duplicates"],
-                    "replayed": False,
-                },
-            )
-        return response
 
     def update_trade_stop(
         self,
@@ -2492,63 +871,14 @@ class UserRepository:
         principal: ApiTokenPrincipal,
         request_id: str,
     ) -> dict[str, Any]:
-        if principal.user_id != user_id:
-            raise ValueError("Token 与交易用户不匹配")
-        with self.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                """
-                SELECT * FROM user_trade_execution
-                WHERE user_id=? AND execution_id=?
-                """,
-                (user_id, execution_id),
-            ).fetchone()
-            if row is None:
-                raise ValueError("成交记录不存在")
-            current = dict(row)
-            if str(current["side"]) != "BUY":
-                raise ValueError("止损价只能更新既有 BUY")
-            normalized_stop = float(stop_price)
-            if not math.isfinite(normalized_stop):
-                raise ValueError("止损价必须为有限数值")
-            if normalized_stop <= 0 or normalized_stop >= float(current["price"]):
-                raise ValueError("止损价必须大于 0 且低于买入成交价")
-            normalized_revision = _strict_positive_integer(
-                expected_revision, field="expected_revision"
-            )
-            cursor = connection.execute(
-                """
-                UPDATE user_trade_execution
-                SET stop_price=?, revision=revision + 1, updated_at=CURRENT_TIMESTAMP
-                WHERE user_id=? AND execution_id=? AND revision=?
-                """,
-                (normalized_stop, user_id, execution_id, normalized_revision),
-            )
-            if cursor.rowcount != 1:
-                raise TradeRevisionConflict("成交记录已变化，请重新读取后再更新")
-            updated = connection.execute(
-                """
-                SELECT * FROM user_trade_execution
-                WHERE user_id=? AND execution_id=?
-                """,
-                (user_id, execution_id),
-            ).fetchone()
-            assert updated is not None
-            self._insert_api_audit(
-                connection,
-                principal,
-                action="trades.stop",
-                request_id=request_id,
-                outcome="UPDATED",
-                details={
-                    "execution_id": execution_id,
-                    "revision": int(updated["revision"]),
-                },
-            )
-        assert updated is not None
-        item = dict(updated)
-        item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
-        return item
+        return self.trades.update_trade_stop(
+            user_id,
+            execution_id,
+            stop_price,
+            expected_revision=expected_revision,
+            principal=principal,
+            request_id=request_id,
+        )
 
     def complete_trade_time(
         self,
@@ -2560,268 +890,24 @@ class UserRepository:
         principal: ApiTokenPrincipal,
         request_id: str,
     ) -> dict[str, Any]:
-        """Fill a missing execution time without turning the Agent API into a general editor."""
-        if principal.user_id != user_id:
-            raise ValueError("Token 与交易用户不匹配")
-        normalized_time = str(traded_at or "").strip()
-        try:
-            datetime.strptime(normalized_time, "%H:%M:%S")
-        except ValueError as exc:
-            raise ValueError("成交时间必须为 HH:MM:SS") from exc
-        normalized_revision = _strict_positive_integer(
-            expected_revision, field="expected_revision"
+        return self.trades.complete_trade_time(
+            user_id,
+            execution_id,
+            traded_at,
+            expected_revision=expected_revision,
+            principal=principal,
+            request_id=request_id,
         )
-        with self.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            current_row = connection.execute(
-                """
-                SELECT * FROM user_trade_execution
-                WHERE user_id=? AND execution_id=?
-                """,
-                (user_id, execution_id),
-            ).fetchone()
-            if current_row is None:
-                raise ValueError("成交记录不存在")
-            current = dict(current_row)
-            if int(current.get("revision") or 1) != normalized_revision:
-                raise TradeRevisionConflict("成交记录已变化，请重新读取后再更新")
-            if str(current.get("traded_at") or "").strip():
-                raise ValueError("成交时间已存在；set-time 只能补全空时间")
-            rows = self._trade_rows(connection, user_id)
-            for row in rows:
-                if str(row["execution_id"]) == execution_id:
-                    row["traded_at"] = normalized_time
-                    break
-            ordered = sorted(
-                rows,
-                key=lambda row: (
-                    str(row["traded_on"]),
-                    str(row.get("traded_at") or ""),
-                    str(row.get("created_at") or ""),
-                    str(row["execution_id"]),
-                ),
-            )
-            _match_trade_executions(ordered)
-            cursor = connection.execute(
-                """
-                UPDATE user_trade_execution
-                SET traded_at=?, revision=revision + 1, updated_at=CURRENT_TIMESTAMP
-                WHERE user_id=? AND execution_id=? AND revision=? AND traded_at=''
-                """,
-                (normalized_time, user_id, execution_id, normalized_revision),
-            )
-            if cursor.rowcount != 1:
-                raise TradeRevisionConflict("成交记录已变化，请重新读取后再更新")
-            updated = connection.execute(
-                """
-                SELECT * FROM user_trade_execution
-                WHERE user_id=? AND execution_id=?
-                """,
-                (user_id, execution_id),
-            ).fetchone()
-            assert updated is not None
-            self._insert_api_audit(
-                connection,
-                principal,
-                action="trades.time",
-                request_id=request_id,
-                outcome="UPDATED",
-                details={
-                    "execution_id": execution_id,
-                    "traded_at": normalized_time,
-                    "revision": int(updated["revision"]),
-                },
-            )
-        item = dict(updated)
-        item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
-        return item
-
-    def _prepare_trade_batch(
-        self,
-        connection: sqlite3.Connection,
-        user_id: str,
-        trades: Sequence[Mapping[str, Any]],
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        if not trades or len(trades) > 200:
-            raise ValueError("每个交易批次必须包含 1 至 200 笔记录")
-        existing = self._trade_rows(connection, user_id)
-        working = list(existing)
-        known: dict[tuple[Any, ...], Mapping[str, Any]] = {
-            _trade_identity(row): row for row in existing
-        }
-        results: list[dict[str, Any] | None] = [None] * len(trades)
-        normalized: list[dict[str, Any]] = []
-        for index, payload in enumerate(trades):
-            try:
-                item = _normalize_api_trade(payload, index)
-            except (TypeError, ValueError) as exc:
-                results[index] = {
-                    "index": index,
-                    "client_id": str(payload.get("client_id") or ""),
-                    "status": "REJECTED",
-                    "reason": str(exc),
-                }
-            else:
-                normalized.append(item)
-        normalized.sort(key=lambda item: (item["traded_on"], item["traded_at"], int(item["index"])))
-        candidates: list[dict[str, Any]] = []
-        for item in normalized:
-            index = int(item["index"])
-            identity = _trade_identity(item)
-            duplicate = known.get(identity)
-            base_result = {
-                "index": index,
-                "client_id": item["client_id"],
-                "symbol": item["symbol"],
-                "traded_on": item["traded_on"],
-                "traded_at": item["traded_at"],
-                "side": item["side"],
-                "quantity": item["quantity"],
-                "price": item["price"],
-            }
-            if duplicate is not None:
-                if item["source_ref"] and _trade_fingerprint(duplicate) != _trade_fingerprint(item):
-                    results[index] = {
-                        **base_result,
-                        "status": "REJECTED",
-                        "reason": "source_ref 已用于另一笔不同的成交",
-                    }
-                    continue
-                results[index] = {
-                    **base_result,
-                    "status": "DUPLICATE",
-                    "execution_id": str(duplicate["execution_id"]),
-                    "revision": int(duplicate.get("revision") or 1),
-                }
-                continue
-            if item["side"] == "BUY":
-                requested = item.get("plan_version_id")
-                active = self.trading_plans.current(user_id)
-                if requested:
-                    plan = self.trading_plans.show(user_id, str(requested))
-                    if plan is None:
-                        results[index] = {
-                            **base_result,
-                            "status": "REJECTED",
-                            "reason": "计划版本不存在或不属于当前用户",
-                        }
-                        continue
-                else:
-                    plan = active
-                if plan is not None:
-                    item["plan_version_id"] = plan["version_id"]
-                    item["evaluation_cycle_id"] = plan["evaluation_cycle_id"]
-                assignment = _setup_assignment(
-                    plan,
-                    plan_setup_id=str(item.get("plan_setup_id") or OTHER_SETUP_ID),
-                    setup_code=item.get("setup_code"),
-                    setup_method=str(item.get("explicit_setup_method") or ""),
-                    other_setup_note=str(item.get("other_setup_note") or ""),
-                )
-                item.update(assignment)
-            else:
-                item["plan_version_id"] = None
-                item["evaluation_cycle_id"] = None
-                item.update(_setup_assignment(None))
-            execution_id = uuid4().hex
-            candidate = {
-                **item,
-                "execution_id": execution_id,
-                "revision": 1,
-                "created_at": f"batch-{index:06d}",
-            }
-            try:
-                ordered = sorted(
-                    [*working, candidate],
-                    key=lambda row: (
-                        str(row["traded_on"]),
-                        str(row.get("traded_at") or ""),
-                        str(row.get("created_at") or ""),
-                        str(row["execution_id"]),
-                    ),
-                )
-                _match_trade_executions(ordered)
-            except ValueError:
-                available = _open_quantity(
-                    [row for row in working if str(row["symbol"]) == item["symbol"]]
-                )
-                results[index] = {
-                    **base_result,
-                    "status": "REJECTED",
-                    "reason": f"卖出数量超过可复盘持仓：可用 {available} 股",
-                }
-                continue
-            working.append(candidate)
-            known[identity] = candidate
-            candidates.append(candidate)
-            results[index] = {
-                **base_result,
-                "status": "READY",
-                "execution_id": execution_id,
-                "revision": 1,
-            }
-        final_results = [item for item in results if item is not None]
-        return {
-            "status": "VALID"
-            if all(item["status"] != "REJECTED" for item in final_results)
-            else "INVALID",
-            "ready": sum(item["status"] == "READY" for item in final_results),
-            "duplicates": sum(item["status"] == "DUPLICATE" for item in final_results),
-            "rejected": sum(item["status"] == "REJECTED" for item in final_results),
-            "results": final_results,
-        }, candidates
 
     def chart_trade_overlay(
         self, user_id: str, symbol: str, end_date: str
     ) -> dict[str, list[dict[str, Any]]]:
-        with self.connect() as connection:
-            rows = self._trade_rows(connection, user_id, symbol.upper(), end_date)
-        _, open_lots, _ = _match_trade_executions(rows, permit_unmatched_sells=True)
-        return {
-            "executions": [
-                {
-                    key: row[key]
-                    for key in (
-                        "execution_id",
-                        "traded_on",
-                        "side",
-                        "quantity",
-                        "price",
-                        "stop_price",
-                    )
-                }
-                for row in rows
-            ],
-            "open_stops": [
-                {
-                    "buy_execution_id": lot["buy_execution_id"],
-                    "buy_date": lot["buy_date"],
-                    "stop_price": lot["stop_price"],
-                }
-                for lot in open_lots
-                if lot.get("stop_price") is not None
-            ],
-        }
+        return self.trades.chart_trade_overlay(user_id, symbol, end_date)
 
     def chart_drawings(
         self, user_id: str, symbol: str, price_scale_id: str, interval: str = "day"
     ) -> list[dict[str, Any]]:
-        if interval not in {"day", "week"}:
-            raise ValueError("unsupported chart interval")
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT drawing_id, tool, anchors_json, content_text, interval_scope,
-                       created_at, updated_at
-                FROM user_chart_drawing
-                WHERE user_id=? AND symbol=? AND price_scale_id=?
-                  AND tool IN ('trendline', 'horizontal', 'text')
-                  AND interval_scope IN ('both', ?)
-                ORDER BY created_at, drawing_id
-                """,
-                (user_id, symbol.upper(), price_scale_id, interval),
-            ).fetchall()
-        return [{**dict(row), "anchors": json.loads(str(row["anchors_json"]))} for row in rows]
+        return self.trades.chart_drawings(user_id, symbol, price_scale_id, interval)
 
     def save_chart_drawing(
         self,
@@ -2834,91 +920,14 @@ class UserRepository:
         content_text: str = "",
         interval_scope: str = "both",
     ) -> dict[str, Any]:
-        normalized, normalized_content, normalized_interval = _normalize_drawing(
-            tool, price_scale_id, anchors, content_text, interval_scope
+        return self.trades.save_chart_drawing(
+            user_id, drawing_id, symbol, price_scale_id, tool, anchors, content_text, interval_scope
         )
-        with self.connect() as connection:
-            existing = connection.execute(
-                """SELECT user_id, symbol, price_scale_id, tool
-                FROM user_chart_drawing WHERE drawing_id=?""",
-                (drawing_id,),
-            ).fetchone()
-            if existing is not None and str(existing["user_id"]) != user_id:
-                raise ValueError("画线记录不属于当前用户")
-            if existing is not None and (
-                str(existing["symbol"]) != symbol.upper()
-                or str(existing["price_scale_id"]) != price_scale_id
-                or str(existing["tool"]) != tool
-            ):
-                raise ValueError("画线记录与当前图表不匹配")
-            connection.execute(
-                """
-                INSERT INTO user_chart_drawing(
-                    drawing_id, user_id, symbol, price_scale_id, tool, anchors_json,
-                    content_text, interval_scope
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(drawing_id) DO UPDATE SET
-                    anchors_json=excluded.anchors_json,
-                    content_text=excluded.content_text,
-                    interval_scope=excluded.interval_scope,
-                    updated_at=CURRENT_TIMESTAMP
-                """,
-                (
-                    drawing_id,
-                    user_id,
-                    symbol.upper(),
-                    price_scale_id,
-                    tool,
-                    json.dumps(normalized, ensure_ascii=False, separators=(",", ":")),
-                    normalized_content,
-                    normalized_interval,
-                ),
-            )
-        return {
-            "drawing_id": drawing_id,
-            "tool": tool,
-            "anchors": normalized,
-            "content_text": normalized_content,
-            "interval_scope": normalized_interval,
-        }
 
     def delete_chart_drawing(
         self, user_id: str, drawing_id: str, symbol: str, price_scale_id: str
     ) -> bool:
-        with self.connect() as connection:
-            cursor = connection.execute(
-                """
-                DELETE FROM user_chart_drawing
-                WHERE user_id=? AND drawing_id=? AND symbol=? AND price_scale_id=?
-                """,
-                (user_id, drawing_id, symbol.upper(), price_scale_id),
-            )
-        return cursor.rowcount == 1
-
-    @staticmethod
-    def _trade_rows(
-        connection: sqlite3.Connection,
-        user_id: str,
-        symbol: str | None = None,
-        end_date: str | None = None,
-    ) -> list[dict[str, Any]]:
-        clauses = ["user_id=?"]
-        parameters: list[Any] = [user_id]
-        if symbol is not None:
-            clauses.append("symbol=?")
-            parameters.append(symbol)
-        if end_date is not None:
-            clauses.append("traded_on<=?")
-            parameters.append(end_date)
-        return [
-            dict(row)
-            for row in connection.execute(
-                "SELECT * FROM user_trade_execution WHERE "
-                + " AND ".join(clauses)
-                + " ORDER BY traded_on, traded_at, created_at, execution_id",
-                tuple(parameters),
-            ).fetchall()
-        ]
+        return self.trades.delete_chart_drawing(user_id, drawing_id, symbol, price_scale_id)
 
 
 def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, Any]:
@@ -2990,8 +999,8 @@ def _normalize_api_trade(payload: Mapping[str, Any], index: int) -> dict[str, An
     if not isinstance(snapshot, Mapping):
         raise ValueError("observation_snapshot 格式不正确")
     setup_code = str(payload.get("setup_code") or "").strip().upper() or None
-    if setup_code is not None and setup_code not in PLAN_SETUP_CODES:
-        raise ValueError(f"计划形态必须为 {plan_setup_choices_text()}")
+    if setup_code is not None and not re.fullmatch(r"[A-Z][A-Z0-9_-]{0,11}", setup_code):
+        raise ValueError("计划形态代码格式不正确")
     return {
         "index": index,
         "client_id": client_id,
@@ -3027,9 +1036,7 @@ def _review_value(row: Mapping[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError, json.JSONDecodeError):
         tags = []
     value["tags"] = (
-        [str(tag) for tag in tags if isinstance(tag, str)]
-        if isinstance(tags, list)
-        else []
+        [str(tag) for tag in tags if isinstance(tag, str)] if isinstance(tags, list) else []
     )
     raw = value.pop("c1_record_json", "{}")
     try:
@@ -3065,9 +1072,7 @@ def normalize_observation_tags(tags: str | Sequence[str]) -> list[str]:
             if not tag:
                 continue
             if len(tag) > OBSERVATION_TAG_MAX_LENGTH:
-                raise ValueError(
-                    f"单个观察标签不能超过 {OBSERVATION_TAG_MAX_LENGTH} 个字符"
-                )
+                raise ValueError(f"单个观察标签不能超过 {OBSERVATION_TAG_MAX_LENGTH} 个字符")
             key = tag.casefold()
             if key in seen:
                 continue
@@ -3113,6 +1118,48 @@ def _validated_c1_record(payload: Mapping[str, Any]) -> dict[str, Any]:
         "structure_state": structure_state,
         "entry_variant": entry_variant,
         "note": note,
+    }
+
+
+def _validated_setup_observation(payload: Mapping[str, Any]) -> dict[str, Any]:
+    status = str(payload.get("status") or "WATCH").strip().upper()
+    if status not in {"WATCH", "READY", "INVALID"}:
+        raise ValueError("形态证据状态不正确")
+    as_of_date = _strict_iso_date(payload.get("as_of_date"), field="证据日期")
+    structure_started_on = str(payload.get("structure_started_on") or "").strip()
+    if structure_started_on:
+        structure_started_on = _strict_iso_date(structure_started_on, field="结构起始日")
+        if structure_started_on > as_of_date:
+            raise ValueError("结构起始日不能晚于证据日期")
+    signal_on = str(payload.get("signal_on") or "").strip()
+    if signal_on:
+        signal_on = _strict_iso_date(signal_on, field="信号日")
+        if signal_on > as_of_date:
+            raise ValueError("信号日不能晚于证据日期")
+
+    def optional_price(key: str, label: str) -> float | None:
+        raw = str(payload.get(key) or "").strip()
+        return round(_strict_positive_float(raw, field=label), 6) if raw else None
+
+    reference_low = optional_price("reference_low", "参考下沿")
+    reference_high = optional_price("reference_high", "参考上沿")
+    if reference_low is not None and reference_high is not None and reference_high <= reference_low:
+        raise ValueError("参考上沿必须高于参考下沿")
+    summary = str(payload.get("summary") or "").strip()
+    if not summary:
+        raise ValueError("请填写形态证据摘要")
+    if len(summary) > 1000:
+        raise ValueError("形态证据摘要不能超过1000字")
+    return {
+        "status": status,
+        "as_of_date": as_of_date,
+        "structure_started_on": structure_started_on,
+        "signal_on": signal_on,
+        "reference_low": reference_low,
+        "reference_high": reference_high,
+        "trigger_price": optional_price("trigger_price", "计划触发价"),
+        "invalidation_price": optional_price("invalidation_price", "候选失效价"),
+        "summary": summary,
     }
 
 
@@ -3336,6 +1383,8 @@ def _normalize_drawing(
         else:
             raise ValueError("invalid drawing anchor")
     return normalized, normalized_content, normalized_interval
+
+
 if TYPE_CHECKING:
     from .reading_notes import ReadingNoteService
     from .trading_plans import TradingPlanService

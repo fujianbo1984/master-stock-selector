@@ -6,12 +6,10 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from statistics import fmean, median
 from threading import Lock
 from typing import Any
-from uuid import uuid4
 
 from .anomaly import empty_daily_anomaly_evidence, evaluate_daily_anomaly_evidence
 from .industry import (
@@ -20,27 +18,6 @@ from .industry import (
     INDUSTRY_TAXONOMY,
     build_industry_observations,
 )
-
-TRADE_METHOD_LABELS = {
-    "WEINSTEIN": "温斯坦",
-    "MINERVINI": "米涅尔维尼",
-    "MANUAL": "人工判断",
-}
-TRADE_SETUP_LABELS = {
-    "FAILED_TEST": "失败测试",
-    "PULLBACK_SUPPORT": "简单回调",
-    "LOWER_TIMEFRAME_BREAKOUT": "低周期突破入场",
-    "COMPLEX_PULLBACK": "复杂回调",
-    "ANTI": "Anti（趋势转换首次回调）",
-    "PRE_BREAKOUT_BASE": "突破前基底入场",
-    "POST_BREAKOUT_FIRST_PULLBACK": "突破后回调",
-    "FAILED_BREAKOUT": "失败突破",
-}
-TRADE_SETUP_ALIASES = {
-    "BREAKOUT": "POST_BREAKOUT_FIRST_PULLBACK",
-    "PULLBACK": "PULLBACK_SUPPORT",
-}
-DEFAULT_TRADE_SETUP = "PULLBACK_SUPPORT"
 
 WATCHLIST_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS stock_method_daily_fact (
@@ -186,52 +163,6 @@ CREATE TABLE IF NOT EXISTS index_minervini_stage2_daily_fact (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (as_of_date, index_symbol, policy_version)
 );
-CREATE TABLE IF NOT EXISTS manual_watch_review (
-    symbol TEXT NOT NULL PRIMARY KEY,
-    manual_state TEXT NOT NULL CHECK (
-        manual_state IN ('UNREVIEWED', 'WATCH', 'FOCUS', 'DROPPED')
-    ),
-    note TEXT NOT NULL DEFAULT '',
-    reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS trade_execution (
-    execution_id TEXT NOT NULL PRIMARY KEY,
-    traded_on TEXT NOT NULL,
-    traded_at TEXT NOT NULL DEFAULT '',
-    symbol TEXT NOT NULL,
-    side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
-    quantity INTEGER NOT NULL CHECK (quantity > 0),
-    price REAL NOT NULL CHECK (price > 0),
-    fee REAL NOT NULL DEFAULT 0 CHECK (fee >= 0),
-    method TEXT NOT NULL CHECK (method IN ('WEINSTEIN', 'MINERVINI', 'MANUAL')),
-    setup_method TEXT NOT NULL DEFAULT 'PULLBACK_SUPPORT' CHECK (setup_method IN (
-        'FAILED_TEST', 'PULLBACK_SUPPORT', 'LOWER_TIMEFRAME_BREAKOUT',
-        'COMPLEX_PULLBACK', 'ANTI', 'PRE_BREAKOUT_BASE',
-        'POST_BREAKOUT_FIRST_PULLBACK', 'FAILED_BREAKOUT'
-    )),
-    stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
-    rationale TEXT NOT NULL DEFAULT '',
-    invalidation TEXT NOT NULL DEFAULT '',
-    exit_reason TEXT NOT NULL DEFAULT '',
-    market_context TEXT NOT NULL DEFAULT '',
-    observation_snapshot_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_trade_execution_symbol_date
-ON trade_execution(symbol, traded_on, created_at);
-CREATE INDEX IF NOT EXISTS idx_trade_execution_date
-ON trade_execution(traded_on, created_at);
-CREATE TABLE IF NOT EXISTS chart_drawing (
-    drawing_id TEXT NOT NULL PRIMARY KEY,
-    symbol TEXT NOT NULL,
-    price_scale_id TEXT NOT NULL,
-    tool TEXT NOT NULL CHECK (tool IN ('trendline', 'horizontal')),
-    anchors_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_chart_drawing_symbol_scale
-ON chart_drawing(symbol, price_scale_id, created_at);
 CREATE TABLE IF NOT EXISTS security_identity_history (
     valid_from TEXT NOT NULL,
     symbol TEXT NOT NULL,
@@ -1535,7 +1466,6 @@ class WatchlistRepository:
                 return
             with self.connect() as connection:
                 connection.executescript(WATCHLIST_SCHEMA_SQL)
-                self._ensure_trade_execution_columns(connection)
             self._initialized = True
 
     def brooks_schema_ready(self) -> bool:
@@ -1588,9 +1518,6 @@ class WatchlistRepository:
                         "SELECT name FROM sqlite_master WHERE type='table'"
                     )
                 }
-                columns = {
-                    str(row[1]) for row in connection.execute("PRAGMA table_info(trade_execution)")
-                }
             finally:
                 connection.close()
         except sqlite3.OperationalError as exc:
@@ -1606,27 +1533,10 @@ class WatchlistRepository:
             "stock_weinstein_provisional_daily_fact",
             "stock_weinstein_provisional_transition",
             "weinstein_stage_baseline",
-            "trade_execution",
+            "watchlist_run_receipt",
             "security_identity_history",
             "security_industry_membership_history",
-        }.issubset(tables) and {"traded_at", "setup_method", "stop_price"}.issubset(columns)
-
-    @staticmethod
-    def _ensure_trade_execution_columns(connection: sqlite3.Connection) -> None:
-        columns = {
-            str(row["name"]) for row in connection.execute("PRAGMA table_info(trade_execution)")
-        }
-        if "traded_at" not in columns:
-            connection.execute(
-                "ALTER TABLE trade_execution ADD COLUMN traded_at TEXT NOT NULL DEFAULT ''"
-            )
-        if "setup_method" not in columns:
-            connection.execute(
-                "ALTER TABLE trade_execution ADD COLUMN setup_method TEXT NOT NULL "
-                f"DEFAULT '{DEFAULT_TRADE_SETUP}'"
-            )
-        if "stop_price" not in columns:
-            connection.execute("ALTER TABLE trade_execution ADD COLUMN stop_price REAL")
+        }.issubset(tables)
 
     @staticmethod
     def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
@@ -2260,6 +2170,74 @@ class WatchlistRepository:
             **dict(row),
             "evidence": json.loads(str(row["evidence_json"] or "{}")),
         }
+
+    def brooks_chart_legs(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        policy_version: str,
+    ) -> list[dict[str, Any]]:
+        """Return PIT-safe Brooks first-leg endpoints for a stock chart."""
+
+        if (
+            not self.brooks_schema_ready()
+            or not symbol
+            or not start_date
+            or not end_date
+            or start_date > end_date
+        ):
+            return []
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT e.event_id, e.start_date, e.signal_date, e.move_atr,
+                       e.duration_bars, f.as_of_date, f.evidence_json
+                FROM brooks_impulse_event AS e
+                JOIN brooks_second_leg_daily_fact AS f
+                  ON f.event_id=e.event_id AND f.policy_version=e.policy_version
+                WHERE e.symbol=? AND e.policy_version=?
+                  AND e.start_date <= ?
+                  AND f.as_of_date=(
+                      SELECT MAX(latest.as_of_date)
+                      FROM brooks_second_leg_daily_fact AS latest
+                      WHERE latest.event_id=e.event_id
+                        AND latest.policy_version=e.policy_version
+                        AND latest.as_of_date <= ?
+                  )
+                ORDER BY e.start_date, e.event_id
+                """,
+                (symbol.upper(), policy_version, end_date, end_date),
+            ).fetchall()
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            evidence = json.loads(str(row["evidence_json"] or "{}"))
+            leg_start_date = str(row["start_date"] or "")
+            leg_end_date = str(
+                evidence.get("effective_leg_end_date") or row["signal_date"] or ""
+            )
+            if not (
+                start_date <= leg_start_date <= end_date
+                and start_date <= leg_end_date <= end_date
+            ):
+                continue
+            result.append(
+                {
+                    "id": f"b1:{row['event_id']}",
+                    "start_date": leg_start_date,
+                    "end_date": leg_end_date,
+                    "duration_bars": int(
+                        evidence.get("effective_leg_bars") or row["duration_bars"]
+                    ),
+                    "move_atr": round(
+                        float(evidence.get("effective_move_atr") or row["move_atr"]), 2
+                    ),
+                    "fact_as_of_date": str(row["as_of_date"]),
+                    "policy_version": policy_version,
+                }
+            )
+        return result
 
     def persist_index_minervini_facts(self, facts: Sequence[Mapping[str, Any]]) -> int:
         """Add index Stage 2 facts without rewriting an existing watchlist run."""
@@ -3415,16 +3393,12 @@ class WatchlistRepository:
                 """,
                 (as_of_date,),
             ).fetchall()
-            review_rows = connection.execute(
-                "SELECT symbol, manual_state, note, reviewed_at FROM manual_watch_review"
-            ).fetchall()
             identity_rows = self._identity_rows_as_of(connection, as_of_date)
             industry_rows = [
                 row
                 for row in self._membership_rows_as_of(connection, as_of_date)
                 if str(row.get("assignment_state") or "") == "VERIFIED"
             ]
-        reviews = {str(row["symbol"]): dict(row) for row in review_rows}
         identities = {str(row["symbol"]): dict(row) for row in identity_rows}
         industries = {str(row["symbol"]): dict(row) for row in industry_rows}
         grouped: dict[str, dict[str, Any]] = {}
@@ -3446,10 +3420,6 @@ class WatchlistRepository:
                     "is_st": bool(identity.get("is_st")),
                     "is_suspended": bool(identity.get("is_suspended")),
                     "methods": {},
-                    "manual": reviews.get(
-                        symbol,
-                        {"manual_state": "UNREVIEWED", "note": "", "reviewed_at": ""},
-                    ),
                     "origin": str(row["origin"]),
                 },
             )
@@ -3774,9 +3744,6 @@ class WatchlistRepository:
                 """,
                 (symbol, limit * 2),
             ).fetchall()
-            review = connection.execute(
-                "SELECT * FROM manual_watch_review WHERE symbol = ?", (symbol,)
-            ).fetchone()
             latest_row = connection.execute(
                 "SELECT MAX(as_of_date) FROM stock_method_daily_fact WHERE symbol = ?",
                 (symbol,),
@@ -3829,339 +3796,11 @@ class WatchlistRepository:
             "latest": latest,
             "history": decoded,
             "history_total": history_total,
-            "manual": dict(review)
-            if review
-            else {
-                "symbol": symbol,
-                "manual_state": "UNREVIEWED",
-                "note": "",
-                "reviewed_at": "",
-            },
         }
 
-    def save_review(self, symbol: str, manual_state: str, note: str) -> None:
-        allowed = {"UNREVIEWED", "WATCH", "FOCUS", "DROPPED"}
-        state = manual_state.upper()
-        if state not in allowed:
-            raise ValueError(f"unsupported manual state: {manual_state}")
-        self.initialize()
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO manual_watch_review(symbol, manual_state, note, reviewed_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(symbol) DO UPDATE SET
-                    manual_state=excluded.manual_state,
-                    note=excluded.note,
-                    reviewed_at=CURRENT_TIMESTAMP
-                """,
-                (symbol.upper(), state, note.strip()),
-            )
+    def stock_names(self, symbols: set[str]) -> dict[str, str]:
+        """Resolve public stock names without exposing private trade storage."""
 
-    def record_trade(
-        self,
-        *,
-        traded_on: str,
-        traded_at: str = "",
-        symbol: str,
-        side: str,
-        quantity: int,
-        price: float,
-        fee: float,
-        method: str,
-        setup_method: str = DEFAULT_TRADE_SETUP,
-        stop_price: float | None = None,
-        rationale: str = "",
-        invalidation: str = "",
-        exit_reason: str = "",
-        market_context: str = "",
-        permit_unmatched_sell: bool = False,
-    ) -> str:
-        """Append one manual execution and freeze the known watchlist evidence on that date."""
-        self.initialize()
-        try:
-            date.fromisoformat(traded_on)
-        except ValueError as exc:
-            raise ValueError("交易日期必须为 YYYY-MM-DD") from exc
-        normalized_time = traded_at.strip()
-        if normalized_time:
-            try:
-                datetime.strptime(normalized_time, "%H:%M:%S")
-            except ValueError as exc:
-                raise ValueError("成交时间必须为 HH:MM:SS") from exc
-        normalized_symbol = symbol.upper().strip()
-        if not normalized_symbol or "." not in normalized_symbol:
-            raise ValueError("股票代码格式不正确")
-        normalized_side = side.upper().strip()
-        if normalized_side not in {"BUY", "SELL"}:
-            raise ValueError("方向必须为买入或卖出")
-        normalized_method = method.upper().strip()
-        normalized_setup = setup_method.upper().strip()
-        normalized_setup = TRADE_SETUP_ALIASES.get(normalized_setup, normalized_setup)
-        if normalized_method not in {"WEINSTEIN", "MINERVINI", "MANUAL"}:
-            raise ValueError("关联方法不正确")
-        if normalized_setup not in TRADE_SETUP_LABELS:
-            raise ValueError("交易方案不受支持")
-        if quantity <= 0 or price <= 0 or fee < 0:
-            raise ValueError("数量、价格和费用必须有效")
-        normalized_stop = float(stop_price) if stop_price is not None else None
-        if normalized_stop is not None and (normalized_stop <= 0 or normalized_stop >= price):
-            raise ValueError("止损价必须大于 0 且低于买入成交价")
-        if normalized_side == "SELL":
-            normalized_stop = None
-
-        execution_id = uuid4().hex
-        with self.connect() as connection:
-            if normalized_side == "SELL":
-                existing_rows = [
-                    dict(row)
-                    for row in connection.execute(
-                        "SELECT * FROM trade_execution WHERE symbol = ? ORDER BY traded_on, traded_at, created_at, execution_id",
-                        (normalized_symbol,),
-                    ).fetchall()
-                ]
-                try:
-                    _match_trade_executions(
-                        [
-                            *existing_rows,
-                            {
-                                "execution_id": execution_id,
-                                "traded_on": traded_on,
-                                "traded_at": normalized_time,
-                                "symbol": normalized_symbol,
-                                "side": normalized_side,
-                                "quantity": quantity,
-                                "price": price,
-                                "fee": fee,
-                                "method": normalized_method,
-                                "setup_method": normalized_setup,
-                                "stop_price": normalized_stop,
-                            },
-                        ]
-                    )
-                except ValueError as exc:
-                    if not permit_unmatched_sell:
-                        available = _open_quantity(existing_rows)
-                        raise ValueError(f"卖出数量超过可复盘持仓：可用 {available} 股") from exc
-            snapshot_rows = connection.execute(
-                """
-                SELECT as_of_date, method, result, policy_version, origin
-                FROM stock_method_daily_fact
-                WHERE symbol = ? AND as_of_date <= ?
-                  AND as_of_date = (
-                    SELECT MAX(as_of_date) FROM stock_method_daily_fact
-                    WHERE symbol = ? AND as_of_date <= ?
-                  )
-                ORDER BY method
-                """,
-                (normalized_symbol, traded_on, normalized_symbol, traded_on),
-            ).fetchall()
-            snapshot = {
-                "as_of_date": str(snapshot_rows[0]["as_of_date"]) if snapshot_rows else "",
-                "facts": [dict(row) for row in snapshot_rows],
-                "quality": "KNOWN_AS_OF" if snapshot_rows else "NO_WATCHLIST_FACT_AS_OF",
-            }
-            connection.execute(
-                """
-                INSERT INTO trade_execution (
-                    execution_id, traded_on, traded_at, symbol, side, quantity, price, fee, method, setup_method, stop_price,
-                    rationale, invalidation, exit_reason, market_context, observation_snapshot_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    execution_id,
-                    traded_on,
-                    normalized_time,
-                    normalized_symbol,
-                    normalized_side,
-                    quantity,
-                    price,
-                    fee,
-                    normalized_method,
-                    normalized_setup,
-                    normalized_stop,
-                    rationale.strip(),
-                    invalidation.strip(),
-                    exit_reason.strip(),
-                    market_context.strip(),
-                    _json(snapshot),
-                ),
-            )
-        return execution_id
-
-    def trade_review(self) -> dict[str, Any]:
-        """Return FIFO-matched completed trades and descriptive, non-predictive statistics."""
-        self.initialize()
-        with self.connect() as connection:
-            rows = [
-                dict(row)
-                for row in connection.execute(
-                    "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
-                ).fetchall()
-            ]
-        for row in rows:
-            row["snapshot"] = json.loads(str(row.pop("observation_snapshot_json") or "{}"))
-        closed, open_lots, unmatched_sells = _match_trade_executions(
-            rows, permit_unmatched_sells=True
-        )
-        open_positions = _summarize_open_lots(open_lots)
-        names = self._trade_stock_names({str(row["symbol"]) for row in rows})
-        for collection in (rows, closed, open_positions, unmatched_sells):
-            for item in collection:
-                symbol = str(item["symbol"])
-                item["stock_name"] = names.get(symbol, "名称待补")
-                setup_method = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
-                setup_method = TRADE_SETUP_ALIASES.get(setup_method, setup_method)
-                item["setup_method"] = setup_method
-                item["setup_label"] = TRADE_SETUP_LABELS.get(setup_method, setup_method)
-        return {
-            "executions": list(reversed(rows)),
-            "closed": list(reversed(closed)),
-            "open_positions": open_positions,
-            "unmatched_sells": list(reversed(unmatched_sells)),
-            "summary": _trade_statistics(closed),
-            "by_setup": {
-                setup: _trade_statistics([item for item in closed if item["setup_method"] == setup])
-                for setup in TRADE_SETUP_LABELS
-            },
-            "sample_state": (
-                "样本不足：少于 20 笔已完成交易，仅展示描述统计。"
-                if len(closed) < 20
-                else "样本达到基础复盘门槛；仍不构成策略有效性或买卖建议。"
-            ),
-        }
-
-    def trade_execution(self, execution_id: str) -> dict[str, Any] | None:
-        self.initialize()
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM trade_execution WHERE execution_id = ?", (execution_id,)
-            ).fetchone()
-        if row is None:
-            return None
-        item = dict(row)
-        item["snapshot"] = json.loads(str(item.pop("observation_snapshot_json") or "{}"))
-        setup = str(item.get("setup_method") or DEFAULT_TRADE_SETUP)
-        setup = TRADE_SETUP_ALIASES.get(setup, setup)
-        item["setup_method"] = setup
-        item["setup_label"] = TRADE_SETUP_LABELS.get(setup, setup)
-        return item
-
-    def update_trade(
-        self,
-        execution_id: str,
-        *,
-        traded_on: str,
-        traded_at: str,
-        side: str,
-        quantity: int,
-        price: float,
-        fee: float,
-        method: str,
-        setup_method: str = DEFAULT_TRADE_SETUP,
-        stop_price: float | None = None,
-        rationale: str = "",
-        invalidation: str = "",
-        exit_reason: str = "",
-        market_context: str = "",
-    ) -> None:
-        self.initialize()
-        try:
-            date.fromisoformat(traded_on)
-            if traded_at:
-                datetime.strptime(traded_at, "%H:%M:%S")
-        except ValueError as exc:
-            raise ValueError("成交日期或时间格式不正确") from exc
-        normalized_side = side.upper().strip()
-        normalized_method = method.upper().strip()
-        normalized_setup = setup_method.upper().strip()
-        normalized_setup = TRADE_SETUP_ALIASES.get(normalized_setup, normalized_setup)
-        if normalized_side not in {"BUY", "SELL"} or normalized_method not in TRADE_METHOD_LABELS:
-            raise ValueError("方向或关联方法不正确")
-        if normalized_setup not in TRADE_SETUP_LABELS:
-            raise ValueError("交易方案不受支持")
-        if quantity <= 0 or price <= 0 or fee < 0:
-            raise ValueError("数量、价格和费用必须有效")
-        normalized_stop = float(stop_price) if stop_price is not None else None
-        if normalized_stop is not None and (normalized_stop <= 0 or normalized_stop >= price):
-            raise ValueError("止损价必须大于 0 且低于买入成交价")
-        if normalized_side == "SELL":
-            normalized_stop = None
-        with self.connect() as connection:
-            current = connection.execute(
-                "SELECT * FROM trade_execution WHERE execution_id = ?", (execution_id,)
-            ).fetchone()
-            if current is None:
-                raise ValueError("成交记录不存在")
-            symbol = str(current["symbol"])
-            rows = [
-                dict(row)
-                for row in connection.execute(
-                    "SELECT * FROM trade_execution ORDER BY traded_on, traded_at, created_at, execution_id"
-                ).fetchall()
-            ]
-            for row in rows:
-                if str(row["execution_id"]) == execution_id:
-                    row.update(
-                        {
-                            "traded_on": traded_on,
-                            "traded_at": traded_at,
-                            "side": normalized_side,
-                            "quantity": quantity,
-                            "price": price,
-                            "fee": fee,
-                            "method": normalized_method,
-                            "setup_method": normalized_setup,
-                            "stop_price": normalized_stop,
-                            "rationale": rationale.strip(),
-                            "invalidation": invalidation.strip(),
-                            "exit_reason": exit_reason.strip(),
-                            "market_context": market_context.strip(),
-                        }
-                    )
-                    break
-            _match_trade_executions(rows)
-            snapshot_rows = connection.execute(
-                """
-                SELECT as_of_date, method, result, policy_version, origin
-                FROM stock_method_daily_fact WHERE symbol = ? AND as_of_date <= ?
-                  AND as_of_date = (SELECT MAX(as_of_date) FROM stock_method_daily_fact
-                                    WHERE symbol = ? AND as_of_date <= ?)
-                ORDER BY method
-                """,
-                (symbol, traded_on, symbol, traded_on),
-            ).fetchall()
-            snapshot = {
-                "as_of_date": str(snapshot_rows[0]["as_of_date"]) if snapshot_rows else "",
-                "facts": [dict(row) for row in snapshot_rows],
-                "quality": "KNOWN_AS_OF" if snapshot_rows else "NO_WATCHLIST_FACT_AS_OF",
-            }
-            connection.execute(
-                """
-                UPDATE trade_execution SET traded_on=?, traded_at=?, side=?, quantity=?, price=?, fee=?,
-                    method=?, setup_method=?, stop_price=?, rationale=?, invalidation=?, exit_reason=?, market_context=?,
-                    observation_snapshot_json=? WHERE execution_id=?
-                """,
-                (
-                    traded_on,
-                    traded_at.strip(),
-                    normalized_side,
-                    quantity,
-                    price,
-                    fee,
-                    normalized_method,
-                    normalized_setup,
-                    normalized_stop,
-                    rationale.strip(),
-                    invalidation.strip(),
-                    exit_reason.strip(),
-                    market_context.strip(),
-                    _json(snapshot),
-                    execution_id,
-                ),
-            )
-
-    def _trade_stock_names(self, symbols: set[str]) -> dict[str, str]:
         if not symbols:
             return {}
         placeholders = ",".join("?" for _ in symbols)
@@ -4197,10 +3836,6 @@ class WatchlistRepository:
             else:
                 rows = []
         return {str(row["symbol"]): str(row["name"] or "") for row in rows}
-
-    def stock_names(self, symbols: set[str]) -> dict[str, str]:
-        """Resolve public stock names without exposing private trade storage."""
-        return self._trade_stock_names(symbols)
 
     def observable_symbols(self, symbols: set[str]) -> set[str]:
         """Return requested stocks that have at least one formal method fact."""
@@ -4238,133 +3873,6 @@ class WatchlistRepository:
             "facts": [dict(row) for row in rows],
             "quality": "KNOWN_AS_OF" if rows else "NO_WATCHLIST_FACT_AS_OF",
         }
-
-    def chart_drawings(self, symbol: str, price_scale_id: str) -> list[dict[str, Any]]:
-        self.initialize()
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT drawing_id, tool, anchors_json, created_at, updated_at
-                FROM chart_drawing
-                WHERE symbol = ? AND price_scale_id = ? AND tool IN ('trendline', 'horizontal')
-                ORDER BY created_at, drawing_id
-                """,
-                (symbol.upper(), price_scale_id),
-            ).fetchall()
-        return [{**dict(row), "anchors": json.loads(str(row["anchors_json"]))} for row in rows]
-
-    def chart_trade_overlay(self, symbol: str, end_date: str) -> dict[str, list[dict[str, Any]]]:
-        """Return recorded trades and active stop levels for a chart overlay only."""
-        self.initialize()
-        with self.connect() as connection:
-            rows = [
-                dict(row)
-                for row in connection.execute(
-                    "SELECT * FROM trade_execution WHERE symbol = ? AND traded_on <= ? "
-                    "ORDER BY traded_on, traded_at, created_at, execution_id",
-                    (symbol.upper(), end_date),
-                ).fetchall()
-            ]
-        _, open_lots, _ = _match_trade_executions(rows, permit_unmatched_sells=True)
-        return {
-            "executions": [
-                {
-                    key: row[key]
-                    for key in (
-                        "execution_id",
-                        "traded_on",
-                        "side",
-                        "quantity",
-                        "price",
-                        "stop_price",
-                    )
-                }
-                for row in rows
-            ],
-            "open_stops": [
-                {
-                    "buy_execution_id": lot["buy_execution_id"],
-                    "buy_date": lot["buy_date"],
-                    "stop_price": lot["stop_price"],
-                }
-                for lot in open_lots
-                if lot.get("stop_price") is not None
-            ],
-        }
-
-    def save_chart_drawing(
-        self,
-        drawing_id: str,
-        symbol: str,
-        price_scale_id: str,
-        tool: str,
-        anchors: Sequence[Mapping[str, Any]],
-    ) -> dict[str, Any]:
-        if tool not in {"trendline", "horizontal"}:
-            raise ValueError("unsupported drawing tool")
-        if not price_scale_id:
-            raise ValueError("missing price scale identifier")
-        expected_count = 2 if tool == "trendline" else 1
-        if len(anchors) != expected_count:
-            raise ValueError(f"{tool} requires {expected_count} anchors")
-        normalized: list[dict[str, float | str]] = []
-        for anchor in anchors:
-            date = str(anchor.get("date") or "")
-            logical = anchor.get("logical")
-            logical_from_end = anchor.get("logical_from_end")
-            logical_from_start = anchor.get("logical_from_start")
-            price = anchor.get("price")
-            if not isinstance(price, (int, float)) or float(price) <= 0:
-                raise ValueError("invalid drawing anchor")
-            if len(date) == 10:
-                normalized.append({"date": date, "price": round(float(price), 6)})
-            elif isinstance(logical_from_end, (int, float)) and float(logical_from_end) > 0:
-                normalized.append(
-                    {
-                        "logical_from_end": round(float(logical_from_end), 4),
-                        "price": round(float(price), 6),
-                    }
-                )
-            elif isinstance(logical_from_start, (int, float)) and float(logical_from_start) < 0:
-                normalized.append(
-                    {
-                        "logical_from_start": round(float(logical_from_start), 4),
-                        "price": round(float(price), 6),
-                    }
-                )
-            elif isinstance(logical, (int, float)):
-                normalized.append(
-                    {"logical": round(float(logical), 4), "price": round(float(price), 6)}
-                )
-            else:
-                raise ValueError("invalid drawing anchor")
-        self.initialize()
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO chart_drawing(drawing_id, symbol, price_scale_id, tool, anchors_json)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(drawing_id) DO UPDATE SET
-                    anchors_json=excluded.anchors_json, updated_at=CURRENT_TIMESTAMP
-                """,
-                (
-                    drawing_id,
-                    symbol.upper(),
-                    price_scale_id,
-                    tool,
-                    json.dumps(normalized, ensure_ascii=False, separators=(",", ":")),
-                ),
-            )
-        return {"drawing_id": drawing_id, "tool": tool, "anchors": normalized}
-
-    def delete_chart_drawing(self, drawing_id: str, symbol: str, price_scale_id: str) -> bool:
-        self.initialize()
-        with self.connect() as connection:
-            cursor = connection.execute(
-                "DELETE FROM chart_drawing WHERE drawing_id = ? AND symbol = ? AND price_scale_id = ?",
-                (drawing_id, symbol.upper(), price_scale_id),
-            )
-        return cursor.rowcount == 1
 
     def run_receipts(self, limit: int = 20) -> list[dict[str, Any]]:
         self.initialize()
@@ -4407,304 +3915,6 @@ class WatchlistRepository:
             "has_facts": bool(fact_state[0]) if fact_state else False,
             "latest_fact_date": str(fact_state[1] or "") if fact_state else "",
         }
-
-
-def _open_quantity(rows: Sequence[Mapping[str, Any]]) -> int:
-    _, lots, _ = _match_trade_executions(rows)
-    return sum(int(lot["remaining_quantity"]) for lot in lots)
-
-
-def _match_trade_executions(
-    rows: Sequence[Mapping[str, Any]],
-    *,
-    permit_unmatched_sells: bool = False,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Match long-only executions FIFO; costs include allocated commissions."""
-    lots: list[dict[str, Any]] = []
-    closed: list[dict[str, Any]] = []
-    unmatched_sells: list[dict[str, Any]] = []
-    for row in rows:
-        if str(row["side"]) == "BUY":
-            quantity = int(row["quantity"])
-            total_cost_cents = _money_cents(
-                Decimal(str(row["price"])) * quantity + Decimal(str(row["fee"]))
-            )
-            lots.append(
-                {
-                    "symbol": str(row["symbol"]),
-                    "buy_execution_id": str(row["execution_id"]),
-                    "buy_date": str(row["traded_on"]),
-                    "method": str(row["method"]),
-                    "setup_method": TRADE_SETUP_ALIASES.get(
-                        str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
-                        str(row.get("setup_method") or DEFAULT_TRADE_SETUP),
-                    ),
-                    "entry_price": float(row["price"]),
-                    "stop_price": row.get("stop_price"),
-                    "initial_stop_price": row.get("initial_stop_price", row.get("stop_price")),
-                    "remaining_quantity": quantity,
-                    "unit_cost": total_cost_cents / 100 / quantity,
-                    "remaining_cost_cents": total_cost_cents,
-                    "rationale": str(row.get("rationale") or ""),
-                    "invalidation": str(row.get("invalidation") or ""),
-                    "market_context": str(row.get("market_context") or ""),
-                    "plan_version_id": row.get("plan_version_id"),
-                    "evaluation_cycle_id": row.get("evaluation_cycle_id"),
-                    "setup_code": row.get("setup_code"),
-                    "setup_kind": row.get("setup_kind", "LEGACY"),
-                    "plan_setup_id": row.get("plan_setup_id"),
-                    "setup_code_snapshot": row.get("setup_code_snapshot", ""),
-                    "setup_name_snapshot": row.get("setup_name_snapshot", ""),
-                    "other_setup_note": row.get("other_setup_note", ""),
-                    "snapshot": dict(row.get("snapshot") or {}),
-                }
-            )
-            continue
-
-        remaining_to_sell = int(row["quantity"])
-        remaining_gross_proceeds_cents = _money_cents(
-            Decimal(str(row["price"])) * remaining_to_sell
-        )
-        remaining_sell_fee_cents = _money_cents(row["fee"])
-        matching_lots = [lot for lot in lots if lot["symbol"] == str(row["symbol"])]
-        for lot in matching_lots:
-            if remaining_to_sell <= 0:
-                break
-            matched_quantity = min(remaining_to_sell, int(lot["remaining_quantity"]))
-            gross_proceeds_cents = _allocate_cents(
-                remaining_gross_proceeds_cents, matched_quantity, remaining_to_sell
-            )
-            sell_fee_cents = _allocate_cents(
-                remaining_sell_fee_cents, matched_quantity, remaining_to_sell
-            )
-            proceeds_cents = gross_proceeds_cents - sell_fee_cents
-            cost_cents = _allocate_cents(
-                int(lot["remaining_cost_cents"]),
-                matched_quantity,
-                int(lot["remaining_quantity"]),
-            )
-            pnl_cents = proceeds_cents - cost_cents
-            gross_pnl = (float(row["price"]) - float(lot["entry_price"])) * matched_quantity
-            closed.append(
-                {
-                    "symbol": str(row["symbol"]),
-                    "method": str(lot["method"]),
-                    "setup_method": str(lot["setup_method"]),
-                    "plan_version_id": lot.get("plan_version_id"),
-                    "evaluation_cycle_id": lot.get("evaluation_cycle_id"),
-                    "setup_code": lot.get("setup_code"),
-                    "setup_kind": lot.get("setup_kind", "LEGACY"),
-                    "plan_setup_id": lot.get("plan_setup_id"),
-                    "setup_code_snapshot": lot.get("setup_code_snapshot", ""),
-                    "setup_name_snapshot": lot.get("setup_name_snapshot", ""),
-                    "other_setup_note": lot.get("other_setup_note", ""),
-                    "snapshot": dict(lot.get("snapshot") or {}),
-                    "buy_execution_id": str(lot["buy_execution_id"]),
-                    "sell_execution_id": str(row["execution_id"]),
-                    "buy_date": str(lot["buy_date"]),
-                    "sell_date": str(row["traded_on"]),
-                    "quantity": matched_quantity,
-                    "cost": cost_cents / 100,
-                    "cost_cents": cost_cents,
-                    "proceeds": proceeds_cents / 100,
-                    "proceeds_cents": proceeds_cents,
-                    "pnl": pnl_cents / 100,
-                    "pnl_cents": pnl_cents,
-                    "gross_pnl": round(gross_pnl, 2),
-                    "entry_price": float(lot["entry_price"]),
-                    "exit_price": float(row["price"]),
-                    "stop_price": lot.get("stop_price"),
-                    "initial_stop_price": lot.get("initial_stop_price"),
-                    "return_pct": round(pnl_cents / cost_cents * 100, 2) if cost_cents else None,
-                    "holding_days": (
-                        date.fromisoformat(str(row["traded_on"]))
-                        - date.fromisoformat(str(lot["buy_date"]))
-                    ).days,
-                    "rationale": str(lot["rationale"]),
-                    "invalidation": str(lot["invalidation"]),
-                    "market_context": str(lot["market_context"]),
-                    "exit_reason": str(row.get("exit_reason") or ""),
-                }
-            )
-            lot["remaining_quantity"] = int(lot["remaining_quantity"]) - matched_quantity
-            lot["remaining_cost_cents"] = int(lot["remaining_cost_cents"]) - cost_cents
-            remaining_to_sell -= matched_quantity
-            remaining_gross_proceeds_cents -= gross_proceeds_cents
-            remaining_sell_fee_cents -= sell_fee_cents
-        if remaining_to_sell:
-            if not permit_unmatched_sells:
-                raise ValueError("卖出记录无法由已有买入记录配对")
-            unmatched_sells.append(
-                {
-                    "symbol": str(row["symbol"]),
-                    "sell_date": str(row["traded_on"]),
-                    "quantity": remaining_to_sell,
-                    "price": float(row["price"]),
-                    "fee": remaining_sell_fee_cents / 100,
-                    "exit_reason": str(row.get("exit_reason") or ""),
-                }
-            )
-    return closed, [lot for lot in lots if int(lot["remaining_quantity"]) > 0], unmatched_sells
-
-
-def _aggregate_completed_trades(
-    closed: Sequence[Mapping[str, Any]],
-    open_lots: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Collapse FIFO exit fragments into completed BUY trade attempts."""
-    open_buy_ids = {str(lot["buy_execution_id"]) for lot in open_lots}
-    grouped: dict[str, list[Mapping[str, Any]]] = {}
-    for fragment in closed:
-        grouped.setdefault(str(fragment["buy_execution_id"]), []).append(fragment)
-    completed: list[dict[str, Any]] = []
-    for buy_id, fragments in grouped.items():
-        if buy_id in open_buy_ids:
-            continue
-        ordered = sorted(
-            fragments, key=lambda item: (str(item["sell_date"]), str(item["sell_execution_id"]))
-        )
-        first = dict(ordered[0])
-        quantity = sum(int(item["quantity"]) for item in ordered)
-        pnl_cents = sum(
-            int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in ordered
-        )
-        gross_pnl = sum(float(item.get("gross_pnl") or 0) for item in ordered)
-        cost_cents = sum(
-            int(item.get("cost_cents", round(float(item["cost"]) * 100))) for item in ordered
-        )
-        proceeds_cents = sum(
-            int(item.get("proceeds_cents", round(float(item["proceeds"]) * 100)))
-            for item in ordered
-        )
-        last = ordered[-1]
-        stop_price = first.get("initial_stop_price")
-        actual_risk = (
-            (float(first["entry_price"]) - float(stop_price)) * quantity
-            if stop_price is not None and float(first["entry_price"]) > float(stop_price)
-            else None
-        )
-        first.update(
-            {
-                "sell_execution_id": ",".join(str(item["sell_execution_id"]) for item in ordered),
-                "sell_date": str(last["sell_date"]),
-                "quantity": quantity,
-                "cost": cost_cents / 100,
-                "cost_cents": cost_cents,
-                "proceeds": proceeds_cents / 100,
-                "proceeds_cents": proceeds_cents,
-                "pnl": pnl_cents / 100,
-                "pnl_cents": pnl_cents,
-                "gross_pnl": round(gross_pnl, 2),
-                "exit_price": round(
-                    sum(float(item["exit_price"]) * int(item["quantity"]) for item in ordered)
-                    / quantity,
-                    6,
-                ),
-                "return_pct": round(pnl_cents / cost_cents * 100, 2) if cost_cents else None,
-                "holding_days": int(last["holding_days"]),
-                "exit_reason": "；".join(
-                    dict.fromkeys(str(item.get("exit_reason") or "") for item in ordered)
-                ).strip("；"),
-                "actual_risk": round(actual_risk, 2) if actual_risk is not None else None,
-                "r_multiple": round(gross_pnl / actual_risk, 4) if actual_risk else None,
-            }
-        )
-        completed.append(first)
-    return completed
-
-
-def _summarize_open_lots(lots: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-    for lot in lots:
-        key = (
-            str(lot["symbol"]),
-            str(lot.get("setup_method") or DEFAULT_TRADE_SETUP),
-            str(lot.get("plan_version_id") or ""),
-            str(lot.get("setup_code") or ""),
-            str(lot.get("plan_setup_id") or ""),
-        )
-        item = grouped.setdefault(
-            key,
-            {
-                "symbol": key[0],
-                "setup_method": key[1],
-                "plan_version_id": lot.get("plan_version_id"),
-                "evaluation_cycle_id": lot.get("evaluation_cycle_id"),
-                "setup_code": lot.get("setup_code"),
-                "setup_kind": lot.get("setup_kind", "LEGACY"),
-                "plan_setup_id": lot.get("plan_setup_id"),
-                "setup_code_snapshot": lot.get("setup_code_snapshot", ""),
-                "setup_name_snapshot": lot.get("setup_name_snapshot", ""),
-                "other_setup_note": lot.get("other_setup_note", ""),
-                "quantity": 0,
-                "cost": 0.0,
-                "cost_cents": 0,
-            },
-        )
-        quantity = int(lot["remaining_quantity"])
-        item["quantity"] += quantity
-        item["cost_cents"] += int(lot["remaining_cost_cents"])
-    return [
-        {
-            **item,
-            "cost": int(item["cost_cents"]) / 100,
-        }
-        for item in sorted(
-            grouped.values(),
-            key=lambda item: (
-                str(item["symbol"]),
-                str(item["setup_method"]),
-                str(item.get("plan_version_id") or ""),
-            ),
-        )
-    ]
-
-
-def _trade_statistics(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    count = len(trades)
-    pnl_cents = [int(item.get("pnl_cents", round(float(item["pnl"]) * 100))) for item in trades]
-    pnl_values = [value / 100 for value in pnl_cents]
-    gains = [value for value in pnl_values if value > 0]
-    losses = [value for value in pnl_values if value < 0]
-    total_cost_cents = sum(
-        int(item.get("cost_cents", round(float(item["cost"]) * 100))) for item in trades
-    )
-    r_values = [float(item["r_multiple"]) for item in trades if item.get("r_multiple") is not None]
-    return {
-        "count": count,
-        "net_pnl": sum(pnl_cents) / 100,
-        "return_pct": round(sum(pnl_cents) / total_cost_cents * 100, 2)
-        if total_cost_cents
-        else None,
-        "win_rate_pct": round(len(gains) / count * 100, 1) if count else None,
-        "avg_gain": round(sum(gains) / len(gains), 2) if gains else None,
-        "avg_loss": round(sum(losses) / len(losses), 2) if losses else None,
-        "profit_loss_ratio": round((sum(gains) / len(gains)) / abs(sum(losses) / len(losses)), 2)
-        if gains and losses
-        else None,
-        "expectancy": round(sum(pnl_values) / count, 2) if count else None,
-        "gross_avg_r": round(sum(r_values) / len(r_values), 4) if r_values else None,
-        "r_count": len(r_values),
-        "avg_holding_days": round(sum(int(item["holding_days"]) for item in trades) / count, 1)
-        if count
-        else None,
-    }
-
-
-def _money_cents(value: Any) -> int:
-    """Convert one monetary amount to integer fen using financial half-up rounding."""
-    return int((Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
-def _allocate_cents(total_cents: int, quantity: int, remaining_quantity: int) -> int:
-    """Allocate integer fen proportionally and leave any remainder for the final fragment."""
-    if quantity == remaining_quantity:
-        return total_cents
-    return int(
-        (Decimal(total_cents) * quantity / remaining_quantity).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        )
-    )
 
 
 def _chart_event_label(method: str, state: str) -> str:

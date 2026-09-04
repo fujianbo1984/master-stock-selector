@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 
-import pytest
-
 from master_stock_selector.watchlist.methods import (
     MINERVINI_POLICY_VERSION,
     WEINSTEIN_POLICY_VERSION,
@@ -374,17 +372,31 @@ def test_repository_returns_retained_method_events_for_chart(tmp_path):
     assert result["events"][4]["label"] == "M再"
 
 
-def test_repository_keeps_system_facts_immutable_but_allows_manual_review(tmp_path):
+def test_new_watchlist_database_excludes_private_user_tables(tmp_path):
     path = tmp_path / "watchlist.sqlite3"
     repository = WatchlistRepository(path)
     repository.initialize()
-    repository.save_review("000001.SZ", "FOCUS", "等待进一步人工分析")
-    repository.save_review("000001.SZ", "WATCH", "继续观察")
+    with sqlite3.connect(path) as connection:
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
 
-    detail = repository.stock_detail("000001.SZ")
+    assert {"manual_watch_review", "trade_execution", "chart_drawing"}.isdisjoint(tables)
 
-    assert detail["manual"]["manual_state"] == "WATCH"
-    assert detail["manual"]["note"] == "继续观察"
+
+def test_repository_initialization_preserves_existing_legacy_private_tables(tmp_path):
+    path = tmp_path / "legacy-watchlist.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE manual_watch_review(symbol TEXT PRIMARY KEY, note TEXT)")
+        connection.execute("INSERT INTO manual_watch_review VALUES ('000001.SZ', 'keep-me')")
+
+    WatchlistRepository(path).initialize()
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT note FROM manual_watch_review").fetchone()[0] == "keep-me"
 
 
 def test_stock_and_industry_lookup_scope_to_requested_rows(tmp_path):
@@ -431,6 +443,7 @@ def test_stock_and_industry_lookup_scope_to_requested_rows(tmp_path):
     detail = repository.stock_detail("000001.SZ")
 
     assert detail["identity"]["name"] == "目标股票"
+    assert "manual" not in detail
     assert detail["industry"]["industry_code"] == "850001.SI"
     assert repository.stock_industry("000003.SZ", "2026-07-31")["industry_code"] == (
         "850002.SI"
@@ -438,80 +451,6 @@ def test_stock_and_industry_lookup_scope_to_requested_rows(tmp_path):
     assert repository.industry_member_symbols("2026-07-31", "850001.SI") == [
         "000001.SZ"
     ]
-
-
-def test_trade_review_matches_fifo_costs_and_rejects_oversell(tmp_path):
-    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
-    repository.record_trade(
-        traded_on="2026-07-01", symbol="000001.SZ", side="BUY", quantity=100,
-        price=10.0, fee=5.0, method="WEINSTEIN", stop_price=8.0,
-        rationale="突破", invalidation="跌破止损",
-    )
-    repository.record_trade(
-        traded_on="2026-07-03", symbol="000001.SZ", side="SELL", quantity=40,
-        price=12.0, fee=4.0, method="WEINSTEIN", exit_reason="计划止盈",
-    )
-
-    review = repository.trade_review()
-
-    assert review["summary"]["count"] == 1
-    assert review["closed"][0]["pnl"] == 74.0
-    assert review["closed"][0]["holding_days"] == 2
-    assert review["open_positions"][0]["symbol"] == "000001.SZ"
-    assert review["open_positions"][0]["quantity"] == 60
-    assert review["open_positions"][0]["cost"] == 603.0
-    assert review["open_positions"][0]["setup_label"] == "简单回调"
-    assert review["closed"][0]["stop_price"] == 8.0
-    assert review["closed"][0]["entry_price"] == 10.0
-    assert review["closed"][0]["exit_price"] == 12.0
-    with pytest.raises(ValueError, match="超过可复盘持仓"):
-        repository.record_trade(
-            traded_on="2026-07-04", symbol="000001.SZ", side="SELL", quantity=61,
-            price=11.0, fee=0.0, method="WEINSTEIN",
-        )
-    with pytest.raises(ValueError, match="低于买入成交价"):
-        repository.record_trade(
-            traded_on="2026-07-04", symbol="000002.SZ", side="BUY", quantity=1,
-            price=10.0, fee=0.0, method="WEINSTEIN", stop_price=10.0,
-        )
-
-
-def test_trade_review_retains_authorized_unmatched_historical_sell(tmp_path):
-    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
-
-    repository.record_trade(
-        traded_on="2026-08-05", symbol="603259.SH", side="SELL", quantity=100,
-        price=147.26, fee=0.0, method="MANUAL", permit_unmatched_sell=True,
-    )
-
-    review = repository.trade_review()
-
-    assert review["summary"]["count"] == 0
-    unmatched = review["unmatched_sells"]
-    assert len(unmatched) == 1
-    assert unmatched[0]["symbol"] == "603259.SH"
-    assert unmatched[0]["quantity"] == 100
-    assert unmatched[0]["setup_label"] == "简单回调"
-
-
-def test_trade_update_preserves_fifo_validation_and_refreshes_fields(tmp_path):
-    repository = WatchlistRepository(tmp_path / "watchlist.sqlite3")
-    execution_id = repository.record_trade(
-        traded_on="2026-07-01", traded_at="09:30:00", symbol="000001.SZ", side="BUY",
-        quantity=100, price=10.0, fee=0.0, method="MANUAL",
-    )
-    repository.record_trade(
-        traded_on="2026-07-02", symbol="000001.SZ", side="SELL", quantity=100,
-        price=12.0, fee=0.0, method="MANUAL",
-    )
-
-    repository.update_trade(
-        execution_id, traded_on="2026-07-01", traded_at="09:31:00", side="BUY",
-        quantity=100, price=11.0, fee=0.0, method="MANUAL", rationale="修正后的依据",
-    )
-
-    assert repository.trade_execution(execution_id)["traded_at"] == "09:31:00"
-    assert repository.trade_review()["closed"][0]["pnl"] == 100.0
 
 
 def test_market_reader_builds_disclosed_equal_weight_industry_proxy(tmp_path):

@@ -640,6 +640,59 @@ def build_agent_api_router(
         )
         return {"request_id": rid, **result}
 
+    @router.post("/plans/grill/sessions/{session_id}/setups")
+    async def grill_save_setup(request: Request, session_id: str) -> dict[str, Any]:
+        principal = require_token(request, "plans:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        expected_revision = payload.get("expected_revision")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+            raise HTTPException(status_code=422, detail="expected_revision 必须是整数")
+        try:
+            result = users.trading_plans.save_setup(
+                principal.user_id,
+                session_id,
+                payload,
+                expected_revision=expected_revision,
+            )
+        except PlanConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal, action="plans.grill.setup.save", request_id=rid, outcome="UPDATED"
+        )
+        return {"request_id": rid, **result}
+
+    @router.post("/plans/grill/sessions/{session_id}/setups/{setup_id}/archive")
+    async def grill_archive_setup(
+        request: Request, session_id: str, setup_id: str
+    ) -> dict[str, Any]:
+        principal = require_token(request, "plans:write")
+        rid = request_id(request)
+        payload = await json_object(request)
+        expected_revision = payload.get("expected_revision")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+            raise HTTPException(status_code=422, detail="expected_revision 必须是整数")
+        try:
+            result = users.trading_plans.archive_setup(
+                principal.user_id,
+                session_id,
+                setup_id,
+                expected_revision=expected_revision,
+            )
+        except PlanConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        users.audit_api_action(
+            principal,
+            action="plans.grill.setup.archive",
+            request_id=rid,
+            outcome="UPDATED",
+        )
+        return {"request_id": rid, **result}
+
     @router.post("/plans/grill/sessions/{session_id}/validate")
     def grill_validate(request: Request, session_id: str) -> dict[str, Any]:
         principal = require_token(request, "plans:read")

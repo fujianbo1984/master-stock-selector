@@ -116,7 +116,7 @@ def test_access_log_schema_migrates_from_v3_and_preserves_existing_rows(tmp_path
     with repository.connect(read_only=True) as connection:
         assert connection.execute("SELECT COUNT(*) FROM user_account").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM user_access_log").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
     assert user_id
 
 
@@ -770,7 +770,43 @@ def test_v11_observation_rows_gain_empty_tags_without_data_loss(tmp_path):
     assert review["manual_state"] == "WATCH"
     assert review["note"] == "旧版备注"
     assert review["tags"] == []
-    assert repository.schema_status()["schema_version"] == 12
+    assert repository.schema_status()["schema_version"] == 13
+
+
+def test_v12_c1_evidence_migrates_to_generic_setup_observation(tmp_path):
+    path = tmp_path / "users.sqlite3"
+    repository = UserRepository(path)
+    repository.initialize()
+    user_id = repository.create_user("v12-owner", "Secure-password-123")
+    repository.save_c1_record(
+        user_id,
+        "000001.SZ",
+        {
+            "as_of_date": "2026-08-01",
+            "range_started_on": "2026-04-01",
+            "lower_bound": "9",
+            "upper_bound": "12",
+            "atr14": "1",
+            "support_test_count": "2",
+            "structure_state": "READY",
+            "entry_variant": "FIRST",
+            "note": "旧 C1 证据",
+        },
+    )
+    with repository.connect() as connection:
+        connection.execute("DROP TABLE user_setup_observation")
+        connection.execute("PRAGMA user_version=12")
+
+    assert repository.schema_status()["status"] == "MIGRATION_REQUIRED"
+    backup = tmp_path / "users-v12.sqlite3"
+    migrated = migrate_user_schema(repository, apply=True, backup=backup)
+
+    assert migrated["status"] == "migrated"
+    observations = repository.setup_observations(user_id, "000001.SZ")
+    assert len(observations) == 1
+    assert observations[0]["setup_id"] == "C1"
+    assert observations[0]["status"] == "READY"
+    assert observations[0]["evidence"]["note"] == "旧 C1 证据"
 
 
 def test_legacy_private_data_migration_requires_apply_and_preserves_source(tmp_path):

@@ -127,7 +127,7 @@ def test_baseline_and_apply_scripts_keep_safety_contract() -> None:
     assert "users_before" in apply
 
 
-def test_migration_apply_script_freezes_v11_to_v12_contract(tmp_path: Path) -> None:
+def test_migration_apply_script_freezes_v12_to_v13_contract(tmp_path: Path) -> None:
     config = release_ecs.parse_args(
         ["--apply", "--migrate-users", "--confirm-commit", "a" * 40]
     )
@@ -146,15 +146,15 @@ def test_migration_apply_script_freezes_v11_to_v12_contract(tmp_path: Path) -> N
 
     script = release_ecs.apply_script(context)
 
-    assert "users-v11-before-v12-" in script
-    assert "assert USER_SCHEMA_VERSION == 12" in script
-    assert 'assert status["schema_version"] == 11' in script
-    assert 'schema-migrate --apply --backup "$backup"' in script
-    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 11' in script
-    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 10' not in script
-    assert 'assert target.execute("PRAGMA user_version").fetchone()[0] == 11' in script
-    assert 'assert target.execute("PRAGMA user_version").fetchone()[0] == 10' not in script
+    assert "users-v12-before-v13-" in script
+    assert "assert USER_SCHEMA_VERSION == 13" in script
     assert 'assert status["schema_version"] == 12' in script
+    assert 'schema-migrate --apply --backup "$backup"' in script
+    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 12' in script
+    assert 'assert source.execute("PRAGMA user_version").fetchone()[0] == 11' not in script
+    assert 'assert target.execute("PRAGMA user_version").fetchone()[0] == 12' in script
+    assert 'assert target.execute("PRAGMA user_version").fetchone()[0] == 11' not in script
+    assert 'assert status["schema_version"] == 13' in script
     assert "source.backup(target)" in script
     assert "systemctl stop masterstock-web.service" in script
     assert "systemctl start masterstock-web.service" in script

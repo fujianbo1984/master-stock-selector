@@ -188,6 +188,36 @@
 </details>
 {% endif %}
 
+{% if private_workspace and (setup_observation_options or setup_observations) %}
+<details class="section stock-disclosure setup-observation-panel" id="setup-observations"{% if setup_observations %} open{% endif %}>
+  <summary><span><strong>交易形态证据</strong><small>通用人工记录 · 不改变三种观察方法的入池结论</small></span><span class="disclosure-action">展开</span></summary>
+  <div class="stock-disclosure-body">
+    <div class="section-heading"><div><p class="eyebrow">个人交易准备</p><h2>按形态保存入场前证据</h2></div><span class="muted">成交时自动冻结快照</span></div>
+    {% if setup_observations %}<div class="setup-observation-summary-list">{% for item in setup_observations %}<article><header><strong>{{ item.setup_code_snapshot }}</strong><span>{{ item.setup_name_snapshot }}</span><em>{{ {'WATCH':'观察中','READY':'触发准备','INVALID':'已失效'}.get(item.status, item.status) }}</em></header><p>{{ item.evidence.summary or item.evidence.note or '已保存结构化证据' }}</p><small>更新于 {{ item.updated_at }}</small></article>{% endfor %}</div>{% endif %}
+    <div class="setup-observation-forms">
+      {% for setup in setup_observation_options %}{% set saved = setup_observation_by_id.get(setup.setup_id, {}) %}{% set evidence = saved.evidence or {} %}
+      <details class="setup-observation-form-card"{% if setup.code == 'C2' or saved %} open{% endif %}>
+        <summary><strong>{{ setup.code }}</strong> {{ setup.name }}<span>{{ '修改证据' if saved else '添加证据' }}</span></summary>
+        <form method="post" action="/a/stocks/{{ stock.symbol }}/setups/{{ setup.setup_id }}/observation" class="trade-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>证据日期<input name="as_of_date" type="date" value="{{ evidence.as_of_date or query_date }}" required></label>
+          <label>状态<select name="status"><option value="WATCH"{% if saved.status == 'WATCH' %} selected{% endif %}>观察中</option><option value="READY"{% if saved.status == 'READY' %} selected{% endif %}>触发准备</option><option value="INVALID"{% if saved.status == 'INVALID' %} selected{% endif %}>已失效</option></select></label>
+          <label>结构起始日<input name="structure_started_on" type="date" value="{{ evidence.structure_started_on or '' }}"></label>
+          <label>信号日<input name="signal_on" type="date" value="{{ evidence.signal_on or '' }}"></label>
+          <label>参考下沿<input name="reference_low" type="number" min="0.001" step="0.001" value="{{ evidence.reference_low or '' }}"></label>
+          <label>参考上沿<input name="reference_high" type="number" min="0.001" step="0.001" value="{{ evidence.reference_high or '' }}"></label>
+          <label>计划触发价<input name="trigger_price" type="number" min="0.001" step="0.001" value="{{ evidence.trigger_price or '' }}"></label>
+          <label>候选失效价<input name="invalidation_price" type="number" min="0.001" step="0.001" value="{{ evidence.invalidation_price or '' }}"></label>
+          <label class="review-note">证据摘要<textarea name="summary" rows="3" maxlength="1000" required placeholder="记录区间、突破第一腿、回调保持与恢复信号。">{{ evidence.summary or '' }}</textarea></label>
+          <div class="trade-form-actions"><button class="button" type="submit" name="action" value="save">保存 {{ setup.code }} 证据</button>{% if saved %}<button class="text-button" type="submit" name="action" value="clear" formnovalidate>清除证据</button>{% endif %}</div>
+        </form>
+      </details>
+      {% endfor %}
+    </div>
+  </div>
+</details>
+{% endif %}
+
 {% if stock.industry.industry_code %}
 <details class="section stock-disclosure industry-stock-context">
   <summary><span><strong>行业背景（仅人工参考）</strong><small>{{ stock.industry.industry_name }} · 需要时进入行业页计算技术确认</small></span><span class="disclosure-action">展开</span></summary>

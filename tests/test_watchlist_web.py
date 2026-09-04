@@ -771,6 +771,92 @@ def _seed_chart_method_events(path) -> None:
         )
 
 
+def _seed_chart_brooks_leg(path) -> None:
+    repository = WatchlistRepository(path)
+    repository.persist_brooks_run(
+        events=[
+            {
+                "event_id": "brooks|000001.SZ|2026-06-18|5",
+                "symbol": "000001.SZ",
+                "signal_date": "2026-06-18",
+                "start_date": "2026-06-10",
+                "duration_bars": 5,
+                "impulse_start": 11.5,
+                "signal_close": 12.3,
+                "signal_high": 12.5,
+                "impulse_height": 0.8,
+                "atr20": 0.2,
+                "move_atr": 4.0,
+                "path_efficiency": 0.9,
+                "bullish_body_count": 4,
+                "bullish_body_share": 0.8,
+                "mean_close_location": 0.8,
+                "mean_overlap": 0.1,
+                "speed_atr_per_session": 0.8,
+                "median_amount20": 100_000.0,
+                "signal_tradability": "TRADABLE",
+                "source_digest": "chart-b1-event",
+                "origin": "RECONSTRUCTED",
+                "policy_version": BROOKS_POLICY_VERSION,
+            }
+        ],
+        facts=[
+            {
+                "as_of_date": "2026-06-30",
+                "event_id": "brooks|000001.SZ|2026-06-18|5",
+                "symbol": "000001.SZ",
+                "state": "S0_IMPULSE",
+                "state_reason": "STRONG_CONTINUATION",
+                "state_rank": 3,
+                "state_changed_on": "2026-06-30",
+                "touch25_date": "",
+                "h1_date": "",
+                "h1_failure_date": "",
+                "h2_date": "",
+                "bars_after_signal": 12,
+                "bars_after_touch25": 0,
+                "current_retracement": 0.0,
+                "maximum_low_retracement": 0.0,
+                "pullback_atr": 0.0,
+                "pullback_low_anchor": 13.2,
+                "prior_high": 13.4,
+                "mm_0_8": 14.0,
+                "mm_1_0": 14.5,
+                "tight_invalidation": 13.2,
+                "structural_invalidation": 11.5,
+                "prior_high_touched": False,
+                "prior_high_closed": False,
+                "mm_0_8_completed": False,
+                "mm_1_0_completed": False,
+                "next_open_status": "PENDING",
+                "tradability_reason": "",
+                "evidence": {
+                    "effective_leg_end_date": "2026-06-24",
+                    "effective_leg_bars": 10,
+                    "effective_signal_close": 13.2,
+                    "effective_move_atr": 8.5,
+                },
+                "source_digest": "chart-b1-fact",
+                "origin": "RECONSTRUCTED",
+                "policy_version": BROOKS_POLICY_VERSION,
+            }
+        ],
+        receipt={
+            "run_id": "chart-b1-run",
+            "as_of_date": "2026-06-30",
+            "from_date": "2026-06-18",
+            "origin": "RECONSTRUCTED",
+            "policy_version": BROOKS_POLICY_VERSION,
+            "market_database": "/tmp/market.sqlite3",
+            "source_digest": "chart-b1-source",
+            "counts": {"impulse_events_seen": 1, "daily_facts": 1},
+            "status": "SUCCESS",
+            "started_at": "2026-06-30T18:00:00+08:00",
+            "finished_at": "2026-06-30T18:01:00+08:00",
+        },
+    )
+
+
 def _seed_filter_cases(path) -> None:
     with sqlite3.connect(path) as connection:
         connection.executemany(
@@ -2120,6 +2206,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     _seed_watchlist(watchlist_path)
     _seed_chart_market(market_path)
     _seed_chart_method_events(watchlist_path)
+    _seed_chart_brooks_leg(watchlist_path)
     app = create_app(
         market_database=market_path,
         watchlist_database=watchlist_path,
@@ -2164,7 +2251,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert "data-chart-source=" not in page.text
     assert "data-chart-pane=" not in page.text
-    assert "stock-chart.js?v=20260831-trade-info-toggle-v1" in page.text
+    assert "stock-chart.js?v=20260903-b1-overlay-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert "data-chart-period-change" in page.text
     assert "data-chart-ohlcv" in page.text
@@ -2201,6 +2288,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-framework-layer="minervini"' in page.text
     assert 'data-framework-layer="weinstein" checked' in page.text
     assert "data-keltner checked" in page.text
+    assert "data-b1 checked" in page.text
     assert "data-trade-info checked" in page.text
     assert "> 成交信息</label>" in page.text
     assert "A股日线校准：20 / 20 / 2.35" in page.text
@@ -2233,6 +2321,10 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'chartViewStorageKey = "masterstock-chart:view"' in controller
     assert 'chartLayersStorageKey = "masterstock-chart:layers:v3"' in controller
     assert 'const tradeInfoInput = root.querySelector("[data-trade-info]");' in controller
+    assert 'const b1Input = root.querySelector("[data-b1]");' in controller
+    assert 'text: "B1"' in controller
+    assert 'id: `${leg.id}:start`' in controller
+    assert "payload.brooks_first_legs" in controller
     assert "tradeInfoInput?.addEventListener" in controller
     stored_layer_settings = controller.split("const storeLayerSettings = () =>", 1)[1].split(
         "const restoreAppearance = () =>", 1
@@ -2300,6 +2392,19 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert payload["method_events"][0]["effective_date"] == "2026-06-05"
     assert payload["method_events"][0]["plot_date"] == "2026-06-10"
     assert payload["method_events"][-1]["failed_checks"] == ["close_above_sma50"]
+    assert payload["brooks_first_legs"] == [
+        {
+            "id": "b1:brooks|000001.SZ|2026-06-18|5",
+            "start_date": "2026-06-10",
+            "start_price": 11.5,
+            "end_date": "2026-06-24",
+            "end_price": 12.9,
+            "duration_bars": 10,
+            "move_atr": 8.5,
+            "fact_as_of_date": "2026-06-30",
+            "policy_version": BROOKS_POLICY_VERSION,
+        }
+    ]
     assert not payload["method_event_coverage"]["weinstein"]["complete_for_chart_range"]
     all_payload = client.get("/api/a/stocks/000001.SZ/chart?date=2026-06-30").json()
     assert len(all_payload["bars"]) > len(payload["bars"])
@@ -2338,6 +2443,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert weekly["method_events"][0]["as_of_date"] == "2026-06-10"
     assert weekly["method_events"][0]["plot_date"] in {row["trade_date"] for row in weekly["bars"]}
     assert weekly["method_events"][0]["plot_date"] != "2026-06-05"
+    assert weekly["brooks_first_legs"] == []
     open_source = client.get(
         "/api/a/stocks/000001.SZ/chart?date=2026-06-30&limit=30&source=open"
     ).json()

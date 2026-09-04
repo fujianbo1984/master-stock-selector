@@ -11,6 +11,7 @@
   const textSaveButton = root.querySelector("[data-drawing-text-save]");
   const textCancelButton = root.querySelector("[data-drawing-text-cancel]");
   const volumeInput = root.querySelector("[data-volume]");
+  const b1Input = root.querySelector("[data-b1]");
   const tradeInfoInput = root.querySelector("[data-trade-info]");
   const keltnerInput = root.querySelector("[data-keltner]");
   const kcSummary = root.querySelector("[data-kc-summary]");
@@ -61,6 +62,7 @@
   let requestController = null;
   let adjacentPrefetchSignature = "";
   let methodEventsById = new Map();
+  let b1Series = [];
   const canonicalDrawingAnchors = new Map();
   const chartViewStorageKey = "masterstock-chart:view";
   const chartLayersStorageKey = "masterstock-chart:layers:v3";
@@ -111,6 +113,8 @@
     const framework = frameworkForInterval();
     root.querySelectorAll("[data-framework-indicator], [data-framework-legend]").forEach(item => { item.hidden = item.dataset.frameworkIndicator !== undefined ? item.dataset.frameworkIndicator !== framework : item.dataset.frameworkLegend !== framework; });
     root.querySelectorAll("[data-framework-status]").forEach(item => { item.hidden = item.dataset.frameworkStatus !== framework; });
+    b1Input.disabled = interval !== "day";
+    b1Input.title = interval === "day" ? "" : "B1仅在日线显示";
   };
   const restoreChartView = () => {
     try {
@@ -133,10 +137,11 @@
       });
       if (typeof saved.keltner === "boolean") keltnerInput.checked = saved.keltner;
       if (typeof saved.volume === "boolean") volumeInput.checked = saved.volume;
+      if (typeof saved.b1 === "boolean") b1Input.checked = saved.b1;
     } catch (_) { /* Browser storage can be unavailable or contain stale data. */ }
   };
   const storeLayerSettings = () => {
-    const saved = { keltner: keltnerInput.checked, volume: volumeInput.checked };
+    const saved = { keltner: keltnerInput.checked, volume: volumeInput.checked, b1: b1Input.checked };
     root.querySelectorAll("[data-framework-layer]").forEach(input => { saved[input.dataset.frameworkLayer] = input.checked; });
     try { window.sessionStorage.setItem(chartLayersStorageKey, JSON.stringify(saved)); }
     catch (_) { /* Browser storage can be unavailable. */ }
@@ -183,6 +188,33 @@
   const volume = chart.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, base: 0 }, initialVolumePane.paneIndex());
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0 } });
   const markersApi = LightweightCharts.createSeriesMarkers(candles, []);
+
+  const renderB1 = () => {
+    b1Series.forEach(item => chart.removeSeries(item));
+    b1Series = [];
+    if (!payload || interval !== "day" || !b1Input.checked) return;
+    (payload.brooks_first_legs || []).forEach((leg) => {
+      const series = chart.addSeries(LightweightCharts.LineSeries, {
+        color: "#0875d1", lineWidth: 1, lastValueVisible: false,
+        priceLineVisible: false, crosshairMarkerVisible: false,
+      });
+      series.setData([
+        { time: leg.start_date, value: leg.start_price },
+        { time: leg.end_date, value: leg.end_price },
+      ]);
+      LightweightCharts.createSeriesMarkers(series, [
+        {
+          id: `${leg.id}:start`, time: leg.start_date, position: "inBar", shape: "circle",
+          color: "#0875d1", text: "", size: 0.45,
+        },
+        {
+          id: `${leg.id}:end`, time: leg.end_date, position: "aboveBar", shape: "circle",
+          color: "#0875d1", text: "B1", size: 0.65,
+        },
+      ]);
+      b1Series.push(series);
+    });
+  };
 
   const minerviniCheckLabels = {
     close_above_sma50: "收盘价高于50日均线",
@@ -572,6 +604,7 @@
     if (tradeLegend) tradeLegend.hidden = !tradeInfoInput?.checked || !(payload.trade_overlay?.executions || []).length;
     syncVolumePane();
     renderMarkers();
+    renderB1();
     renderFrameworkPanel();
     renderTimeline();
     renderMethodEventDetail(null);
@@ -842,6 +875,7 @@
     if (payload) drawPayload(payload);
   });
   keltnerInput.addEventListener("change", () => { storeLayerSettings(); if (payload) drawPayload(payload); });
+  b1Input.addEventListener("change", () => { storeLayerSettings(); if (payload) drawPayload(payload); });
   root.querySelectorAll("[data-framework-layer]").forEach(input => input.addEventListener("change", () => {
     storeLayerSettings();
     if (payload) drawPayload(payload);

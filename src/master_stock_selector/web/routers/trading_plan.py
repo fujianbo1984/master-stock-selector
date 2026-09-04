@@ -6,7 +6,7 @@ from urllib.parse import parse_qs
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from ..trading_plans import PlanConflict
+from ..trading_plans import SETUP_FIELD_LABELS, PlanConflict
 from ..users import UserRepository
 from .auth import current_user
 
@@ -54,6 +54,7 @@ def build_trading_plan_router(
                 "validation": validation,
                 "owner_share": owner_share,
                 "latest_share": latest_share,
+                "setup_field_labels": SETUP_FIELD_LABELS,
             },
         )
 
@@ -166,6 +167,50 @@ def build_trading_plan_router(
                 409 if isinstance(exc, PlanConflict) else 422, detail=str(exc)
             ) from exc
         return RedirectResponse(f"/a/plan?session={session_id}", status_code=303)
+
+    @router.post("/a/plan/grill/{session_id}/setups/save")
+    async def save_setup(request: Request, session_id: str) -> RedirectResponse:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(401, "请先登录")
+        form = await form_values(request)
+        if not users.csrf_valid(user, str(form.get("csrf_token") or "")):
+            raise HTTPException(403, "CSRF 校验失败")
+        try:
+            users.trading_plans.save_setup(
+                user.user_id,
+                session_id,
+                form,
+                expected_revision=int(str(form.get("revision") or "0")),
+            )
+        except PlanConflict as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        return RedirectResponse(f"/a/plan?session={session_id}#setup-editor", status_code=303)
+
+    @router.post("/a/plan/grill/{session_id}/setups/{setup_id}/archive")
+    async def archive_setup(
+        request: Request, session_id: str, setup_id: str
+    ) -> RedirectResponse:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(401, "请先登录")
+        form = await form_values(request)
+        if not users.csrf_valid(user, str(form.get("csrf_token") or "")):
+            raise HTTPException(403, "CSRF 校验失败")
+        try:
+            users.trading_plans.archive_setup(
+                user.user_id,
+                session_id,
+                setup_id,
+                expected_revision=int(str(form.get("revision") or "0")),
+            )
+        except PlanConflict as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        return RedirectResponse(f"/a/plan?session={session_id}#setup-editor", status_code=303)
 
     @router.post("/a/plan/grill/{session_id}/publish")
     async def publish(request: Request, session_id: str) -> RedirectResponse:

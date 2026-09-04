@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from ..watchlist.repository import TRADE_SETUP_ALIASES
+from ..trade_domain import TRADE_SETUP_ALIASES
 from .articles import all_articles, repository_article_payload
 from .users import DEFAULT_ACCESS_LOG_RETENTION_DAYS, UserRepository
 
