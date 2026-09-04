@@ -2215,7 +2215,10 @@ class WatchlistRepository:
             evidence = json.loads(str(row["evidence_json"] or "{}"))
             leg_start_date = str(row["start_date"] or "")
             leg_end_date = str(
-                evidence.get("effective_leg_end_date") or row["signal_date"] or ""
+                evidence.get("b1_end_date")
+                or evidence.get("effective_leg_end_date")
+                or row["signal_date"]
+                or ""
             )
             if not (
                 start_date <= leg_start_date <= end_date
@@ -2228,10 +2231,17 @@ class WatchlistRepository:
                     "start_date": leg_start_date,
                     "end_date": leg_end_date,
                     "duration_bars": int(
-                        evidence.get("effective_leg_bars") or row["duration_bars"]
+                        evidence.get("b1_bars")
+                        or evidence.get("effective_leg_bars")
+                        or row["duration_bars"]
                     ),
                     "move_atr": round(
-                        float(evidence.get("effective_move_atr") or row["move_atr"]), 2
+                        float(
+                            evidence.get("b1_move_atr")
+                            or evidence.get("effective_move_atr")
+                            or row["move_atr"]
+                        ),
+                        2,
                     ),
                     "fact_as_of_date": str(row["as_of_date"]),
                     "policy_version": policy_version,

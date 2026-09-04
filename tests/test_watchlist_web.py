@@ -806,7 +806,7 @@ def _seed_chart_brooks_leg(path) -> None:
                 "event_id": "brooks|000001.SZ|2026-06-18|5",
                 "symbol": "000001.SZ",
                 "state": "S0_IMPULSE",
-                "state_reason": "STRONG_CONTINUATION",
+                "state_reason": "FOLLOW_THROUGH_AFTER_B1",
                 "state_rank": 3,
                 "state_changed_on": "2026-06-30",
                 "touch25_date": "",
@@ -831,10 +831,12 @@ def _seed_chart_brooks_leg(path) -> None:
                 "next_open_status": "PENDING",
                 "tradability_reason": "",
                 "evidence": {
-                    "effective_leg_end_date": "2026-06-24",
-                    "effective_leg_bars": 10,
-                    "effective_signal_close": 13.2,
-                    "effective_move_atr": 8.5,
+                    "b1_anchor_date": "2026-06-10",
+                    "b1_end_date": "2026-06-24",
+                    "b1_bars": 10,
+                    "b1_peak_close": 13.2,
+                    "b1_move_atr": 8.5,
+                    "b1_status": "FROZEN",
                 },
                 "source_digest": "chart-b1-fact",
                 "origin": "RECONSTRUCTED",
@@ -1507,7 +1509,8 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "Brooks 强势股与 H1 独立证据" in detail.text
     assert "最近 H1 / 回调判断" in detail.text
     assert "首次触发窗口" in detail.text
-    assert "峰值扩展跨度" in detail.text
+    assert "Brooks B1·第一腿" in detail.text
+    assert "峰值扩展跨度" not in detail.text
     assert "第一腿扩展" not in detail.text
     assert "/ 人工" in detail.text
     assert "不改变上方两法结论" in detail.text

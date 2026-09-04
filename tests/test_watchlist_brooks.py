@@ -194,6 +194,9 @@ def test_chutianlong_first_leg_expands_then_exposes_pullback_metrics_for_manual_
     bars[8] = _bar(
         "2026-08-31", 20.00, open_price=19.80, high=20.10, low=19.50
     )
+    bars[7] = _bar(
+        "2026-08-28", 16.70, open_price=16.90, high=19.50, low=16.40
+    )
     event = BrooksImpulse(
         event_id="brooks|003040.SZ|2026-08-24|3",
         symbol="003040.SZ",
@@ -233,26 +236,33 @@ def test_chutianlong_first_leg_expands_then_exposes_pullback_metrics_for_manual_
     h1 = by_date["2026-08-31"]["evidence"]
 
     assert trigger["trigger_window_bars"] == 3
-    assert trigger["effective_leg_bars"] == 3
-    assert expanded["effective_leg_bars"] == 6
-    assert expanded["effective_leg_start_date"] == "2026-08-20"
-    assert expanded["effective_leg_end_date"] == "2026-08-27"
-    assert expanded["max_consecutive_up_bars"] == 6
-    assert expanded["max_consecutive_up_start"] == "2026-08-20"
-    assert expanded["max_consecutive_up_end"] == "2026-08-27"
-    assert expanded["leg_status"] == "EXPANDING"
+    assert trigger["b1_bars"] == 3
+    assert trigger["b1_status"] == "FORMING"
+    assert expanded["b1_bars"] == 6
+    assert expanded["b1_anchor_date"] == "2026-08-19"
+    assert expanded["b1_first_bar_date"] == "2026-08-20"
+    assert expanded["b1_end_date"] == "2026-08-27"
+    assert expanded["b1_max_consecutive_up_bars"] == 6
+    assert expanded["b1_max_consecutive_up_start"] == "2026-08-20"
+    assert expanded["b1_max_consecutive_up_end"] == "2026-08-27"
+    assert expanded["leg_status"] == "B1_FORMING"
 
     assert by_date["2026-08-28"]["state"] == "S0_IMPULSE"
     assert by_date["2026-08-28"]["touch25_date"] == ""
     assert pullback["leg_status"] == "PULLBACK"
-    assert pullback["effective_leg_end_date"] == "2026-08-27"
+    assert pullback["b1_status"] == "FROZEN"
+    assert pullback["b1_frozen_on"] == "2026-08-28"
+    assert pullback["b1_end_date"] == "2026-08-27"
+    assert pullback["b1_max_high"] == 18.93
+    assert pullback["cycle_peak_high"] == 19.50
     assert pullback["touch25_manual"] is True
     assert by_date["2026-08-31"]["state"] == "S2_H1"
     assert by_date["2026-08-31"]["h1_date"] == "2026-08-31"
     assert h1["leg_status"] == "H1_CANDIDATE"
-    assert h1["effective_leg_end_date"] == "2026-08-27"
-    assert h1["effective_signal_close"] == 18.73
-    assert by_date["2026-08-31"]["prior_high"] == 18.93
+    assert h1["b1_end_date"] == "2026-08-27"
+    assert h1["b1_peak_close"] == 18.73
+    assert h1["cycle_peak_close"] == 18.73
+    assert by_date["2026-08-31"]["prior_high"] == 19.50
 
 
 def test_brooks_emits_only_first_h1_per_pullback_and_resets_after_new_peak() -> None:
@@ -305,6 +315,10 @@ def test_brooks_emits_only_first_h1_per_pullback_and_resets_after_new_peak() -> 
     assert by_date[dates[13]]["h1_date"] == ""
     assert by_date[dates[16]]["state"] == "S2_H1"
     assert by_date[dates[16]]["evidence"]["pullback_cycle"] == 2
+    assert by_date[dates[16]]["evidence"]["b1_end_date"] == dates[10]
+    assert by_date[dates[16]]["evidence"]["b1_peak_close"] == 100.0
+    assert by_date[dates[16]]["evidence"]["cycle_peak_date"] == dates[14]
+    assert by_date[dates[16]]["evidence"]["cycle_peak_close"] == 102.0
 
     invalid_bars = [
         *base,
@@ -320,6 +334,57 @@ def test_brooks_emits_only_first_h1_per_pullback_and_resets_after_new_peak() -> 
     )[0]
     assert invalid_fact["state"] == "INVALIDATED"
     assert invalid_fact["state_reason"] == "STRUCTURAL_FAILURE"
+
+
+def test_brooks_keeps_equal_peak_close_in_b1_then_freezes_on_first_lower_close() -> None:
+    dates = _dates(6)
+    bars = [
+        _bar(dates[0], 10.0),
+        _bar(dates[1], 11.0),
+        _bar(dates[2], 12.0),
+        _bar(dates[3], 13.0, high=13.2),
+        _bar(dates[4], 13.0, high=13.4),
+        _bar(dates[5], 12.5, high=13.8, low=12.2),
+    ]
+    event = BrooksImpulse(
+        event_id="brooks|000001.SZ|equal-peak|3",
+        symbol="000001.SZ",
+        signal_pos=3,
+        start_pos=0,
+        signal_date=dates[3],
+        start_date=dates[0],
+        duration_bars=3,
+        impulse_start=10.0,
+        signal_close=13.0,
+        signal_high=13.2,
+        impulse_height=3.0,
+        atr20=1.0,
+        move_atr=3.0,
+        path_efficiency=1.0,
+        bullish_body_count=3,
+        bullish_body_share=1.0,
+        mean_close_location=0.8,
+        mean_overlap=0.1,
+        speed_atr_per_session=1.0,
+        median_amount20=30_000.0,
+        source_digest="equal-peak",
+    )
+
+    fact = build_brooks_daily_facts(
+        event,
+        bars,
+        [SecurityState(valid_from=dates[0])],
+        [dates[5]],
+        origin="RECONSTRUCTED",
+    )[0]
+    evidence = fact["evidence"]
+
+    assert evidence["b1_end_date"] == dates[4]
+    assert evidence["b1_bars"] == 4
+    assert evidence["b1_peak_close"] == 13.0
+    assert evidence["b1_max_high"] == 13.4
+    assert evidence["cycle_peak_high"] == 13.8
+    assert evidence["b1_frozen_on"] == dates[5]
 
 
 def test_brooks_event_expires_after_40_sessions_and_missing_dates_remain_explicit() -> None:
@@ -449,15 +514,18 @@ def _event_and_fact() -> tuple[dict[str, object], dict[str, object]]:
             "current_close": 13.0,
             "trigger_window_bars": 8,
             "trigger_date": "2026-07-31",
-            "effective_leg_start_date": "2026-07-22",
-            "effective_leg_end_date": "2026-07-31",
-            "effective_leg_bars": 8,
-            "effective_move_atr": 4.0,
-            "leg_frozen": False,
+            "b1_anchor_date": "2026-07-21",
+            "b1_first_bar_date": "2026-07-22",
+            "b1_end_date": "2026-07-31",
+            "b1_bars": 8,
+            "b1_move_atr": 4.0,
+            "b1_status": "FROZEN",
+            "b1_frozen_on": "2026-07-30",
+            "b1_path_efficiency": 0.9,
             "leg_status": "H1_CANDIDATE",
-            "max_consecutive_up_bars": 6,
-            "max_consecutive_up_start": "2026-07-24",
-            "max_consecutive_up_end": "2026-07-31",
+            "b1_max_consecutive_up_bars": 6,
+            "b1_max_consecutive_up_start": "2026-07-24",
+            "b1_max_consecutive_up_end": "2026-07-31",
             "pullback_cycle": 1,
             "pullback_start_date": "2026-07-30",
             "pullback_bars": 2,
@@ -498,9 +566,10 @@ def test_brooks_workload_phases_are_mutually_exclusive_and_priority_is_transpare
             **base,
             "maximum_low_retracement": maximum_retracement,
             "pullback_atr": pullback_atr,
-            "evidence": {
-                **dict(base["evidence"]),
-                "pullback_bars": pullback_bars,
+                "evidence": {
+                    **dict(base["evidence"]),
+                    "b1_status": "FROZEN" if pullback_bars else "FORMING",
+                    "pullback_bars": pullback_bars,
                 "pullback_start_date": "2026-08-28" if pullback_bars else "",
                 "last_h1_date": last_h1_date,
             },
@@ -707,16 +776,17 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "不与 Weinstein、Minervini 合成总分" in page.text
     assert "机械买点" in page.text
     assert "观察链" in page.text
-    assert "今日新强势" in page.text
-    assert "强势扩展" in page.text
+    assert "今日B1触发" in page.text
+    assert "B1延伸中" in page.text
+    assert "跟随上涨" in page.text
     assert "回调观察" in page.text
     assert "优先观察" in page.text
     assert "H1重点观察" in page.text
     assert "今日 H1" in page.text
     assert "收盘回调" in page.text
     assert "首次触发：8日窗口" in page.text
-    assert "峰值扩展跨度：8 个交易日" in page.text
-    assert "第一腿 8 个交易日" not in page.text
+    assert "B1：8 个交易日" in page.text
+    assert "峰值扩展跨度" not in page.text
     assert "最大连续收涨：6 日" in page.text
     assert "data-download-tradingview-list=\"brooks-results\"" in page.text
 

@@ -1236,6 +1236,7 @@ def _filter_brooks_rows(
         "immature",
         "deep",
         "expanding",
+        "followthrough",
         "cycle_done",
         "h1",
         "new",
@@ -1282,10 +1283,11 @@ def _filter_brooks_rows(
             "watch": "H1重点观察",
             "immature": "回调未成熟",
             "deep": "深回调/老化",
-            "expanding": "强势扩展",
+            "expanding": "B1延伸中",
+            "followthrough": "跟随上涨",
             "cycle_done": "本轮H1已过",
             "h1": "今日 H1",
-            "new": "今日新强势",
+            "new": "今日B1触发",
         }.get(phase, BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知"))
         row["retracement_pct"] = float(row.get("current_retracement") or 0) * 100
         row["maximum_retracement_pct"] = float(row.get("maximum_low_retracement") or 0) * 100
@@ -1317,7 +1319,7 @@ def _filter_brooks_rows(
 
 
 def _brooks_priority_quality(row: Mapping[str, Any]) -> bool:
-    """Transparent first-leg quality tag used only inside the H1 watch phase."""
+    """Transparent trigger-window quality tag used only in the H1 watch phase."""
 
     mean_overlap = row.get("mean_overlap")
     return (
@@ -1348,7 +1350,11 @@ def _brooks_phase(row: Mapping[str, Any]) -> str:
     pullback_start = str(evidence.get("pullback_start_date") or "")
     last_h1_date = str(evidence.get("last_h1_date") or "")
     if pullback_bars <= 0:
-        return "expanding"
+        return (
+            "followthrough"
+            if str(evidence.get("b1_status") or "") == "FROZEN"
+            else "expanding"
+        )
     if pullback_start and last_h1_date and last_h1_date >= pullback_start:
         return "cycle_done"
 
