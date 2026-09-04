@@ -1506,6 +1506,9 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "两种方法逐项对照" in detail.text
     assert "Brooks 强势股与 H1 独立证据" in detail.text
     assert "最近 H1 / 回调判断" in detail.text
+    assert "首次触发窗口" in detail.text
+    assert "峰值扩展跨度" in detail.text
+    assert "第一腿扩展" not in detail.text
     assert "/ 人工" in detail.text
     assert "不改变上方两法结论" in detail.text
     assert "异常交易复核" in detail.text

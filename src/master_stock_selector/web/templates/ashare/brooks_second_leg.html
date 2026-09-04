@@ -85,7 +85,7 @@
   {% if rows %}
   <div class="table-wrap brooks-table-wrap">
     <table class="watchlist-table brooks-table" data-sortable="true"{% if rows|length > 40 %} data-page-size="40"{% endif %}>
-      <thead><tr><th>事件 / 股票</th><th>第一腿</th><th>质量</th><th>人工判断回调</th><th>H1 证据</th><th>失效距离</th><th>事实日期</th></tr></thead>
+      <thead><tr><th>事件 / 股票</th><th>首次触发 / 峰值扩展</th><th>质量</th><th>人工判断回调</th><th>H1 证据</th><th>失效距离</th><th>事实日期</th></tr></thead>
       <tbody>
       {% for row in rows %}
       {% set leg = row.evidence or {} %}
@@ -99,7 +99,7 @@
           </div>
           <small class="table-subline">{{ row.industry or '行业待补' }}</small>
         </td>
-        <td data-sort="{{ row.signal_date }}"><strong>首次触发 {{ row.duration_bars }}日 · {{ row.signal_date }}</strong><small class="table-subline">第一腿 {{ leg.effective_leg_bars or row.duration_bars }} 个交易日 · {{ leg.effective_leg_start_date or row.start_date }} → {{ leg.effective_leg_end_date or row.signal_date }}</small><small class="table-subline">最大连续收涨 {{ leg.max_consecutive_up_bars or row.duration_bars }} 日{% if leg.max_consecutive_up_start %} · {{ leg.max_consecutive_up_start }} → {{ leg.max_consecutive_up_end }}{% endif %}</small><small class="table-subline">{{ '结构已结束' if leg.leg_frozen else '持续跟踪' }} · {{ '%.2f'|format(leg.effective_move_atr or row.move_atr) }} ATR</small></td>
+        <td data-sort="{{ row.signal_date }}"><strong>首次触发：{{ row.duration_bars }}日窗口 · {{ row.signal_date }}</strong><small class="table-subline">峰值扩展跨度：{{ leg.effective_leg_bars or row.duration_bars }} 个交易日 · {{ leg.effective_leg_start_date or row.start_date }} → {{ leg.effective_leg_end_date or row.signal_date }}</small><small class="table-subline">最大连续收涨：{{ leg.max_consecutive_up_bars or row.duration_bars }} 日{% if leg.max_consecutive_up_start %} · {{ leg.max_consecutive_up_start }} → {{ leg.max_consecutive_up_end }}{% endif %}</small><small class="table-subline">{{ '结构已结束' if leg.leg_frozen else '持续跟踪' }} · 扩展幅度 {{ '%.2f'|format(leg.effective_move_atr or row.move_atr) }} ATR</small></td>
         <td data-sort="{{ row.path_efficiency }}"><div>效率 <strong>{{ '%.1f%%'|format(row.path_efficiency * 100) }}</strong>{% if row.priority_quality %} <span class="brooks-quality-tag">第一腿优质</span>{% endif %}</div><small class="table-subline">CLV {{ '%.1f%%'|format(row.mean_close_location * 100) }} · 重叠 {{ '%.1f%%'|format(row.mean_overlap * 100) }}</small><small class="table-subline">阳线 {{ row.bullish_body_count }}/{{ row.duration_bars }} · 20日额 {{ '%.2f'|format(row.median_amount20_yi) }}亿</small></td>
         <td data-sort="{{ row.maximum_low_retracement }}"><strong>收盘回调 {{ '%.1f%%'|format(row.retracement_pct) }}</strong><small class="table-subline">盘中最大 {{ '%.1f%%'|format(row.maximum_retracement_pct) }} · {{ '%.2f'|format(row.pullback_atr) }} ATR</small><small class="table-subline">{{ leg.pullback_bars or 0 }} 个交易日 · 低点 {{ '%.2f'|format(row.pullback_low_anchor) }}</small><small class="table-subline">touch25：人工判断</small></td>
         <td data-sort="{{ row.h1_date }}"><strong>{{ row.h1_date or '尚未出现' }}</strong><small class="table-subline">阳线 · CLV {% if leg.h1_clv is not none %}{{ '%.1f%%'|format(leg.h1_clv * 100) }}{% else %}—{% endif %}</small><small class="table-subline">突破前日高点 {% if leg.h1_breakout_pct is not none %}{{ '%+.2f%%'|format(leg.h1_breakout_pct * 100) }}{% else %}—{% endif %}</small><small class="table-subline">第 {{ leg.pullback_cycle or 0 }} 轮回调首次 H1</small></td>

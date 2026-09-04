@@ -714,9 +714,10 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "H1重点观察" in page.text
     assert "今日 H1" in page.text
     assert "收盘回调" in page.text
-    assert "首次触发 8日" in page.text
-    assert "第一腿 8 个交易日" in page.text
-    assert "最大连续收涨 6 日" in page.text
+    assert "首次触发：8日窗口" in page.text
+    assert "峰值扩展跨度：8 个交易日" in page.text
+    assert "第一腿 8 个交易日" not in page.text
+    assert "最大连续收涨：6 日" in page.text
     assert "data-download-tradingview-list=\"brooks-results\"" in page.text
 
     filtered = TestClient(app).get("/a/brooks-second-leg?date=2026-07-31&min_amount=2")
