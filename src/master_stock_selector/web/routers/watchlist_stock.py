@@ -230,6 +230,14 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         if payload["brooks"]:
             brooks = payload["brooks"]
             brooks["state_label"] = BROOKS_STATE_LABELS.get(str(brooks.get("state") or ""), "未知")
+            if (
+                str(brooks.get("state") or "") == "S2_H1"
+                and str(brooks.get("h1_date") or "") == str(brooks.get("as_of_date") or "")
+            ):
+                cycle = int((brooks.get("evidence") or {}).get("pullback_cycle") or 0)
+                brooks["state_label"] = (
+                    "今日B1首次H1" if cycle == 1 else "今日后续周期H1"
+                )
             current_close = float(brooks.get("evidence", {}).get("current_close") or 0)
             brooks["current_close"] = current_close
             brooks["retracement_pct"] = float(brooks.get("current_retracement") or 0) * 100

@@ -13,6 +13,7 @@ from .watchlist import (
     _base_filter_rows,
     _brooks_phase,
     _brooks_priority_quality,
+    _brooks_pullback_tier,
     _change_rows,
     _current_rows,
     _daily_query_string,
@@ -314,6 +315,7 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
             "followthrough",
             "cycle_done",
             "h1",
+            "cycle_h1",
             "new",
             "history",
             "terminal",
@@ -354,6 +356,7 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
             phase: phases.count(phase)
             for phase in {
                 "h1",
+                "cycle_h1",
                 "new",
                 "expanding",
                 "followthrough",
@@ -370,6 +373,12 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
             for row, phase in zip(daily_rows, phases, strict=True)
         )
         counts["pullback"] = counts["immature"] + counts["watch"] + counts["deep"]
+        for h1_phase in ("h1", "cycle_h1"):
+            for tier in ("watch", "immature", "deep"):
+                counts[f"{h1_phase}_{tier}"] = sum(
+                    phase == h1_phase and _brooks_pullback_tier(row) == tier
+                    for row, phase in zip(daily_rows, phases, strict=True)
+                )
         counts["history"] = len(history_rows)
         counts["all"] = len(daily_rows)
         return render(

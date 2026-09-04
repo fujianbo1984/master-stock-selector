@@ -1239,6 +1239,7 @@ def _filter_brooks_rows(
         "followthrough",
         "cycle_done",
         "h1",
+        "cycle_h1",
         "new",
         "history",
         "terminal",
@@ -1253,7 +1254,7 @@ def _filter_brooks_rows(
         row = dict(raw)
         phase = _brooks_phase(row)
         if state_mode == "history":
-            visible = phase == "h1"
+            visible = phase in {"h1", "cycle_h1"}
         elif state_mode == "pullback":
             visible = phase in {"immature", "watch", "deep"}
         elif state_mode == "priority":
@@ -1278,6 +1279,13 @@ def _filter_brooks_rows(
         row["current_close"] = current_close
         row["brooks_phase"] = phase
         row["priority_quality"] = _brooks_priority_quality(row)
+        pullback_tier = _brooks_pullback_tier(row)
+        row["pullback_tier"] = pullback_tier
+        row["pullback_tier_label"] = {
+            "watch": "重点观察区间",
+            "immature": "回调未成熟",
+            "deep": "深回调/老化",
+        }.get(pullback_tier, "—")
         row["state_label"] = {
             "priority": "优先观察",
             "watch": "H1重点观察",
@@ -1286,7 +1294,8 @@ def _filter_brooks_rows(
             "expanding": "B1延伸中",
             "followthrough": "跟随上涨",
             "cycle_done": "本轮H1已过",
-            "h1": "今日 H1",
+            "h1": "今日B1首次H1",
+            "cycle_h1": "今日后续周期H1",
             "new": "今日B1触发",
         }.get(phase, BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知"))
         row["retracement_pct"] = float(row.get("current_retracement") or 0) * 100
@@ -1315,6 +1324,16 @@ def _filter_brooks_rows(
                 str(row.get("symbol") or ""),
             )
         )
+    elif state_mode in {"h1", "cycle_h1", "history"}:
+        tier_rank = {"watch": 0, "immature": 1, "deep": 2}
+        filtered.sort(
+            key=lambda row: (
+                tier_rank.get(str(row.get("pullback_tier") or ""), 3),
+                int((row.get("evidence") or {}).get("pullback_cycle") or 0),
+                -float(row.get("median_amount20") or 0),
+                str(row.get("symbol") or ""),
+            )
+        )
     return filtered
 
 
@@ -1334,8 +1353,9 @@ def _brooks_phase(row: Mapping[str, Any]) -> str:
 
     row_state = str(row.get("state") or "")
     row_date = str(row.get("as_of_date") or "")
+    evidence = dict(row.get("evidence") or {})
     if bool(row.get("h1_date")) and str(row.get("h1_date")) == row_date:
-        return "h1"
+        return "h1" if int(evidence.get("pullback_cycle") or 0) == 1 else "cycle_h1"
     if row_state in {"COMPLETED", "INVALIDATED", "STALE"}:
         return "terminal"
     if row_state == "PAUSED":
@@ -1345,7 +1365,6 @@ def _brooks_phase(row: Mapping[str, Any]) -> str:
     if row_state != "S0_IMPULSE":
         return "all"
 
-    evidence = dict(row.get("evidence") or {})
     pullback_bars = int(evidence.get("pullback_bars") or 0)
     pullback_start = str(evidence.get("pullback_start_date") or "")
     last_h1_date = str(evidence.get("last_h1_date") or "")
@@ -1358,6 +1377,16 @@ def _brooks_phase(row: Mapping[str, Any]) -> str:
     if pullback_start and last_h1_date and last_h1_date >= pullback_start:
         return "cycle_done"
 
+    return _brooks_pullback_tier(row)
+
+
+def _brooks_pullback_tier(row: Mapping[str, Any]) -> str:
+    """Classify pullback maturity independently of whether H1 occurs today."""
+
+    evidence = dict(row.get("evidence") or {})
+    pullback_bars = int(evidence.get("pullback_bars") or 0)
+    if pullback_bars <= 0:
+        return ""
     maximum_retracement_pct = float(row.get("maximum_low_retracement") or 0) * 100
     pullback_atr = float(row.get("pullback_atr") or 0)
     if maximum_retracement_pct >= 50 or pullback_atr >= 3 or pullback_bars > 10:

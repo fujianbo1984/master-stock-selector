@@ -600,6 +600,10 @@ def test_brooks_workload_phases_are_mutually_exclusive_and_priority_is_transpare
 def test_brooks_new_and_h1_take_precedence_over_workload_phase() -> None:
     event, fact = _event_and_fact()
     h1_row = {**event, **fact}
+    cycle_h1_row = {
+        **h1_row,
+        "evidence": {**dict(h1_row["evidence"]), "pullback_cycle": 2},
+    }
     new_row = {
         **event,
         **fact,
@@ -609,7 +613,24 @@ def test_brooks_new_and_h1_take_precedence_over_workload_phase() -> None:
     }
 
     assert _brooks_phase(h1_row) == "h1"
+    assert _brooks_phase(cycle_h1_row) == "cycle_h1"
     assert _brooks_phase(new_row) == "new"
+
+    assert len(
+        _filter_brooks_rows(
+            [h1_row, cycle_h1_row], state="h1", industry="", min_amount=0, q=""
+        )
+    ) == 1
+    assert len(
+        _filter_brooks_rows(
+            [h1_row, cycle_h1_row], state="cycle_h1", industry="", min_amount=0, q=""
+        )
+    ) == 1
+    assert len(
+        _filter_brooks_rows(
+            [h1_row, cycle_h1_row], state="history", industry="", min_amount=0, q=""
+        )
+    ) == 2
 
 
 def test_brooks_schema_is_explicit_and_repository_keeps_facts_separate(
@@ -782,13 +803,23 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "回调观察" in page.text
     assert "优先观察" in page.text
     assert "H1重点观察" in page.text
-    assert "今日 H1" in page.text
+    assert "今日B1首次H1" in page.text
+    assert "今日后续周期H1" in page.text
+    assert "B1后首次H1" in page.text
+    assert "重点观察区间" in page.text
     assert "收盘回调" in page.text
     assert "首次触发：8日窗口" in page.text
     assert "B1：8 个交易日" in page.text
     assert "峰值扩展跨度" not in page.text
     assert "最大连续收涨：6 日" in page.text
     assert "data-download-tradingview-list=\"brooks-results\"" in page.text
+
+    later_cycle = TestClient(app).get(
+        "/a/brooks-second-leg?date=2026-07-31&state=cycle_h1"
+    )
+    assert later_cycle.status_code == 200
+    assert "今日后续周期H1" in later_cycle.text
+    assert "000001.SZ" not in later_cycle.text
 
     filtered = TestClient(app).get("/a/brooks-second-leg?date=2026-07-31&min_amount=2")
     assert "当前条件下没有 Brooks 观察事件" in filtered.text
