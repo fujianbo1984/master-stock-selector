@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date as calendar_date
 from typing import Any
 from urllib.parse import urlencode
 
@@ -34,6 +35,13 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
     render = context.render
     repository = context.repository
     market_reader = context.market_reader
+
+    def validate_date(value: str | None) -> None:
+        if value:
+            try:
+                calendar_date.fromisoformat(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="查询日期无效") from exc
     cached_rows = context.cached_rows
     cached_daily_auxiliary = context.cached_daily_auxiliary
     rows_for_user = context.rows_for_user
@@ -63,8 +71,9 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
             method=method,
             state=state,
         )
+        validate_date(date)
         market_cap_floor = _market_cap_floor(min_cap)
-        query_date = _selected_date(repository, date, market_reader)
+        query_date = date or _selected_date(repository, None, market_reader)
         # 首页仍取总市值以执行默认的小市值过滤，但不加载流通市值和
         # 20 日成交额中位数，减少首次打开观察池的数据库工作量。
         formal_rows = rows_for_user(request, query_date, include_liquidity=False)
@@ -134,7 +143,7 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
                 method=method_mode,
             )
         index_rows, _ = cached_daily_auxiliary(query_date)
-        date_fallback = date if date and date != query_date else ""
+        date_fallback = date if date and not repository.has_fact_date(date) else ""
         industry_name = next(
             (
                 str(row.get("industry") or "")
@@ -324,6 +333,7 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
         }
         if state_mode not in allowed_states:
             raise HTTPException(status_code=422, detail="unsupported Brooks state filter")
+        validate_date(date)
         dates = repository.brooks_fact_dates(BROOKS_POLICY_VERSION)
         query_date = ""
         if dates:
@@ -385,7 +395,7 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
             request,
             "ashare/brooks_second_leg.html",
             {
-                "active": "Brooks 第二腿",
+                "active": "Brooks 事件观察",
                 "query_date": query_date,
                 "latest_date": dates[0] if dates else "",
                 "date_missing": date if date and not query_date else "",

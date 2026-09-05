@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}龙场悟道 · 大师选股{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260904-dynamic-plan-v1">
+  <title>{% block title %}龙场悟道 · 股票研究{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css?v=20260905-routes-v1">
 </head>
 <body class="app-body {% block body_class %}{% endblock %}">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -80,7 +80,11 @@
       syncTradeFields();
     });
 
-    document.querySelectorAll("table[data-sortable='true']").forEach((table) => {
+    document.querySelectorAll("table[data-sortable='true']").forEach((table, tableIndex) => {
+      const stateKey = `research-table:${location.pathname}${location.search}:${tableIndex}`;
+      let savedState = {};
+      try { savedState = JSON.parse(sessionStorage.getItem(stateKey) || "{}"); } catch (_) {}
+      const saveState = () => { try { sessionStorage.setItem(stateKey, JSON.stringify({...savedState, page: currentPage})); } catch (_) {} };
       const headers = Array.from(table.querySelectorAll("thead th"));
       const pageSize = Number(table.dataset.pageSize || 0);
       let currentPage = 0;
@@ -114,8 +118,8 @@
           previous.disabled = currentPage === 0;
           next.disabled = currentPage >= pageCount - 1;
         };
-        previous.addEventListener("click", () => { currentPage -= 1; refreshPagination(); table.scrollIntoView({ block: "start" }); });
-        next.addEventListener("click", () => { currentPage += 1; refreshPagination(); table.scrollIntoView({ block: "start" }); });
+        previous.addEventListener("click", () => { currentPage -= 1; refreshPagination(); saveState(); table.scrollIntoView({ block: "start" }); });
+        next.addEventListener("click", () => { currentPage += 1; refreshPagination(); saveState(); table.scrollIntoView({ block: "start" }); });
       }
 
       const sortRows = (th, index, direction) => {
@@ -148,6 +152,8 @@
         const sort = () => {
           const direction = th.dataset.direction === "asc" ? "desc" : "asc";
           sortRows(th, index, direction);
+          savedState = {sortIndex: index, direction};
+          saveState();
         };
         th.addEventListener("click", sort);
         th.addEventListener("keydown", (event) => {
@@ -160,6 +166,10 @@
         const defaultDirection = table.dataset.defaultDirection === "asc" ? "asc" : "desc";
         sortRows(headers[defaultIndex], defaultIndex, defaultDirection);
       }
+      if (Number.isInteger(savedState.sortIndex) && headers[savedState.sortIndex]) {
+        sortRows(headers[savedState.sortIndex], savedState.sortIndex, savedState.direction === "asc" ? "asc" : "desc");
+      }
+      currentPage = Math.max(0, Number(savedState.page) || 0);
       refreshPagination();
     });
 
@@ -245,5 +255,6 @@
 
   </script>
   {% block scripts %}{% endblock %}
+  <script src="/static/research-navigation.js?v=20260905-routes-v2"></script>
 </body>
 </html>

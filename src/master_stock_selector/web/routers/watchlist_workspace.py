@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date as CalendarDate
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
@@ -173,7 +174,7 @@ def build_workspace_router(context: WatchlistRouteContext) -> APIRouter:
     @router.get("/a/observations", response_class=HTMLResponse)
     def personal_observations(
         request: Request,
-        date: str | None = None,
+        date: CalendarDate | None = None,
         state: str = "WATCH",
         tag: str = "",
     ) -> Response:
@@ -183,7 +184,7 @@ def build_workspace_router(context: WatchlistRouteContext) -> APIRouter:
         selected_state = state.upper()
         if selected_state not in {"WATCH", "FOCUS", "ARCHIVED"}:
             selected_state = "WATCH"
-        query_date = _selected_date(repository, date, market_reader)
+        query_date = date.isoformat() if date else _selected_date(repository, None, market_reader)
         reviews = users.reviews_for_user(user.user_id)
         selected_tag = ""
         if selected_state == "WATCH" and tag.strip():
@@ -216,6 +217,10 @@ def build_workspace_router(context: WatchlistRouteContext) -> APIRouter:
             for value in ("WATCH", "FOCUS", "ARCHIVED")
         }
         visible_items = [item for item in items if item["manual"]["manual_state"] == selected_state]
+        visible_items.sort(
+            key=lambda item: (str(item["manual"].get("reviewed_at") or ""), item["symbol"]),
+            reverse=True,
+        )
         watch_tags: dict[str, int] = {}
         for item in items:
             if item["manual"]["manual_state"] != "WATCH":

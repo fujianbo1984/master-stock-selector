@@ -1,28 +1,30 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
-{% set prominent_investment_notice = true %}
-{% block heading %}强势股与 H1 观察池{% endblock %}
+
+{% block heading %}Brooks 事件观察{% endblock %}
 {% block subtitle %}今日B1触发 → B1延伸 → 首次回调 → B1首次H1 → 跟随周期 · {{ query_date or date_missing or '暂无事实日期' }}{% endblock %}
 {% block content %}
+{% set selected_brooks_date = query_date or date_missing %}
 <section class="section panel brooks-page-hero">
   <div class="brooks-page-heading">
-    <p class="eyebrow">Al Brooks · 独立日线代理</p>
-    <h1>强势股与 H1 观察池</h1>
+    <p class="eyebrow">发现股票 / Al Brooks · 独立日线代理</p>
+    <h1>价格行为事件 <small>Brooks 事件观察</small></h1>
+    <p class="research-next-step">选择左侧阶段，点击股票核对该事件的图形与路径边界，再决定是否加入个人观察。</p>
     <p>B1只记录首次高质量向上推动；首个收盘回调出现后永久冻结，后续新高单独归入跟随周期。</p>
   </div>
   <div class="brooks-page-status" role="status">
-    <span>截至 {{ query_date or '—' }} 收盘</span>
+    <span>查询日 {{ query_date or date_missing or '—' }}</span>
     {% if not schema_ready %}<strong>方法尚未初始化</strong>
     {% elif not query_date %}<strong>尚无计算事实</strong>
-    {% elif rows %}<strong>{{ rows|length }} 个当前结果</strong>
+    {% elif rows %}<strong>{{ rows|length }} 个当前事件</strong>
     {% else %}<strong>当前查询无事件</strong>{% endif %}
   </div>
 </section>
 
 {% if not schema_ready %}
-<div class="notice" role="status">Brooks 独立事实表尚未初始化。请先在目标观察池数据库显式运行 <code>masterstock watchlist --brooks-schema --apply</code>。</div>
+<div class="notice" role="status">Brooks 方法尚未准备就绪。可在运行状态页查看数据准备情况。</div>
 {% elif date_missing %}
-<div class="notice" role="status">请求日期 {{ date_missing }} 尚未生成 Brooks 事实；为避免把旧信号误认为当日信号，本页不会自动回退日期。</div>
+<div class="notice" role="status">请求日期 {{ date_missing }} 尚未生成 Brooks 事实；为避免把旧信号误认为当日信号，本页不会自动回退日期。{% if latest_date %}<a class="text-link" href="/a/brooks-second-leg?date={{ latest_date }}">查看最近可用日期 {{ latest_date }}</a>{% endif %}</div>
 {% endif %}
 
 <section class="section brooks-workspace">
@@ -30,7 +32,7 @@
     <div class="brooks-stage-heading"><span>观察链</span><small>独立日线事实</small></div>
     {% for value, code, label, description in [('new','NEW','今日B1触发','3/5/8日首次达标'),('expanding','B1','B1延伸中','尚未出现首次收盘回调'),('pullback','PB','回调观察','等待本轮首次 H1'),('h1','H1','今日B1首次H1','B1后第1轮回调的首次向上尝试'),('followthrough','FT','跟随上涨','B1已冻结，周期峰值更新'),('cycle_h1','CH1','今日后续周期H1','第2轮及以后的周期事实'),('history','HIS','历史 H1','最近若干事实日的 H1')] %}
     {% set stage_current = state == value or (value == 'pullback' and state in ['priority','watch','immature','deep']) %}
-    <a class="brooks-stage{% if stage_current %} is-current{% endif %}" {% if stage_current %}aria-current="page"{% endif %} href="/a/brooks-second-leg?date={{ query_date }}&amp;state={{ value }}&amp;lookback={{ lookback }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}">
+    <a class="brooks-stage{% if stage_current %} is-current{% endif %}" {% if stage_current %}aria-current="page"{% endif %} href="/a/brooks-second-leg?date={{ selected_brooks_date }}&amp;state={{ value }}&amp;lookback={{ lookback }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}">
       <span class="brooks-stage-code">{{ code }}</span>
       <span class="brooks-stage-copy"><strong>{{ label }}</strong><small>{{ description }}</small></span>
       <span class="brooks-stage-count">{{ counts[value] }}</span>
@@ -40,14 +42,16 @@
 
   <div class="panel brooks-results-panel" id="brooks-results">
     <form class="brooks-filter-bar" method="get" action="/a/brooks-second-leg">
-      <label>日期 <input name="date" value="{{ query_date }}" type="date"></label>
-      <label>范围
+      <label>日期 <input name="date" value="{{ query_date or date_missing }}" type="date"></label>
+      <label>更多状态
         <select name="state">
-          {% for value, label in [('priority','优先观察'),('watch','H1重点观察'),('immature','回调未成熟'),('deep','深回调/老化'),('pullback','全部回调观察'),('new','今日B1触发'),('expanding','B1延伸中'),('h1','今日B1首次H1'),('followthrough','跟随上涨'),('cycle_h1','今日后续周期H1'),('cycle_done','本轮H1已过'),('history','历史 H1'),('terminal','结构失效/超时'),('paused','资格暂停'),('all','全部事实')] %}
-          <option value="{{ value }}" {% if state == value %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ state }}" selected>保持当前阶段</option>
+          {% for value, label in [('terminal','结构失效/超时'),('paused','资格暂停'),('all','全部事实')] %}
+          <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
         </select>
       </label>
+      {% if state == 'history' %}
       <label>历史范围
         <select name="lookback">
           {% for value, label in [(5,'最近5个事实日'),(10,'最近10个事实日'),(20,'最近20个事实日'),(60,'最近60个事实日')] %}
@@ -55,6 +59,7 @@
           {% endfor %}
         </select>
       </label>
+      {% endif %}
       <label>行业
         <select name="industry">
           <option value="">全部行业</option>
@@ -68,15 +73,17 @@
           {% endfor %}
         </select>
       </label>
-      <label class="brooks-filter-search">股票 <input name="q" value="{{ q }}" placeholder="代码、名称或行业"></label>
+      <label class="brooks-filter-search">筛选当前列表 <input name="q" value="{{ q }}" placeholder="代码、名称或行业"></label>
       <button class="button filter-submit" type="submit">应用条件</button>
     </form>
 
+    {% if state in ['pullback', 'priority', 'watch', 'immature', 'deep', 'cycle_done'] %}
     <nav class="brooks-phase-tabs" aria-label="回调观察分层">
       {% for value, label, description in [('priority','优先观察','触发窗口质量较高'),('watch','重点观察','回调2–10日 · 15%–50% · 0.5–3 ATR'),('immature','未成熟','回调时间或深度不足'),('deep','深回调/老化','回调过深、过久或≥3 ATR'),('cycle_done','本轮H1已过','等待创新高后开启下一轮')] %}
-      <a class="brooks-phase-tab{% if state == value %} is-current{% endif %}" href="/a/brooks-second-leg?date={{ query_date }}&amp;state={{ value }}&amp;lookback={{ lookback }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}"><span>{{ label }}</span><strong>{{ counts[value] }}</strong><small>{{ description }}</small></a>
+      <a class="brooks-phase-tab{% if state == value %} is-current{% endif %}" href="/a/brooks-second-leg?date={{ selected_brooks_date }}&amp;state={{ value }}&amp;lookback={{ lookback }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}"><span>{{ label }}</span><strong>{{ counts[value] }}</strong><small>{{ description }}</small></a>
       {% endfor %}
     </nav>
+    {% endif %}
 
     <div class="brooks-results-heading">
       <div><p class="eyebrow">当前结果</p><h2>{% if state == 'priority' %}优先观察{% elif state == 'watch' %}H1重点观察{% elif state == 'immature' %}回调未成熟{% elif state == 'deep' %}深回调/老化{% elif state == 'cycle_done' %}本轮H1已过{% elif state == 'h1' %}今日B1首次H1 <small>重点 {{ counts.h1_watch }} · 未成熟 {{ counts.h1_immature }} · 深回调 {{ counts.h1_deep }}</small>{% elif state == 'cycle_h1' %}今日后续周期H1 <small>重点 {{ counts.cycle_h1_watch }} · 未成熟 {{ counts.cycle_h1_immature }} · 深回调 {{ counts.cycle_h1_deep }}</small>{% else %}独立候选{% endif %} <small class="result-count">{{ rows|length }} 个事件</small></h2></div>
@@ -90,12 +97,13 @@
       {% for row in rows %}
       {% set leg = row.evidence or {} %}
       {% set row_date = row.as_of_date or query_date %}
+      {% set detail_url = '/a/stocks/' ~ row.symbol ~ '?date=' ~ row_date ~ '&brooks_state=' ~ state ~ '&industry=' ~ (industry|urlencode) ~ '&min_amount=' ~ min_amount ~ '&q=' ~ (q|urlencode) ~ '&section=brooks-results&source_date=' ~ query_date ~ '&lookback=' ~ lookback ~ '&event_id=' ~ (row.event_id|urlencode) ~ ('&nav_previous=' ~ loop.previtem.symbol if not loop.first else '') ~ ('&nav_next=' ~ loop.nextitem.symbol if not loop.last else '') ~ '&nav_position=' ~ loop.index ~ '&nav_total=' ~ loop.length %}
       <tr>
         <td data-sort="{{ row.state_rank }}">
           <span class="status-marker status-{{ 'pass' if row.state_rank <= 2 else 'unknown' if row.state == 'PAUSED' else 'fail' if row.state in ['INVALIDATED','STALE'] else 'transition' }}">{{ row.state_label }}</span>
           <div class="stock-primary-link">
-            <a class="instrument-name-link" data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.name or '名称待补' }}</strong></a>
-            <span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a><a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?date={{ row_date }}&amp;brooks_state={{ state }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}&amp;section=brooks-results{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}">详情</a><a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}/chart?date={{ row_date }}&amp;brooks_state={{ state }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}&amp;section=brooks-results{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}">K线</a></span>
+            <a class="instrument-name-link" href="{{ detail_url }}"><strong>{{ row.name or '名称待补' }}</strong></a>
+            <span class="stock-secondary-links"><span class="instrument-code-link">{{ row.symbol }}</span><a class="stock-detail-link" data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">外部行情</a><a class="stock-detail-link" href="{{ detail_url }}">详情</a><a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}/chart?date={{ row_date }}&amp;brooks_state={{ state }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}&amp;section=brooks-results&amp;source_date={{ query_date }}&amp;lookback={{ lookback }}&amp;event_id={{ row.event_id|urlencode }}{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}">K线</a></span>
           </div>
           <small class="table-subline">{{ row.industry or '行业待补' }}</small>
         </td>
@@ -122,7 +130,7 @@
     <h3>当前条件下没有 Brooks 观察事件。</h3>
     <p>当前层级没有事件也是有效结果；可切换到其他回调层级或历史 H1 查看。</p>
     {% endif %}
-    <div class="brooks-empty-actions"><a class="text-link" href="/a/brooks-second-leg?date={{ query_date }}&amp;state=all&amp;industry=&amp;min_amount=0&amp;q=">查看全部事实</a><a class="text-link" href="/a/runs">查看运行状态</a></div>
+    <div class="brooks-empty-actions"><a class="text-link" href="/a/brooks-second-leg?date={{ selected_brooks_date }}&amp;state=all&amp;industry=&amp;min_amount=0&amp;q=">查看全部事实</a><a class="text-link" href="/a/runs">查看运行状态</a></div>
   </div>
   {% endif %}
   </div>

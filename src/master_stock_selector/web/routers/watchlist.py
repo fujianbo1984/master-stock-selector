@@ -1480,6 +1480,11 @@ def _stock_navigation(
                 "q": q,
             }
         )
+    if section == "stock-search":
+        return {"query": query, "entry_query": query,
+                "list_url": "/a/stocks?" + urlencode({"date": query_date, "q": q}),
+                "section_label": "搜索结果", "position": 0, "total": 0,
+                "previous": None, "next": None}
     labels = {
         "new-candidates": "新进 / 重进",
         "continuing-candidates": "持续符合",
@@ -1494,7 +1499,7 @@ def _stock_navigation(
         "focus-candidates": "我的重点观察",
         "personal-observations": "我的观察",
         "open-positions": "当前持仓",
-        "brooks-results": "强势股与 H1 观察池",
+        "brooks-results": "Brooks 事件观察",
     }
     empty: dict[str, Any] = {
         "query": query,

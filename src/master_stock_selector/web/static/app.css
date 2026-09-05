@@ -2296,3 +2296,77 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .plan-version-history .table-wrap { padding: 0 18px 18px; }
 
 .settings-form textarea { width: 100%; resize: vertical; }
+
+/* Desktop research workspace: global lookup stays separate from list filters. */
+.global-stock-search { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.global-stock-search > label { font-weight: 700; white-space: nowrap; }
+.global-stock-input { position: relative; width: 340px; }
+.global-stock-input input { width: 100%; min-height: 38px; }
+.global-stock-input ul { position: absolute; z-index: 80; top: 100%; left: 0; width: 480px; max-height: 440px; overflow-y: auto; margin: 4px 0 0; padding: 5px; list-style: none; background: var(--panel, #fff); border: 1px solid var(--line); box-shadow: 0 8px 24px #0002; }
+.global-stock-input li { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.global-stock-input li strong, .global-stock-input li small { display: block; }
+.global-stock-input li small { margin-top: 4px; }
+.global-stock-input li[aria-selected="true"], .global-stock-input li:hover { background: var(--accent-soft, #eee); outline: 2px solid var(--accent, #555); outline-offset: -2px; }
+.global-stock-search input:focus-visible, .stock-workspace-nav a:focus-visible { outline: 2px solid var(--accent, #555); outline-offset: 2px; }
+.stock-data-status { padding: 12px 0; font-size: 13px; }
+.stock-method-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); background: var(--panel, #fff); }
+.stock-method-summary > a { padding: 14px 18px; border-right: 1px solid var(--line); color: inherit; text-decoration: none; }
+.stock-method-summary > a:last-child { border-right: 0; }
+.stock-method-summary span, .stock-method-summary strong, .stock-method-summary small { display: block; }
+.stock-method-summary strong { font-size: 18px; margin: 6px 0; }
+.stock-workspace-nav { position: sticky; top: 0; z-index: 15; display: flex; gap: 24px; padding: 13px 16px; margin-top: 12px; background: var(--panel, #fff); border: 1px solid var(--line); }
+.stock-workspace-nav a { color: inherit; font-weight: 700; }
+.stock-price-workspace, #method-evidence, #brooks-evidence, #personal-research, #method-history { scroll-margin-top: 64px; }
+.stock-price-workspace .chart-workbench { margin: 0; border: 0; }
+.stock-price-workspace { padding: 12px; }
+.stock-search-results .form-row { margin: 20px 0; }
+.stock-search-results table { width: 100%; }
+.watchlist-table thead th { position: sticky; top: 0; z-index: 2; background: var(--panel, #fff); }
+.watchlist-hero { display: block; padding: 14px 18px; }
+.watchlist-hero h1 { font-size: 26px; margin: 4px 0; }
+.watchlist-hero-summary { white-space: normal; }
+.home-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.home-summary .kpi { padding: 10px 16px; }
+.home-summary .kpi strong { font-size: 26px; }
+.brooks-filter-bar { grid-template-columns: 136px 150px minmax(120px, 1fr) 140px minmax(170px, 1.4fr) 100px; }
+.brooks-filter-bar:has([name="lookback"]) { grid-template-columns: 136px 150px 145px minmax(120px, 1fr) 140px; }
+.brooks-filter-bar:has([name="lookback"]) .brooks-filter-search { grid-column: 1 / 5; }
+.stock-price-workspace .stock-chart-stage { height: 520px; }
+.global-stock-status { position: absolute; top: calc(100% - 8px); left: 54px; z-index: 81; max-width: 480px; font-size: 12px; background: var(--panel, #fff); }
+.global-stock-status:empty { display: none; }
+.global-stock-status:not(:empty) { padding: 5px 10px; border: 1px solid var(--line); }
+.applied-list-filters { font-size: 12px; margin: 7px 0 0; }
+
+/* Desktop research routes: task navigation and compact working surfaces. */
+.research-header { grid-template-columns: auto minmax(200px, 1fr) auto auto; gap: 18px; }
+.research-subnav { display:flex; align-items:center; gap:24px; padding:12px 4px; border-bottom:1px solid var(--line); font-size:13px; }
+.research-subnav strong { color:var(--muted); font-size:12px; }
+.research-subnav a.active { color:var(--accent); font-weight:700; }
+.workspace-welcome { display:flex; justify-content:space-between; align-items:center; gap:40px; padding:30px 0; }
+.workspace-welcome h1 { font-family:"Songti SC",serif; font-size:34px; margin:10px 0 18px; }
+.workspace-welcome p { max-width:720px; line-height:1.8; }
+.workspace-start { display:grid; gap:12px; min-width:210px; }
+.workspace-start .button { justify-content:center; }
+.research-route { display:grid; grid-template-columns:repeat(3,1fr); gap:32px; padding:12px 0; list-style:none; counter-reset:route; }
+.research-route li { counter-increment:route; border-top:1px solid var(--line); padding:20px 0; }
+.research-route li::before { content:'0' counter(route); display:block; color:var(--accent); margin-bottom:12px; }
+.research-route strong, .research-route span { display:block; margin-bottom:8px; }
+.research-route span, .workspace-support p { color:var(--muted); font-size:13px; line-height:1.8; }
+.workspace-support, .discovery-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
+.workspace-support > div { border-top:1px solid var(--line); padding:20px 0; }
+.discovery-options article { display:flex; flex-direction:column; align-items:flex-start; padding:28px; }
+.discovery-options h2 { margin:8px 0 14px; }
+.discovery-options p, .discovery-options dd { line-height:1.8; }
+.discovery-options dl { margin:12px 0 24px; flex:1; }
+.discovery-options dt { font-size:12px; color:var(--muted); margin-top:14px; }
+.discovery-options dd { margin:4px 0; }
+.workspace-recent-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 28px; }
+.workspace-recent-list article { padding:18px 0; border-top:1px solid var(--line); }
+.workspace-recent-list article p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; }
+.workspace-recent-list small { color:var(--muted); }
+.workspace-recent-list .manual-state { float:right; }
+.research-next-step { font-size:13px; color:var(--muted); line-height:1.7; margin:10px 0 0; }
+.home-summary .kpi { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; min-height:0; }
+.home-summary .kpi strong { font-size:24px; margin:0; }
+.brooks-page-heading h1 small { font-size:16px; color:var(--muted); font-weight:400; }
+#personal-research { scroll-margin-top:70px; }

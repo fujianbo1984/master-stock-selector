@@ -1,0 +1,19 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block subtitle %}查询任意在库沪深股票 · {{ query_date }}{% endblock %}
+{% block content %}
+<section class="section panel stock-search-results">
+  <div class="section-heading"><div><p class="eyebrow">全站查股票</p><h1>在库股票查询</h1><p class="muted">独立于观察池、市值和个人观察条件。查询不会入库或触发计算。</p></div></div>
+  <form class="form-row" action="/a/stocks" method="get">
+    <label>代码或名称<input name="q" value="{{ q }}" maxlength="80" placeholder="例如：000001 或 平安银行" autofocus></label>
+    <label>查询日期<input name="date" type="date" value="{{ query_date }}" required></label>
+    <button class="button" type="submit">查股票</button>
+  </form>
+  {% if rows %}<p class="muted">截至 {{ query_date }} · 显示前 {{ rows|length }} 个匹配结果</p>
+  <table class="watchlist-table"><thead><tr><th>股票</th><th>行业</th><th>数据状态</th><th>行情日期</th><th>方法事实日期</th></tr></thead><tbody>
+  {% for row in rows %}<tr><td><a class="stock-detail-link" href="{{ row.url }}"><strong>{{ row.name or row.symbol }}</strong> {{ row.symbol }}</a>{% if row.is_st %}<span class="tag tag-caution">风险警示</span>{% endif %}{% if row.is_suspended %}<span class="tag tag-muted">停牌</span>{% endif %}</td><td>{{ row.industry or '暂无行业资料' }}</td><td>{{ row.data_status }}</td><td>{{ row.market_date or '暂无' }}</td><td>{{ row.fact_date or '暂无' }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% elif q %}<div class="empty" role="status">截至 {{ query_date }}，库内未找到匹配股票。请检查代码、名称或查询日期。</div>
+  {% else %}<div class="empty">输入代码或名称，查询已在库的沪深股票。</div>{% endif %}
+</section>
+{% endblock %}

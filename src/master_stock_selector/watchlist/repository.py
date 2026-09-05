@@ -2138,7 +2138,7 @@ class WatchlistRepository:
         ]
 
     def brooks_stock_fact(
-        self, symbol: str, end_date: str, policy_version: str = ""
+        self, symbol: str, end_date: str, policy_version: str = "", *, event_id: str = ""
     ) -> dict[str, Any]:
         """Return the latest independent Brooks event fact available by end_date."""
 
@@ -2159,10 +2159,11 @@ class WatchlistRepository:
                   ON e.event_id=f.event_id AND e.policy_version=f.policy_version
                 WHERE f.symbol=? AND f.as_of_date <= ?
                   AND (? = '' OR f.policy_version = ?)
+                  AND (? = '' OR f.event_id = ?)
                 ORDER BY f.as_of_date DESC, f.state_rank, e.signal_date DESC
                 LIMIT 1
                 """,
-                (symbol, end_date, policy_version, policy_version),
+                (symbol, end_date, policy_version, policy_version, event_id, event_id),
             ).fetchone()
         if row is None:
             return {}
@@ -3736,7 +3737,7 @@ class WatchlistRepository:
             result.append(item)
         return result
 
-    def stock_detail(self, symbol: str, limit: int = 260) -> dict[str, Any]:
+    def stock_detail(self, symbol: str, limit: int = 260, *, as_of_date: str = "") -> dict[str, Any]:
         self.initialize()
         symbol = symbol.upper()
         with self.connect() as connection:
@@ -3748,17 +3749,17 @@ class WatchlistRepository:
                 LEFT JOIN stock_method_transition AS t
                   ON t.as_of_date = f.as_of_date AND t.symbol = f.symbol
                  AND t.method = f.method AND t.policy_version = f.policy_version
-                WHERE f.symbol = ?
+                WHERE f.symbol = ? AND (? = '' OR f.as_of_date <= ?)
                 ORDER BY f.as_of_date DESC, f.method
                 LIMIT ?
                 """,
-                (symbol, limit * 2),
+                (symbol, as_of_date, as_of_date, limit * 2),
             ).fetchall()
             latest_row = connection.execute(
-                "SELECT MAX(as_of_date) FROM stock_method_daily_fact WHERE symbol = ?",
-                (symbol,),
+                "SELECT MAX(as_of_date) FROM stock_method_daily_fact WHERE symbol = ? AND (? = '' OR as_of_date <= ?)",
+                (symbol, as_of_date, as_of_date),
             ).fetchone()
-            detail_date = str(latest_row[0] or "") if latest_row else ""
+            detail_date = as_of_date or (str(latest_row[0] or "") if latest_row else "")
             identity_row = next(
                 (
                     row
@@ -3780,8 +3781,8 @@ class WatchlistRepository:
             )
             history_total = int(
                 connection.execute(
-                    "SELECT COUNT(*) FROM stock_method_daily_fact WHERE symbol = ?",
-                    (symbol,),
+                    "SELECT COUNT(*) FROM stock_method_daily_fact WHERE symbol = ? AND (? = '' OR as_of_date <= ?)",
+                    (symbol, as_of_date, as_of_date),
                 ).fetchone()[0]
             )
         decoded = [

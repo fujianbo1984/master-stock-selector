@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date as calendar_date
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -13,6 +14,7 @@ from ...watchlist.charting import (
     keltner_channels,
     keltner_config_payload,
 )
+from ..stock_catalog import StockCatalog
 from ..users import (
     C1_ENTRY_VARIANT_LABELS,
     C1_STRUCTURE_STATE_LABELS,
@@ -55,6 +57,79 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
     open_position_navigation_rows = context.open_position_navigation_rows
     brooks_navigation_rows = context.brooks_navigation_rows
 
+    catalog = StockCatalog(market_reader.path, repository.path)
+
+    def selected_date(value: str | None) -> str:
+        if value:
+            try:
+                return calendar_date.fromisoformat(value).isoformat()
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="查询日期无效") from exc
+        return max(repository.latest_fact_date(), market_reader.safe_latest_market_date()) or calendar_date.today().isoformat()
+
+    def stored_stock(symbol: str, date: str | None) -> tuple[str, dict[str, Any], str]:
+        cutoff = selected_date(date)
+        inventory = catalog.inventory(cutoff)
+        symbol = symbol.strip().upper()
+        if len(symbol) == 6 and symbol.isdigit():
+            matches = [key for key in inventory if key.split(".")[0] == symbol]
+            if not matches:
+                matches = [key for key in catalog.inventory("9999-12-31") if key.split(".")[0] == symbol]
+            if len(matches) == 1:
+                symbol = matches[0]
+        item = catalog.lookup(symbol, cutoff)
+        if not item:
+            # A known stock may not yet have data at the requested historical cutoff.
+            item = catalog.inventory("9999-12-31").get(symbol)
+            if not item:
+                raise HTTPException(status_code=404, detail="库内未找到该股票")
+            item = {"symbol": symbol, "name": "", "industry": ""}
+        payload = repository.stock_detail(symbol, as_of_date=cutoff)
+        payload["identity"] = {**{k: item[k] for k in ("name", "list_date", "is_st", "is_suspended") if k in item}, **payload["identity"]}
+        payload["market_date"] = item.get("market_date", "")
+        payload["fact_date"] = item.get("fact_date", "")
+        if not payload["industry"] and item.get("industry"):
+            payload["industry"] = {"industry_name": item["industry"]}
+        return symbol, payload, cutoff
+
+    def preserve_context(navigation: dict[str, Any], request: Request) -> None:
+        navigation.setdefault("entry_query", navigation["query"])
+        event_id = request.query_params.get("event_id", "")[:120]
+        additions: dict[str, str] = {}
+        source_date = request.query_params.get("source_date", "")
+        lookback = request.query_params.get("lookback", "")
+        if source_date:
+            additions["source_date"] = selected_date(source_date)
+        if lookback in {"5", "10", "20", "60"}:
+            additions["lookback"] = lookback
+        if additions:
+            navigation["query"] += "&" + urlencode(additions)
+            navigation["entry_query"] += "&" + urlencode(additions)
+        if event_id:
+            navigation["entry_query"] += "&" + urlencode({"event_id": event_id})
+        if request.query_params.get("section") == "brooks-results":
+            parsed = urlsplit(navigation["list_url"])
+            params = dict(parse_qsl(parsed.query))
+            if source_date:
+                params["date"] = additions["source_date"]
+            if lookback in {"5", "10", "20", "60"}:
+                params["lookback"] = lookback
+            navigation["list_url"] = parsed.path + "?" + urlencode(params)
+
+    @router.get("/api/a/stocks/search")
+    def search_stocks(q: str = Query(default="", max_length=80), date: str | None = None) -> dict[str, Any]:
+        cutoff = selected_date(date)
+        rows = catalog.search(q, cutoff)
+        for item in rows:
+            item["url"] = "/a/stocks/" + item["symbol"] + "?" + urlencode({"date": cutoff, "section": "stock-search", "q": q})
+            item["data_status"] = "行情与方法事实" if item.get("market_date") and item.get("fact_date") else "已有行情 · 暂无方法事实" if item.get("market_date") else "已有方法事实" if item.get("fact_date") else "仅基础资料"
+        return {"query_date": cutoff, "rows": rows}
+
+    @router.get("/a/stocks", response_class=HTMLResponse)
+    def stock_search(request: Request, q: str = Query(default="", max_length=80), date: str | None = None) -> HTMLResponse:
+        result = search_stocks(q, date)
+        return render(request, "ashare/stock_search.html", {**result, "q": q, "active": "查股票", "latest_date": result["query_date"]})
+
     @router.get("/a/stocks/{symbol}", response_class=HTMLResponse)
     def stock_detail(
         request: Request,
@@ -78,9 +153,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         brooks_state: str = "h1",
         min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
-        payload = repository.stock_detail(symbol)
-        if not payload["latest"]:
-            raise HTTPException(status_code=404, detail="stock has no watchlist facts")
+        symbol, payload, selected = stored_stock(symbol, date)
         user = current_user(request)
         payload["manual"] = (
             users.review(user.user_id, symbol)
@@ -123,11 +196,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         payload["manual_label"] = MANUAL_LABELS.get(
             str(payload["manual"].get("manual_state") or "UNREVIEWED"), "未加入"
         )
-        fact_date = max(
-            (str(row.get("as_of_date") or "") for row in payload["latest"].values()),
-            default="",
-        )
-        query_date = date or fact_date
+        query_date = selected
         editing_trade = (
             users.trade_execution(user.user_id, edit_trade)
             if user is not None and edit_trade
@@ -222,11 +291,12 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             if section.partition("#")[0] == "brooks-results"
             else None,
         )
+        preserve_context(navigation, request)
         payload["market_metrics"] = market_reader.safe_stock_market_metrics(
             query_date,
             [symbol],
         ).get(symbol.upper(), {})
-        payload["brooks"] = repository.brooks_stock_fact(symbol, query_date, BROOKS_POLICY_VERSION)
+        payload["brooks"] = repository.brooks_stock_fact(symbol, query_date, BROOKS_POLICY_VERSION, event_id=request.query_params.get("event_id", "")[:120])
         if payload["brooks"]:
             brooks = payload["brooks"]
             brooks["state_label"] = BROOKS_STATE_LABELS.get(str(brooks.get("state") or ""), "未知")
@@ -244,15 +314,25 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         payload["anomaly_evidence"] = _stock_anomaly_evidence(
             repository, market_reader, payload, query_date, symbol
         )
+        payload["chart_ready"] = len(market_reader.safe_stock_chart_bars(symbol, query_date, limit=30)) >= 2
         payload["external_urls"] = _stock_external_urls(symbol)
         return render(
             request,
             "ashare/watchlist_stock.html",
             {
-                "active": "大师观察池",
+                "active": {"brooks-results": "Brooks 事件观察", "personal-observations": "我的观察", "stock-search": "查股票"}.get(section, "大师观察池"),
                 "query_date": query_date,
-                "latest_date": repository.latest_fact_date(),
+                "latest_date": query_date,
                 "stock": payload,
+                "symbol": symbol,
+                "stock_name": str(payload["identity"].get("name") or symbol),
+                "industry_name": str(payload["industry"].get("industry_name") or "行业待补"),
+                "market_metrics": payload["market_metrics"],
+                "external_urls": payload["external_urls"],
+                "chart_methods": _chart_method_statuses(payload["history"], query_date),
+                "keltner_presets": KELTNER_PRESETS,
+                "daily_keltner": default_keltner_preset("day")[1],
+                "initial_interval": "day" if section == "brooks-results" or method == "minervini" else "week" if method == "weinstein" else "",
                 "manual_labels": MANUAL_LABELS,
                 "minervini_check_labels": MINERVINI_CHECK_LABELS,
                 "minervini_metric_labels": MINERVINI_METRIC_LABELS,
@@ -293,9 +373,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         brooks_state: str = "h1",
         min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
-        payload = repository.stock_detail(symbol)
-        if not payload["latest"]:
-            raise HTTPException(status_code=404, detail="stock has no watchlist facts")
+        symbol, payload, selected = stored_stock(symbol, date)
         user = current_user(request)
         payload["manual"] = (
             users.review(user.user_id, symbol)
@@ -311,10 +389,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         payload["manual_label"] = MANUAL_LABELS.get(
             str(payload["manual"].get("manual_state") or "UNREVIEWED"), "未加入"
         )
-        query_date = date or max(
-            (str(row.get("as_of_date") or "") for row in payload["latest"].values()),
-            default="",
-        )
+        query_date = selected
         navigation = _stock_navigation(
             repository,
             market_reader,
@@ -361,6 +436,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             if section.partition("#")[0] == "brooks-results"
             else None,
         )
+        preserve_context(navigation, request)
         chart_methods = _chart_method_statuses(payload["history"], query_date)
         market_metrics = market_reader.safe_stock_market_metrics(query_date, [symbol]).get(
             symbol.upper(), {}
@@ -369,9 +445,9 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             request,
             "ashare/watchlist_stock_chart.html",
             {
-                "active": "大师观察池",
+                "active": {"brooks-results": "Brooks 事件观察", "personal-observations": "我的观察", "stock-search": "查股票"}.get(section, "大师观察池"),
                 "query_date": query_date,
-                "latest_date": repository.latest_fact_date(),
+                "latest_date": query_date,
                 "symbol": symbol.upper(),
                 "stock_name": str(payload["identity"].get("name") or symbol.upper()),
                 "industry_name": str(payload["industry"].get("industry_name") or "行业待补"),
@@ -384,9 +460,10 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
                     item["result"] == "PASS" and item["as_of_date"] == query_date
                     for item in chart_methods
                 ),
-                "back_url": f"/a/stocks/{symbol.upper()}?{navigation['query']}",
+                "back_url": f"/a/stocks/{symbol.upper()}?{navigation['entry_query']}",
                 "navigation": navigation,
                 "private_workspace": user is not None,
+                "initial_interval": "day" if section == "brooks-results" or method == "minervini" else "week" if method == "weinstein" else "",
                 "keltner_presets": KELTNER_PRESETS,
                 "daily_keltner": default_keltner_preset("day")[1],
             },
@@ -418,13 +495,8 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         brooks_state: str = "h1",
         min_amount: float = Query(default=0, ge=0, le=10000),
     ) -> HTMLResponse:
-        payload = repository.stock_detail(symbol)
-        if not payload["latest"]:
-            raise HTTPException(status_code=404, detail="stock has no watchlist facts")
-        query_date = date or max(
-            (str(row.get("as_of_date") or "") for row in payload["latest"].values()),
-            default="",
-        )
+        symbol, payload, selected = stored_stock(symbol, date)
+        query_date = selected
         navigation = _stock_navigation(
             repository,
             market_reader,
@@ -475,7 +547,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             "ashare/watchlist_stock_realtime.html",
             {
                 "query_date": query_date,
-                "latest_date": repository.latest_fact_date(),
+                "latest_date": query_date,
                 "symbol": symbol.upper(),
                 "stock_name": str(payload["identity"].get("name") or symbol.upper()),
                 "industry_name": str(payload["industry"].get("industry_name") or ""),

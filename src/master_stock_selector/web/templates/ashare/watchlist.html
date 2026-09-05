@@ -1,16 +1,37 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
-{% set prominent_investment_notice = true %}
+
 {% set market = "a" %}
 {% block heading %}大师观察池{% endblock %}
 {% block subtitle %}Weinstein 与 Minervini 独立筛选 · {{ query_date or '暂无事实日期' }}{% endblock %}
 {% block content %}
 <section class="section daily-hero watchlist-hero page-ledger-hero">
   <div>
-    <p class="eyebrow">大师观察池</p>
-    <h1>{{ '今日观察池' if filters.view == 'current' else '每日进入 / 退出' if filters.view == 'projection' else '正式状态变化' }}</h1>
-    <p class="muted watchlist-hero-summary">{% if filters.view == 'projection' %}回答“今天谁进入、谁退出”；每日收盘后用本周临时周K线更新，周五收盘后才成为 Weinstein 正式事实。{% elif filters.view == 'changes' %}查看单一方法已经确认的进入、持续与退出；Weinstein 按完整周确认，Minervini 按日确认。{% else %}查看当前符合 Weinstein 或 Minervini 独立方法的股票，不合成跨方法总分。{% endif %}</p>
+    <p class="eyebrow">发现股票 / 趋势候选 · 大师观察池</p>
+    <h1>{{ '趋势候选' if filters.view == 'current' else 'Weinstein 周内预变化' if filters.view == 'projection' else '正式状态变化' }}</h1>
+    <p class="muted watchlist-hero-summary">{% if filters.view == 'projection' %}回答“今天谁预进入、谁预退出”；每日收盘后用本周临时周K线更新，本周最后一个交易日收盘后才成为 Weinstein 正式事实。{% elif filters.view == 'changes' %}查看单一方法已经确认的进入、持续与退出；Weinstein 按完整周确认，Minervini 按日确认。{% else %}查看当前符合 Weinstein 或 Minervini 独立方法的股票，不合成跨方法总分。{% endif %}</p>
   </div>
+<p class="research-next-step">先选择方法与展示条件，再点击股票核对图形和入选依据；值得跟踪时，在个股页加入我的观察。</p>
+</section>
+<nav class="section daily-jumpbar query-mode-switch" aria-label="观察池查看模式">
+  <span>查看模式</span>
+  <div class="daily-tablist">
+    <a class="query-choice{% if filters.view == 'current' %} active{% endif %}" {% if filters.view == 'current' %}aria-current="page"{% endif %} href="{{ urls.current_view }}">当前观察池</a>
+    <a class="query-choice{% if filters.view == 'projection' %} active{% endif %}" {% if filters.view == 'projection' %}aria-current="page"{% endif %} href="{{ urls.projection_view }}">Weinstein 周内预变化</a>
+    <a class="query-choice{% if filters.view == 'changes' %} active{% endif %}" {% if filters.view == 'changes' %}aria-current="page"{% endif %} href="{{ urls.changes_view }}">正式状态变化</a>
+  </div>
+  <a class="text-link query-industry-link" href="/a/industries?date={{ query_date }}">查看行业观察 →</a>
+</nav>
+
+{% if filters.view == 'current' %}
+<section class="section grid kpi-grid watchlist-summary query-summary home-summary" aria-label="当前观察池方法口径">
+  {% for value, label in [('all','全部当前'),('weinstein','Weinstein'),('minervini','Minervini'),('both','两法同时符合')] %}
+  <a class="kpi kpi-link{% if filters.method == value %} kpi-accent{% endif %}" {% if filters.method == value %}aria-current="page"{% endif %} href="{{ urls.current_methods[value] }}"><span>{{ label }}</span><strong>{{ summary.current[value] }}</strong></a>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="section">
   <form class="form-row daily-filter daily-filter-compact" method="get" action="/a/daily">
     <input type="hidden" name="view" value="{{ filters.view }}">
     <input type="hidden" name="method" value="{{ filters.method }}">
@@ -22,33 +43,16 @@
         {% for value, label in [(50,'≥50亿（默认）'),(0,'不限'),(30,'≥30亿'),(100,'≥100亿')] %}<option value="{{ value }}" {% if filters.min_cap == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </label>
-    <label class="filter-search">搜索 <input name="q" value="{{ filters.q }}" placeholder="代码、名称或行业"></label>
+    <label class="filter-search">筛选当前列表 <input name="q" value="{{ filters.q }}" placeholder="代码、名称或行业"></label>
     <button class="button filter-submit" type="submit">应用展示条件</button>
   </form>
+  <p class="muted applied-list-filters">计数按当前展示条件计算 · 市值{% if filters.min_cap %} ≥{{ filters.min_cap }}亿{% else %}不限{% endif %}{% if filters.q %} · 列表匹配“{{ filters.q }}”{% endif %} · 已排除风险警示股</p>
 </section>
-
-{% if filters.view == 'current' %}
-<section class="section grid kpi-grid watchlist-summary query-summary home-summary" aria-label="当前观察池方法口径">
-  {% for value, label in [('all','全部当前'),('weinstein','Weinstein'),('minervini','Minervini'),('both','两法同时符合')] %}
-  <a class="kpi kpi-link{% if filters.method == value %} kpi-accent{% endif %}" {% if filters.method == value %}aria-current="page"{% endif %} href="{{ urls.current_methods[value] }}"><span>{{ label }}</span><strong>{{ summary.current[value] }}</strong></a>
-  {% endfor %}
-</section>
-{% endif %}
-
-<nav class="section daily-jumpbar query-mode-switch" aria-label="观察池查看模式">
-  <span>查看模式</span>
-  <div class="daily-tablist">
-    <a class="query-choice{% if filters.view == 'current' %} active{% endif %}" {% if filters.view == 'current' %}aria-current="page"{% endif %} href="{{ urls.current_view }}">当前观察池</a>
-    <a class="query-choice{% if filters.view == 'projection' %} active{% endif %}" {% if filters.view == 'projection' %}aria-current="page"{% endif %} href="{{ urls.projection_view }}">每日变化</a>
-    <a class="query-choice{% if filters.view == 'changes' %} active{% endif %}" {% if filters.view == 'changes' %}aria-current="page"{% endif %} href="{{ urls.changes_view }}">正式状态变化</a>
-  </div>
-  <a class="text-link query-industry-link" href="/a/industries?date={{ query_date }}">查看行业观察 →</a>
-</nav>
 
 {% if date_fallback %}
-<div class="notice" role="status">请求日期 {{ date_fallback }} 没有观察事实，当前显示最新事实日期 {{ query_date }}。</div>
+<div class="notice" role="status">请求日期 {{ date_fallback }} 没有观察事实，保留所选日期，不以最新事实替代。<a class="text-link" href="/a/daily?date={{ latest_date }}">查看最近可用日期 {{ latest_date }}</a></div>
 {% endif %}
-{% if filters.view == 'projection' %}<div class="notice projection-asof-note" role="note"><strong>截至 {{ query_date }} 收盘：</strong>“预进入/预退出”是今日相对上一交易日的临时周线投影；{% if rows and rows[0].is_final_session %}本交易日已收周，结果已进入正式确认流程。{% else %}周五收盘前均未确认。{% endif %}它不会改写完整周 Weinstein 事实，也不是买卖指令。</div>{% endif %}
+{% if filters.view == 'projection' %}<div class="notice projection-asof-note" role="note"><strong>截至 {{ query_date }} 收盘：</strong>“预进入/预退出”是今日相对上一交易日的临时周线投影；{% if rows and rows[0].is_final_session %}本交易日已收周，结果已进入正式确认流程。{% else %}本周最后一个交易日收盘前均未确认。{% endif %}它不会改写完整周 Weinstein 事实，也不是买卖指令。</div>{% endif %}
 {% if filters.industry %}
 <div class="section active-filter-summary" role="status"><span>当前行业：<strong>{{ industry_name or filters.industry }}</strong> <small>{{ filters.industry }}</small></span><a class="text-link" href="{{ urls.clear_industry }}">清除行业条件</a></div>
 {% endif %}
@@ -66,7 +70,7 @@
         <small>{{ row.effective_date }} · 已持续 {{ row.duration_weeks }} 周</small>
         <div class="index-method-result index-minervini-result"><span>Minervini 第二阶段</span><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></div>
       </article>{% endfor %}
-    </div>{% else %}<div class="empty">暂无四指数方法事实，请先运行大师观察池计算。</div>{% endif %}
+    </div>{% else %}<div class="empty">所选日期暂无四指数方法事实。</div>{% endif %}
     <p class="method-boundary-copy">“两法同时符合”只是两个独立当前事实的交集，不生成跨方法总分；系统不输出核心目标、买点或交易指令。</p>
   </div>
 </details>

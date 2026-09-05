@@ -49,7 +49,7 @@
   const privateOverlayUrl = root.dataset.privateOverlayUrl || "";
   const csrfToken = root.dataset.csrfToken || "";
   let limit = 260;
-  let interval = "day";
+  let interval = root.dataset.initialInterval || "day";
   let payload = null;
   let drawings = [];
   let activeTool = "browse";
@@ -120,7 +120,7 @@
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(chartViewStorageKey) || "null");
       if (!saved || typeof saved !== "object") return;
-      if (["day", "week"].includes(saved.interval)) interval = saved.interval;
+      if (!root.dataset.initialInterval && ["day", "week"].includes(saved.interval)) interval = saved.interval;
       if (saved.limit === null || saved.limit === 260) limit = saved.limit;
     } catch (_) { /* Browser storage can be unavailable or contain stale data. */ }
   };

@@ -37,7 +37,7 @@ def build_auth_router(
         return len(recent) >= 5
 
     @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
-    def login_page(request: Request, next: str = "/a/daily") -> Response:
+    def login_page(request: Request, next: str = "/a/dashboard") -> Response:
         if current_user(request) is not None:
             return RedirectResponse(_safe_next(next), status_code=303)
         password_changed = request.query_params.get("password_changed") == "1"
@@ -59,7 +59,7 @@ def build_auth_router(
         values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
         username = str((values.get("username") or [""])[0]).strip()
         password = str((values.get("password") or [""])[0])
-        next_path = _safe_next(str((values.get("next") or ["/a/daily"])[0]))
+        next_path = _safe_next(str((values.get("next") or ["/a/dashboard"])[0]))
         client_host = request.client.host if request.client else "unknown"
         attempt_key = f"{client_host}:{username.lower()}"
         if limited(attempt_key):
@@ -279,5 +279,5 @@ def require_user(request: Request) -> AuthenticatedUser:
 def _safe_next(value: str) -> str:
     candidate = value.strip()
     if not candidate.startswith("/") or candidate.startswith("//"):
-        return "/a/daily"
+        return "/a/dashboard"
     return candidate

@@ -791,7 +791,17 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     page = TestClient(app).get("/a/brooks-second-leg?date=2026-07-31&state=h1")
 
     assert page.status_code == 200
-    assert "强势股与 H1 观察池" in page.text
+    # An event-only stored stock is searchable and its selected event survives detail navigation.
+    client = TestClient(app)
+    found = client.get("/api/a/stocks/search?q=000001&date=2026-07-31").json()["rows"]
+    assert found[0]["symbol"] == "000001.SZ"
+    detail = client.get("/a/stocks/000001.SZ", params={"date": "2026-07-31", "event_id": event["event_id"], "section": "brooks-results", "source_date": "2026-08-03", "lookback": "60", "brooks_state": "history"})
+    assert detail.status_code == 200
+    assert "event_id=" in detail.text
+    assert "/a/brooks-second-leg?date=2026-08-03" in detail.text
+    assert "lookback=60" in detail.text
+    assert repository.brooks_stock_fact("000001.SZ", "2026-07-31", BROOKS_POLICY_VERSION, event_id="wrong-event") == {}
+    assert "Brooks 事件观察" in page.text
     assert "touch25：人工判断" in page.text
     assert "000001.SZ" in page.text
     assert "不与 Weinstein、Minervini 合成总分" in page.text
@@ -801,8 +811,7 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "B1延伸中" in page.text
     assert "跟随上涨" in page.text
     assert "回调观察" in page.text
-    assert "优先观察" in page.text
-    assert "H1重点观察" in page.text
+    assert 'aria-label="回调观察分层"' not in page.text  # H1 阶段不重复显示回调筛选
     assert "今日B1首次H1" in page.text
     assert "今日后续周期H1" in page.text
     assert "B1后首次H1" in page.text
@@ -909,13 +918,13 @@ def test_brooks_results_keep_previous_and_next_navigation_in_stock_chart(
     first_chart = client.get(f"/a/stocks/000001.SZ/chart?{first_chart_href}")
 
     assert first_chart.status_code == 200
-    assert "强势股与 H1 观察池 <b>1 / 2</b>" in first_chart.text
+    assert "Brooks 事件观察 <b>1 / 2</b>" in first_chart.text
     assert 'aria-label="下一只：ST示例"' in first_chart.text
     next_href = unescape(first_chart.text.split('data-chart-next href="', 1)[1].split('"', 1)[0])
     second_chart = client.get(next_href)
 
     assert second_chart.status_code == 200
-    assert "强势股与 H1 观察池 <b>2 / 2</b>" in second_chart.text
+    assert "Brooks 事件观察 <b>2 / 2</b>" in second_chart.text
     assert 'aria-label="上一只：平安银行"' in second_chart.text
     assert "/a/brooks-second-leg?date=2026-07-31" in second_chart.text
 

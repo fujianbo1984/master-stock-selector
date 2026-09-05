@@ -21,6 +21,7 @@ from .access_log import (
     GeoIpResolver,
     should_record_access,
 )
+from .display_time import sqlite_utc_to_shanghai
 from .owner import DEFAULT_SITE_OWNER_USERNAME
 from .routers.agent_api import build_agent_api_router
 from .routers.auth import build_auth_router, current_user
@@ -163,6 +164,7 @@ def create_app(
         return response
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+    templates.env.filters["shanghai_time"] = sqlite_utc_to_shanghai
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     def render(
@@ -171,30 +173,46 @@ def create_app(
         context: dict[str, Any],
     ) -> HTMLResponse:
         user = current_user(request)
-        public_items = [
-            ("大师观察池", "/a/daily"),
-            ("Brooks 第二腿", "/a/brooks-second-leg"),
-            ("市场全景", "/a/indices"),
-            ("行业观察", "/a/industries"),
+        nav_groups = [
+            {"label": "工作台", "items": [("工作台", "/a/dashboard")]},
+            {
+                "label": "发现股票",
+                "items": [
+                    ("发现股票", "/a/discover"),
+                    ("趋势候选", "/a/daily"),
+                    ("价格行为事件", "/a/brooks-second-leg"),
+                ],
+            },
+            {
+                "label": "我的研究",
+                "items": [
+                    ("我的观察", "/a/observations"),
+                    ("交易计划", "/a/plan"),
+                    ("交易复盘", "/a/review"),
+                ],
+            },
+            {
+                "label": "市场背景",
+                "items": [("市场全景", "/a/indices"), ("行业观察", "/a/industries")],
+            },
         ]
-        private_items = (
-            [
-                ("我的观察", "/a/observations"),
-                ("交易计划", "/a/plan"),
-                ("交易复盘", "/a/review"),
-            ]
-            if user is not None
-            else []
+        active = {"大师观察池": "趋势候选", "Brooks 事件观察": "价格行为事件"}.get(
+            str(context.get("active", "")), context.get("active", "")
         )
-        nav_groups = [{"label": "公开研究", "items": public_items}]
-        if user is not None:
-            nav_groups.append({"label": "站内共享", "items": [("站长动态", "/a/owner")]})
-        if private_items:
-            nav_groups.append({"label": "个人工作区", "items": private_items})
+        active_group = next(
+            (
+                group["label"]
+                for group in nav_groups
+                if any(label == active for label, _ in group["items"])
+            ),
+            "",
+        )
         base_context = {
             "request": request,
             "today": date.today().isoformat(),
             "a_nav_groups": nav_groups,
+            "active_group": active_group,
+            "nav_active": active,
             "a_nav": [item for group in nav_groups for item in group["items"]],
             "current_user": user,
             "is_site_owner": bool(
@@ -203,7 +221,8 @@ def create_app(
             "csrf_token": user.csrf_token if user is not None else "",
             "icp_filing": configured_icp_filing,
             "research_date": (
-                context.get("query_date")
+                context.get("date_missing")
+                or context.get("query_date")
                 or context.get("latest_date")
                 or request.query_params.get("date")
                 or ""
