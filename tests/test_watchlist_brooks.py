@@ -839,6 +839,10 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
 
     missing = TestClient(app).get("/a/brooks-second-leg?date=2026-08-03")
     assert "请求日期 2026-08-03 尚未生成 Brooks 事实" in missing.text
+    assert 'class="brooks-stage-count">—</span>' in missing.text
+    assert 'class="brooks-stage-count">0</span>' not in missing.text
+    assert 'class="result-count">未计算</small>' in missing.text
+    assert 'class="brooks-stage-count">0</span>' in page.text
     assert "000001.SZ" not in missing.text
 
     runs = TestClient(app).get("/a/runs")

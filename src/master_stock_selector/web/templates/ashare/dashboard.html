@@ -3,9 +3,10 @@
 {% block heading %}工作台{% endblock %}
 {% block subtitle %}发现研究对象，核对独立方法证据，记录自己的判断{% endblock %}
 {% block content %}
-<section class="section workspace-welcome">
-  <div><p class="eyebrow">沪深 A 股 · 个人研究工作台</p><h1>{{ '继续你的研究' if recent_observations else '从一只股票，开始有依据的观察' }}</h1><p>从沪深 A 股中发现研究对象，查看独立方法证据，持续记录自己的观察与交易复盘。</p><p class="muted">程序帮助缩小范围；是否关注、继续观察或放弃，由你判断。</p></div>
+<section class="section workspace-welcome{% if recent_observations %} workspace-returning{% endif %}">
+  <div><h1>{{ '继续你的研究' if recent_observations else '从一只股票，开始有依据的观察' }}</h1><p>从沪深 A 股中发现研究对象，查看独立方法证据，持续记录自己的观察与交易复盘。</p></div>
   <div class="workspace-start"><a class="button" href="/a/discover?date={{ query_date }}">寻找研究对象 →</a><a class="button button-secondary" href="/a/stocks?date={{ query_date }}">查询指定股票 →</a></div>
+<nav class="workspace-direct-routes" aria-label="直接发现股票"><a class="text-link" href="/a/daily?date={{ query_date }}">趋势候选 →</a><a class="text-link" href="/a/brooks-second-leg?date={{ query_date }}">价格行为事件 →</a></nav>
 </section>
 {% if recent_observations %}
 <section class="section panel"><div class="section-heading"><div><p class="eyebrow">重点优先 · 同状态按最近更新</p><h2>继续观察</h2></div><a class="text-link" href="/a/observations?date={{ query_date }}">全部 {{ observation_count }} 只观察与重点 →</a></div>

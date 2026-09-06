@@ -375,7 +375,7 @@
   };
   const resize = () => {
     const rect = chartNode.getBoundingClientRect();
-    const chartHeight = Math.max(520, Math.floor(rect.height || 640));
+    const chartHeight = Math.max(root.closest(".stock-price-workspace") ? 360 : 520, Math.floor(rect.height || 640));
     const volumeHeight = volumeInput.checked ? Math.max(104, Math.round(chartHeight * 0.2)) : 0;
     const drawingHeight = chartHeight - volumeHeight;
     chart.applyOptions({ width: Math.max(320, Math.floor(rect.width)), height: chartHeight });

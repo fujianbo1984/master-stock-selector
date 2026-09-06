@@ -1103,7 +1103,6 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     response = client.get("/a/daily?min_cap=0")
 
     assert response.status_code == 200
-    assert "大师观察池" in response.text
     assert "不构成投资建议或自动买卖指令" in response.text
     assert "趋势候选" in response.text
     assert "点击股票核对图形和入选依据" in response.text
@@ -2258,7 +2257,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert "data-chart-source=" not in page.text
     assert "data-chart-pane=" not in page.text
-    assert "stock-chart.js?v=20260905-workspace-v1" in page.text
+    assert "stock-chart.js?v=20260906-density-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert "data-chart-period-change" in page.text
     assert "data-chart-ohlcv" in page.text

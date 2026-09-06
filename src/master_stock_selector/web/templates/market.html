@@ -21,6 +21,15 @@
     <a class="{% if active_group == group.label %}active{% endif %}" {% if active_group == group.label %}aria-current="true"{% endif %} href="{{ group['items'][0][1] }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ group.label }}</a>
     {% endfor %}
   </nav>
+<form class="global-stock-search" action="/a/stocks" method="get" data-stock-search role="search" aria-label="查任意在库股票">
+  <label class="sr-only" for="global-stock-query">查股票</label>
+  <div class="global-stock-input">
+    <input id="global-stock-query" name="q" type="search" maxlength="80" placeholder="查股票 · 代码/名称" title="查询任意在库股票，回车查看结果" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="global-stock-options">
+    <ul id="global-stock-options" role="listbox" aria-label="在库股票" hidden></ul>
+  </div>
+  <input type="hidden" name="date" value="{{ request.query_params.get("date") or research_date or today }}">
+  <span class="global-stock-status" role="status" aria-live="polite"></span>
+</form>
   <div class="research-account" aria-label="当前个人工作区">
     {% if current_user %}
     <a class="research-account-profile" href="/account/password" aria-label="进入账户设置">
@@ -39,24 +48,24 @@
     {% endif %}
   </div>
 </header>
-{% for group in a_nav_groups if group.label == active_group and group['items']|length > 1 %}
+{% for group in a_nav_groups if not suppress_section_nav and group.label == active_group and group['items']|length > 1 %}
 <nav class="research-subnav" aria-label="{{ group.label }}">
-  <strong>{{ group.label }}</strong>
-  {% for label, href in group['items'] %}<a {% if nav_active == label %}class="active" aria-current="page" {% endif %}href="{{ href }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ label }}</a>{% endfor %}
+  {% for label, href in group['items'] %}<a {% if nav_active == label %}class="active" aria-current="page" {% endif %}href="{{ href }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ "使用导览" if label == "发现股票" else label }}</a>{% endfor %}
 </nav>
 {% endfor %}
-<form class="global-stock-search" action="/a/stocks" method="get" data-stock-search role="search" aria-label="查任意在库股票">
-  <label for="global-stock-query">查股票</label>
-  <div class="global-stock-input">
-    <input id="global-stock-query" name="q" type="search" maxlength="80" placeholder="在库股票代码或名称" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="global-stock-options">
-    <ul id="global-stock-options" role="listbox" aria-label="在库股票" hidden></ul>
-  </div>
-  <input type="hidden" name="date" value="{{ request.query_params.get("date") or research_date or today }}">
-  <button class="button button-secondary button-compact" type="submit">查询</button>
-  <span class="muted">截至 {{ request.query_params.get("date") or research_date or today }} · 不受观察池筛选限制</span>
-  <span class="global-stock-status" role="status" aria-live="polite"></span>
-</form>
+
 <script src="/static/stock-search.js?v=20260905-workspace-v4"></script>
+{% if not suppress_page_intro %}
+<section class="page-intro" aria-labelledby="page-title">
+  <div>
+    <h1 id="page-title">{{ self.heading() }}</h1>
+  </div>
+  <p>{{ self.subtitle() }}</p>
+</section>
+{% endif %}
+<div class="research-main">
+  {% block content %}{% endblock %}
+</div>
 {% if not suppress_investment_notice %}
 {% if prominent_investment_notice %}
 <aside class="investment-notice investment-notice-prominent" role="note" aria-label="投资风险提示">
@@ -67,16 +76,4 @@
 <aside class="investment-notice investment-notice-compact" role="note"><strong>研究工具</strong><span>不构成投资建议或自动买卖指令</span></aside>
 {% endif %}
 {% endif %}
-{% if not suppress_page_intro %}
-<section class="page-intro" aria-labelledby="page-title">
-  <div>
-    <span class="section-label">龙场悟道 · 沪深 A 股研究</span>
-    <h1 id="page-title">{{ self.heading() }}</h1>
-  </div>
-  <p>{{ self.subtitle() }}</p>
-</section>
-{% endif %}
-<div class="research-main">
-  {% block content %}{% endblock %}
-</div>
 {% endblock %}

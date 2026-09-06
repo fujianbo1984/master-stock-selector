@@ -1,5 +1,6 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
+{% set suppress_section_nav = true %}
 {% block heading %}{{ stock.identity.name or stock.symbol }}{% endblock %}
 {% block subtitle %}{{ stock.symbol }} · {{ stock.industry.industry_name or '行业待补' }} · 三套独立方法证据{% endblock %}
 {% block content %}
@@ -9,7 +10,7 @@
 
 <section class="section stock-identity-card stock-ledger-identity">
   <div class="stock-identity-main">
-    <p class="eyebrow">个股研究 · 当前状态 → 图形与证据 → 我的判断</p>
+
     <h1>{{ stock.identity.name or stock.symbol }} <small>{{ stock.symbol }}</small></h1>
     <p class="muted">上市：{{ stock.identity.list_date or '暂无' }}{% if stock.industry.industry_code %} · 行业：<a href="/a/industries/{{ stock.industry.industry_code }}/chart?date={{ query_date }}" title="打开 {{ stock.industry.industry_name }} 行业日线">{{ stock.industry.industry_name }}（申万2021三级）</a>{% endif %}{% if stock.identity.is_st %} · 风险警示{% endif %}{% if stock.identity.is_suspended %} · 当前停牌{% endif %}</p>
   </div>
@@ -26,7 +27,7 @@
     {% if navigation.total %}<span class="hero-navigation-context">{{ navigation.section_label }} · {{ navigation.position }} / {{ navigation.total }}</span>{% endif %}
     {% if navigation.previous %}<a class="button button-secondary button-compact" data-research-previous href="/a/stocks/{{ navigation.previous.symbol }}?{{ navigation.query }}">← {{ navigation.previous.name }}</a>{% endif %}
     {% if navigation.next %}<a class="button button-secondary button-compact" data-research-next href="/a/stocks/{{ navigation.next.symbol }}?{{ navigation.query }}">{{ navigation.next.name }} →</a>{% endif %}
-    <a class="button button-secondary" href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.entry_query }}">站内K线图</a>{% if stock.external_urls.tonghuashun_url %}<a class="button button-secondary" href="/a/stocks/{{ stock.symbol }}/realtime?{{ navigation.query }}">同花顺实时</a>{% endif %}<a class="text-link" data-research-return href="{{ navigation.list_url }}">返回{{ navigation.section_label }} →</a>
+    {% if stock.external_urls.tonghuashun_url %}<details class="stock-external-menu"><summary>外部行情</summary><a href="/a/stocks/{{ stock.symbol }}/realtime?{{ navigation.query }}">同花顺实时</a></details>{% endif %}<a class="text-link" data-research-return href="{{ navigation.list_url }}">返回{{ navigation.section_label }} →</a>
   </div>
 </section>
 
@@ -39,7 +40,7 @@
 </section>
 <nav class="stock-workspace-nav" aria-label="个股研究区域"><a href="#stock-price-workspace">价格图</a><a href="#method-evidence">两法证据</a><a href="#brooks-evidence">Brooks 事件</a>{% if private_workspace %}<a href="#personal-research">我的观察</a>{% endif %}<a href="#method-history">方法历史</a></nav>
 <section id="stock-price-workspace" class="section panel stock-price-workspace">
-  <div class="section-heading"><h2>价格与方法</h2>{% if stock.chart_ready %}<a class="text-link" href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.entry_query }}">打开完整图表工作区 →</a>{% endif %}</div>
+  <div class="section-heading"><h2>价格与方法</h2><a class="text-link" href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.entry_query }}">打开完整图表工作区 →</a></div>
   {% if stock.chart_ready %}{% set compact_chart = true %}{% include "ashare/_stock_chart_workspace.html" %}
   {% else %}<div class="empty" role="status">截至 {{ query_date }}，可追溯复权行情不足，暂不能绘制价格图。已有资料与方法事实仍可在本页查看。</div>{% endif %}
 </section>
