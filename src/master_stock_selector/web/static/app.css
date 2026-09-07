@@ -519,7 +519,8 @@ textarea { resize: vertical; }
 .kpi-link:hover { background: #fffaf1; box-shadow: inset 0 -3px 0 var(--accent); transform: translateY(-1px); }
 .kpi-link:hover::after, .kpi-link:focus-visible::after { opacity: 1; transform: translateX(2px); }
 .kpi-link:focus-visible { z-index: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
-.industry-summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.industry-summary-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.industry-summary-grid .kpi { min-height: 68px; padding: 10px 14px; }
 
 .table-wrap { width: 100%; overflow: visible; border-top: 1px solid var(--line-strong); scrollbar-color: var(--line-strong) transparent; }
 table { width: 100%; border-collapse: collapse; background: white; }
@@ -567,23 +568,43 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .table-pagination span { min-width: 145px; color: var(--muted); font-size: 11px; text-align: center; }
 .industry-observation-table { min-width: 1040px; }
 .industry-observation-table-compact { min-width: 780px; }
-.industry-heat-table { min-width: 1380px; }
+.industry-heat-table { min-width: 1080px; table-layout: fixed; }
 .industry-observation-table-compact th:first-child { width: 24%; }
 .industry-observation-table-compact th:nth-child(3),
 .industry-observation-table-compact th:nth-child(4) { width: 22%; }
-.industry-heat-table th:first-child { width: 17%; }
-.industry-heat-table th:nth-child(3),
-.industry-heat-table th:nth-child(4) { width: auto; }
-.industry-heat-table th:nth-child(7) { width: 18%; }
-.industry-heat-table td { vertical-align: top; }
+.industry-heat-table .industry-col { width: 18%; }
+.industry-heat-table .member-col { width: 5%; }
+.industry-heat-table .return-col { width: 7%; }
+.industry-heat-table .return-rank-col { width: 9%; }
+.industry-heat-table .breadth-col { width: 9%; }
+.industry-heat-table .brooks-col { width: 17%; }
+.industry-heat-table .method-col { width: 9%; }
+.industry-heat-table .quality-col { width: 10%; }
+.industry-heat-table th,
+.industry-heat-table td { padding: 9px 10px; vertical-align: top; }
+.industry-heat-table thead th { text-align: center; }
+.industry-heat-table thead th:first-child { text-align: left; }
+.industry-heat-table .industry-table-groups th { color: var(--text); background: #eee9df; font-size: 11px; letter-spacing: .3px; vertical-align: middle; }
+.industry-heat-table tbody td:not(:first-child) { white-space: nowrap; }
+.industry-method-primary,
+.industry-method-compact { line-height: 1.35; }
+.industry-method-primary > span { display: block; }
+.industry-method-primary small,
+.industry-method-compact small { white-space: nowrap; }
 .industry-observation-table td small, .table-subline { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 .heat-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
 .heat-tags-roomy { margin: 14px 0; }
 .workspace-hot-industries .muted { margin: 14px 0 0; }
-.hot-industry-list { display: grid; border: 1px solid var(--line); border-bottom: 0; }
-.hot-industry-list > a { display: grid; grid-template-columns: minmax(180px, 1.25fr) repeat(3, minmax(150px, 1fr)); gap: 18px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
-.hot-industry-list > a:hover { background: #fbf3e4; }
-.hot-industry-list span { display: grid; gap: 3px; }
+.hot-industry-list { display: grid; border: 1px solid var(--line); border-bottom: 0; background: var(--panel); }
+.hot-industry-list-head,
+.hot-industry-row { display: grid; grid-template-columns: minmax(210px, 1.35fr) minmax(140px, .8fr) minmax(150px, .85fr) minmax(280px, 1.6fr); gap: 18px; align-items: center; }
+.hot-industry-list-head { padding: 8px 14px; border-bottom: 1px solid var(--line-strong); color: var(--muted); background: #f3f0e9; font-size: 10px; font-weight: 650; letter-spacing: .25px; }
+.hot-industry-list > .hot-industry-row { padding: 11px 14px; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
+.hot-industry-list > .hot-industry-row:hover { background: #fbf3e4; }
+.hot-industry-row > span { display: grid; gap: 3px; min-width: 0; }
+.hot-industry-name strong { font-family: "Songti SC", "STSong", serif; font-size: 15px; }
+.hot-industry-metric strong,
+.hot-industry-method strong { white-space: nowrap; }
 .hot-industry-list small { color: var(--muted); font-size: 10px; }
 .industry-heat-evidence .industry-chart-kpis { margin-bottom: 0; }
 

@@ -1861,6 +1861,10 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert "不计分、不判定“主线”" in page.text
     assert "不构成投资建议或自动买卖指令" in page.text
     assert "industry-observation-table-compact" in page.text
+    assert '<th colspan="4">热度表现</th>' in page.text
+    assert '<th colspan="3">方法事实</th>' in page.text
+    assert 'data-sort-column="6">Brooks Leg1</th>' in page.text
+    assert "app.css?v=20260907-industry-ledger-v1" in page.text
     assert "<th>Weinstein 新入/重进</th>" not in page.text
     assert "新/重" in page.text
     assert "小样本，仅看数量" in page.text

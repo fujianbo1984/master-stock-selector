@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}龙场悟道 · 股票研究{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260906-density-v2">
+  <link rel="stylesheet" href="/static/app.css?v=20260907-industry-ledger-v1">
 </head>
 <body class="app-body {% block body_class %}{% endblock %}">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -85,7 +85,13 @@
       let savedState = {};
       try { savedState = JSON.parse(sessionStorage.getItem(stateKey) || "{}"); } catch (_) {}
       const saveState = () => { try { sessionStorage.setItem(stateKey, JSON.stringify({...savedState, page: currentPage})); } catch (_) {} };
-      const headers = Array.from(table.querySelectorAll("thead th"));
+      const explicitHeaders = Array.from(table.querySelectorAll("thead th[data-sort-column]"));
+      const headers = explicitHeaders.length ? explicitHeaders : Array.from(table.querySelectorAll("thead th"));
+      const columnIndexFor = (th, fallbackIndex) => {
+        const explicitIndex = Number(th.dataset.sortColumn);
+        return Number.isInteger(explicitIndex) ? explicitIndex : fallbackIndex;
+      };
+      const headerForColumn = (columnIndex) => headers.find((th, headerIndex) => columnIndexFor(th, headerIndex) === columnIndex);
       const pageSize = Number(table.dataset.pageSize || 0);
       let currentPage = 0;
       let refreshPagination = () => {};
@@ -144,15 +150,16 @@
         refreshPagination();
       };
 
-      headers.forEach((th, index) => {
+      headers.forEach((th, headerIndex) => {
+        const columnIndex = columnIndexFor(th, headerIndex);
         th.tabIndex = 0;
         th.setAttribute("role", "button");
         th.setAttribute("aria-sort", "none");
         th.setAttribute("aria-label", `按${th.textContent.trim()}排序`);
         const sort = () => {
           const direction = th.dataset.direction === "asc" ? "desc" : "asc";
-          sortRows(th, index, direction);
-          savedState = {sortIndex: index, direction};
+          sortRows(th, columnIndex, direction);
+          savedState = {sortIndex: columnIndex, direction};
           saveState();
         };
         th.addEventListener("click", sort);
@@ -162,12 +169,14 @@
       });
 
       const defaultIndex = Number(table.dataset.defaultSort);
-      if (Number.isInteger(defaultIndex) && headers[defaultIndex]) {
+      const defaultHeader = headerForColumn(defaultIndex);
+      if (Number.isInteger(defaultIndex) && defaultHeader) {
         const defaultDirection = table.dataset.defaultDirection === "asc" ? "asc" : "desc";
-        sortRows(headers[defaultIndex], defaultIndex, defaultDirection);
+        sortRows(defaultHeader, defaultIndex, defaultDirection);
       }
-      if (Number.isInteger(savedState.sortIndex) && headers[savedState.sortIndex]) {
-        sortRows(headers[savedState.sortIndex], savedState.sortIndex, savedState.direction === "asc" ? "asc" : "desc");
+      const savedHeader = headerForColumn(savedState.sortIndex);
+      if (Number.isInteger(savedState.sortIndex) && savedHeader) {
+        sortRows(savedHeader, savedState.sortIndex, savedState.direction === "asc" ? "asc" : "desc");
       }
       currentPage = Math.max(0, Number(savedState.page) || 0);
       refreshPagination();
