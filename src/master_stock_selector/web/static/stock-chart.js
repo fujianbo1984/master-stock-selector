@@ -114,7 +114,7 @@
     root.querySelectorAll("[data-framework-indicator], [data-framework-legend]").forEach(item => { item.hidden = item.dataset.frameworkIndicator !== undefined ? item.dataset.frameworkIndicator !== framework : item.dataset.frameworkLegend !== framework; });
     root.querySelectorAll("[data-framework-status]").forEach(item => { item.hidden = item.dataset.frameworkStatus !== framework; });
     b1Input.disabled = interval !== "day";
-    b1Input.title = interval === "day" ? "" : "B1仅在日线显示";
+    b1Input.title = interval === "day" ? "" : "Leg1仅在日线显示";
   };
   const restoreChartView = () => {
     try {
@@ -209,7 +209,7 @@
         },
         {
           id: `${leg.id}:end`, time: leg.end_date, position: "aboveBar", shape: "circle",
-          color: "#0875d1", text: "B1", size: 0.65,
+          color: "#0875d1", text: "Leg1", size: 0.65,
         },
       ]);
       b1Series.push(series);

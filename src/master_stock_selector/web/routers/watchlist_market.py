@@ -35,20 +35,30 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
     render = context.render
     repository = context.repository
     market_reader = context.market_reader
+    cached_industry_heat = context.cached_industry_heat
 
     @router.get("/a/industries", response_class=HTMLResponse)
     def industries(
         request: Request,
         date: str | None = None,
+        view: str = "hot",
+        horizon: int = Query(default=5),
         method: str = "all",
         min_members: int = Query(default=1, ge=1, le=10000),
         q: str = "",
     ) -> HTMLResponse:
         query_date = _selected_date(repository, date, market_reader)
-        rows = [_decorate_industry(row) for row in repository.industry_observations(query_date)]
+        view_mode = view.lower().strip()
+        if view_mode not in {"hot", "all"}:
+            raise HTTPException(status_code=422, detail="unsupported industry view")
+        if horizon not in {5, 20}:
+            raise HTTPException(status_code=422, detail="unsupported heat horizon")
+        rows = [_decorate_industry(row) for row in cached_industry_heat(query_date)]
         query = q.strip().lower()
         filtered = []
         for row in rows:
+            if view_mode == "hot" and not bool(row.get("is_hot")):
+                continue
             if int(row.get("eligible_member_count") or 0) < min_members:
                 continue
             if method == "weinstein" and int(row.get("weinstein_pass_count") or 0) <= 0:
@@ -66,6 +76,21 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
             ):
                 continue
             filtered.append(row)
+        filtered.sort(
+            key=lambda row: (
+                -(
+                    float(row[f"return_{horizon}d_pct"])
+                    if row.get(f"return_{horizon}d_pct") is not None
+                    else -1000000.0
+                ),
+                -(
+                    float(row["breadth_5d_pct"])
+                    if row.get("breadth_5d_pct") is not None
+                    else -1.0
+                ),
+                str(row.get("industry_code") or ""),
+            )
+        )
         return render(
             request,
             "ashare/watchlist_industries.html",
@@ -75,15 +100,26 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
                 "latest_date": repository.latest_fact_date(),
                 "available_dates": repository.available_dates(30),
                 "rows": filtered,
-                "filters": {"method": method, "min_members": min_members, "q": q},
+                "filters": {
+                    "view": view_mode,
+                    "horizon": horizon,
+                    "method": method,
+                    "min_members": min_members,
+                    "q": q,
+                },
                 "summary": {
                     "industries": len(rows),
+                    "hot": sum(1 for row in rows if bool(row.get("is_hot"))),
                     "active": sum(1 for row in rows if int(row.get("union_pass_count") or 0) > 0),
                     "small_sample": sum(
                         1 for row in rows if row.get("quality_state") == "SMALL_SAMPLE"
                     ),
                     "unknown": sum(1 for row in rows if row.get("quality_state") == "UNKNOWN"),
-                    "coverage": (rows[0].get("membership_coverage_pct") if rows else None),
+                    "coverage": (
+                        round(float(rows[0].get("membership_coverage_pct") or 0), 1)
+                        if rows
+                        else None
+                    ),
                 },
             },
         )
@@ -98,7 +134,31 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
         payload = repository.industry_detail(query_date, industry_code)
         if not payload:
             raise HTTPException(status_code=404, detail="industry observation not found")
-        members = [_decorate_industry_member(row) for row in payload["members"]]
+        heat = next(
+            (
+                row
+                for row in cached_industry_heat(query_date)
+                if str(row.get("industry_code") or "").upper() == industry_code.upper()
+            ),
+            {},
+        )
+        brooks_phases = {
+            str(row.get("symbol") or "").upper(): str(row.get("phase") or "")
+            for row in heat.get("brooks_members", [])
+        }
+        members = []
+        for raw in payload["members"]:
+            item = _decorate_industry_member(row=raw)
+            item["brooks_phase"] = brooks_phases.get(str(item.get("symbol") or "").upper(), "")
+            item["brooks_phase_label"] = {
+                "new": "今日新Leg1",
+                "h1": "今日首次H1",
+                "cycle_h1": "今日周期H1",
+            }.get(
+                item["brooks_phase"],
+                "当前Leg1" if item["brooks_phase"] else "暂无事实",
+            )
+            members.append(item)
         analysis_bars = market_reader.safe_industry_proxy_bars(
             [str(row.get("symbol") or "") for row in members],
             query_date,
@@ -121,6 +181,7 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
                 "query_date": query_date,
                 "latest_date": repository.latest_fact_date(),
                 "observation": observation,
+                "heat": _decorate_industry(dict(heat)) if heat else {},
                 "confirmation": confirmation,
                 "members": members,
                 "bars": bars,
@@ -256,7 +317,7 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
             "industry_level": "L3",
             "policy_version": INDUSTRY_POLICY_VERSION,
             "rows": [
-                _decorate_industry(row) for row in repository.industry_observations(query_date)
+                _decorate_industry(row) for row in cached_industry_heat(query_date)
             ],
         }
 
@@ -265,7 +326,26 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
         payload = repository.industry_detail(query_date, industry_code)
         if not payload:
             raise HTTPException(status_code=404, detail="industry observation not found")
-        return {"query_date": query_date, **payload}
+        heat = next(
+            (
+                row
+                for row in cached_industry_heat(query_date)
+                if str(row.get("industry_code") or "").upper() == industry_code.upper()
+            ),
+            {},
+        )
+        phases = {
+            str(row.get("symbol") or "").upper(): str(row.get("phase") or "")
+            for row in heat.get("brooks_members", [])
+        }
+        members = [
+            {
+                **row,
+                "brooks_phase": phases.get(str(row.get("symbol") or "").upper(), ""),
+            }
+            for row in payload["members"]
+        ]
+        return {"query_date": query_date, **payload, "members": members, "heat": heat}
 
     @router.get("/api/a/indices/{query_date}")
     def api_indices(query_date: str) -> dict[str, Any]:

@@ -33,7 +33,7 @@ def register_watchlist(subparsers: SubparserRegistry) -> None:
     mode.add_argument(
         "--brooks-only",
         action="store_true",
-        help="只生成独立 Brooks 强势第一腿—第二腿事实",
+        help="只生成独立 Brooks 强势 Leg1—第二腿事实",
     )
     mode.add_argument(
         "--brooks-schema",

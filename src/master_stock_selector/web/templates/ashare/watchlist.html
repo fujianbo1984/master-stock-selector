@@ -15,7 +15,7 @@
   <summary><span><strong>数据与方法说明</strong><small>{% if summary.reconstructed %}含历史重建事实 · {% endif %}市值仅影响展示 · 四指数不参与个股评分</small></span><span class="disclosure-action">展开</span></summary>
   <div class="stock-disclosure-body methodology-context-body"><p class="research-next-step">先选择方法与展示条件，再点击股票核对图形和入选依据；值得跟踪时，在个股页加入我的观察。</p>
     {% if summary.reconstructed %}<p class="context-callout">当前结果含历史重建事实，表示依据现有本地行情重算，不冒充当日曾实际保存的观察结果。</p>{% endif %}
-    <p>已按 {{ query_date }} 当日风险标识排除风险警示股 {{ summary.excluded_st }} 只；市值不参与 Weinstein 或 Minervini 判定。非风险警示入选股中，低于 50 亿 {{ summary.small_cap }} 只；默认仅展示总市值不低于 50 亿的股票，且市值缺失不展示。{% if filters.min_cap and summary.missing_market_cap %}市值缺失的 {{ summary.missing_market_cap }} 只在当前门槛下不显示。{% endif %}</p>
+    <p>已按 {{ query_date }} 当日风险标识排除风险警示股 {{ summary.excluded_st }} 只；市值不参与 Weinstein 或 Minervini 判定。非风险警示入选股中，低于 50 亿 {{ summary.small_cap }} 只；默认不限制总市值，市值条件仅用于用户主动筛选。{% if filters.min_cap and summary.missing_market_cap %}市值缺失的 {{ summary.missing_market_cap }} 只在当前门槛下不显示。{% endif %}</p>
     <div class="section-heading methodology-context-heading"><div><p class="eyebrow">市场上下文</p><h2>四指数独立判断</h2></div><a class="text-link" href="/a/indices?date={{ query_date }}">查看完整证据 →</a></div>
     {% if indices %}<div class="index-stage-grid">
       {% for row in indices %}<article class="index-stage-card stage-{{ row.stage|lower }}">
@@ -56,7 +56,7 @@
     <label class="filter-date">日期 <input name="date" value="{{ query_date }}" type="date"></label>
     <label>总市值
       <select name="min_cap">
-        {% for value, label in [(50,'≥50亿（默认）'),(0,'不限'),(30,'≥30亿'),(100,'≥100亿')] %}<option value="{{ value }}" {% if filters.min_cap == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        {% for value, label in [(0,'不限（默认）'),(30,'≥30亿'),(50,'≥50亿'),(100,'≥100亿')] %}<option value="{{ value }}" {% if filters.min_cap == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </label>
     <label class="filter-search">筛选当前列表 <input name="q" value="{{ filters.q }}" placeholder="代码、名称或行业"></label>

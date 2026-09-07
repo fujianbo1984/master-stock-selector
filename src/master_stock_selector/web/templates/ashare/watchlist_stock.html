@@ -54,18 +54,18 @@
       <div><dt>证据日</dt><dd>{{ brooks.as_of_date }}</dd></div>
       <div><dt>当前状态</dt><dd>{{ brooks.state_label }}</dd></div>
       <div><dt>首次触发窗口</dt><dd>{{ brooks.duration_bars }}个交易日 · {{ brooks.signal_date }}</dd></div>
-      <div><dt>Brooks B1·第一腿</dt><dd>{{ brooks.evidence.b1_bars or brooks.duration_bars }}个交易日 · {{ brooks.evidence.b1_anchor_date or brooks.start_date }} → {{ brooks.evidence.b1_end_date or brooks.signal_date }}</dd></div>
-      <div><dt>B1状态 / 幅度</dt><dd>{{ '已冻结' if brooks.evidence.b1_status == 'FROZEN' else '延伸中' }} / {{ '%.2f'|format(brooks.evidence.b1_move_atr or brooks.move_atr) }} ATR{% if brooks.evidence.b1_frozen_on %} · {{ brooks.evidence.b1_frozen_on }}{% endif %}</dd></div>
-      <div><dt>B1最大连续收涨</dt><dd>{{ brooks.evidence.b1_max_consecutive_up_bars or brooks.duration_bars }}日{% if brooks.evidence.b1_max_consecutive_up_start %} · {{ brooks.evidence.b1_max_consecutive_up_start }} → {{ brooks.evidence.b1_max_consecutive_up_end }}{% endif %}</dd></div>
-      <div><dt>触发 / 完整B1效率</dt><dd>{{ '%.1f%%'|format(brooks.path_efficiency * 100) }} / {{ '%.1f%%'|format((brooks.evidence.b1_path_efficiency or brooks.path_efficiency) * 100) }}</dd></div>
-      <div><dt>B1 / 当前周期回吐</dt><dd>{{ '%.1f%%'|format((brooks.evidence.b1_current_retracement or 0) * 100) }} / {{ '%.1f%%'|format(brooks.retracement_pct) }}</dd></div>
+      <div><dt>Brooks Leg1</dt><dd>{{ brooks.evidence.b1_bars or brooks.duration_bars }}个交易日 · {{ brooks.evidence.b1_anchor_date or brooks.start_date }} → {{ brooks.evidence.b1_end_date or brooks.signal_date }}</dd></div>
+      <div><dt>Leg1状态 / 幅度</dt><dd>{{ '已冻结' if brooks.evidence.b1_status == 'FROZEN' else '延伸中' }} / {{ '%.2f'|format(brooks.evidence.b1_move_atr or brooks.move_atr) }} ATR{% if brooks.evidence.b1_frozen_on %} · {{ brooks.evidence.b1_frozen_on }}{% endif %}</dd></div>
+      <div><dt>Leg1最大连续收涨</dt><dd>{{ brooks.evidence.b1_max_consecutive_up_bars or brooks.duration_bars }}日{% if brooks.evidence.b1_max_consecutive_up_start %} · {{ brooks.evidence.b1_max_consecutive_up_start }} → {{ brooks.evidence.b1_max_consecutive_up_end }}{% endif %}</dd></div>
+      <div><dt>触发 / 完整Leg1效率</dt><dd>{{ '%.1f%%'|format(brooks.path_efficiency * 100) }} / {{ '%.1f%%'|format((brooks.evidence.b1_path_efficiency or brooks.path_efficiency) * 100) }}</dd></div>
+      <div><dt>Leg1 / 当前周期回吐</dt><dd>{{ '%.1f%%'|format((brooks.evidence.b1_current_retracement or 0) * 100) }} / {{ '%.1f%%'|format(brooks.retracement_pct) }}</dd></div>
       <div><dt>当前周期峰值</dt><dd>{{ brooks.evidence.cycle_peak_date or '—' }} · {{ '%.2f'|format(brooks.evidence.cycle_peak_close or brooks.prior_high) }}</dd></div>
       <div><dt>最近 H1 / 回调判断</dt><dd>{{ brooks.h1_date or brooks.evidence.last_h1_date or '—' }} / 人工</dd></div>
       <div><dt>现价 / 前高</dt><dd>{{ '%.2f'|format(brooks.current_close) }} / {{ '%.2f'|format(brooks.prior_high) }}</dd></div>
       <div><dt>紧失效 / 结构失效</dt><dd>{{ '%.2f'|format(brooks.tight_invalidation) }} / {{ '%.2f'|format(brooks.structural_invalidation) }}</dd></div>
     </dl>
     <p class="muted">状态依据：{{ brooks.state_reason }} · 规则版本：{{ brooks.policy_version }} · 来源：{{ brooks.origin }}</p>
-    {% else %}<div class="empty">截至当前查询日没有 Brooks 第一腿事件事实。</div>{% endif %}
+    {% else %}<div class="empty">截至当前查询日没有 Brooks Leg1 事件事实。</div>{% endif %}
   </div>
 </details>
 

@@ -2,7 +2,7 @@
 {% set suppress_page_intro = true %}
 
 {% block heading %}Brooks 事件观察{% endblock %}
-{% block subtitle %}今日B1触发 → B1延伸 → 首次回调 → B1首次H1 → 跟随周期 · {{ query_date or date_missing or '暂无事实日期' }}{% endblock %}
+{% block subtitle %}今日Leg1触发 → Leg1延伸 → 首次回调 → Leg1首次H1 → 跟随周期 · {{ query_date or date_missing or '暂无事实日期' }}{% endblock %}
 {% block content %}
 {% set selected_brooks_date = query_date or date_missing %}
 {% set facts_available = schema_ready and query_date and not date_missing %}
@@ -11,7 +11,7 @@
 
     <h1>价格行为事件 <small>Brooks 事件观察</small></h1>
 
-    <details class="brooks-method-help"><summary>观察方法与使用说明</summary><p>选择阶段，点击股票核对图形与路径边界。</p><p>B1只记录首次高质量向上推动；首个收盘回调出现后永久冻结，后续新高单独归入跟随周期。</p></details>
+    <details class="brooks-method-help"><summary>观察方法与使用说明</summary><p>选择阶段，点击股票核对图形与路径边界。</p><p>Leg1只记录首次高质量向上推动；首个收盘回调出现后永久冻结，后续新高单独归入跟随周期。</p></details>
   </div>
   <div class="brooks-page-status" role="status">
     <span>查询日 {{ query_date or date_missing or '—' }}</span>
@@ -25,7 +25,7 @@
 <section class="section brooks-workspace">
   <aside class="brooks-stage-rail" aria-label="Brooks 观察链">
     <div class="brooks-stage-heading"><span>观察链</span><small>独立日线事实</small></div>
-    {% for value, code, label, description in [('new','NEW','今日B1触发','3/5/8日首次达标'),('expanding','B1','B1延伸中','尚未出现首次收盘回调'),('pullback','PB','回调观察','等待本轮首次 H1'),('h1','H1','今日B1首次H1','B1后第1轮回调的首次向上尝试'),('followthrough','FT','跟随上涨','B1已冻结，周期峰值更新'),('cycle_h1','CH1','今日后续周期H1','第2轮及以后的周期事实'),('history','HIS','历史 H1','最近若干事实日的 H1')] %}
+    {% for value, code, label, description in [('new','NEW','今日Leg1触发','3/5/8日首次达标'),('expanding','Leg1','Leg1延伸中','尚未出现首次收盘回调'),('pullback','PB','回调观察','等待本轮首次 H1'),('h1','H1','今日Leg1首次H1','Leg1后第1轮回调的首次向上尝试'),('followthrough','FT','跟随上涨','Leg1已冻结，周期峰值更新'),('cycle_h1','CH1','今日后续周期H1','第2轮及以后的周期事实'),('history','HIS','历史 H1','最近若干事实日的 H1')] %}
     {% set stage_current = state == value or (value == 'pullback' and state in ['priority','watch','immature','deep']) %}
     <a class="brooks-stage{% if stage_current %} is-current{% endif %}" {% if stage_current %}aria-current="page"{% endif %} href="/a/brooks-second-leg?date={{ selected_brooks_date }}&amp;state={{ value }}&amp;lookback={{ lookback }}&amp;industry={{ industry|urlencode }}&amp;min_amount={{ min_amount }}&amp;q={{ q|urlencode }}">
       <span class="brooks-stage-code">{{ code }}</span>
@@ -81,13 +81,13 @@
     {% endif %}
 
     <div class="brooks-results-heading">
-      <div><p class="eyebrow">当前结果</p><h2>{% if state == 'priority' %}优先观察{% elif state == 'watch' %}H1重点观察{% elif state == 'immature' %}回调未成熟{% elif state == 'deep' %}深回调/老化{% elif state == 'cycle_done' %}本轮H1已过{% elif state == 'h1' %}今日B1首次H1 <small>重点 {{ counts.h1_watch if facts_available else '—' }} · 未成熟 {{ counts.h1_immature if facts_available else '—' }} · 深回调 {{ counts.h1_deep if facts_available else '—' }}</small>{% elif state == 'cycle_h1' %}今日后续周期H1 <small>重点 {{ counts.cycle_h1_watch if facts_available else '—' }} · 未成熟 {{ counts.cycle_h1_immature if facts_available else '—' }} · 深回调 {{ counts.cycle_h1_deep if facts_available else '—' }}</small>{% else %}独立候选{% endif %} <small class="result-count">{{ (rows|length ~ ' 个事件') if facts_available else '未计算' }}</small></h2></div>
+      <div><p class="eyebrow">当前结果</p><h2>{% if state == 'priority' %}优先观察{% elif state == 'watch' %}H1重点观察{% elif state == 'immature' %}回调未成熟{% elif state == 'deep' %}深回调/老化{% elif state == 'cycle_done' %}本轮H1已过{% elif state == 'h1' %}今日Leg1首次H1 <small>重点 {{ counts.h1_watch if facts_available else '—' }} · 未成熟 {{ counts.h1_immature if facts_available else '—' }} · 深回调 {{ counts.h1_deep if facts_available else '—' }}</small>{% elif state == 'cycle_h1' %}今日后续周期H1 <small>重点 {{ counts.cycle_h1_watch if facts_available else '—' }} · 未成熟 {{ counts.cycle_h1_immature if facts_available else '—' }} · 深回调 {{ counts.cycle_h1_deep if facts_available else '—' }}</small>{% else %}独立候选{% endif %} <small class="result-count">{{ (rows|length ~ ' 个事件') if facts_available else '未计算' }}</small></h2></div>
       {% if rows %}<div class="section-actions"><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="brooks-results">下载代码（{{ rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="brooks-results">复制代码</button></div>{% endif %}
     </div>
   {% if rows %}
   <div class="table-wrap brooks-table-wrap">
     <table class="watchlist-table brooks-table" data-sortable="true"{% if rows|length > 40 %} data-page-size="40"{% endif %}>
-      <thead><tr><th>事件 / 股票</th><th>触发 / B1</th><th>触发窗口质量</th><th>周期回调</th><th>H1 证据</th><th>失效距离</th><th>事实日期</th></tr></thead>
+      <thead><tr><th>事件 / 股票</th><th>触发 / Leg1</th><th>触发窗口质量</th><th>周期回调</th><th>H1 证据</th><th>失效距离</th><th>事实日期</th></tr></thead>
       <tbody>
       {% for row in rows %}
       {% set leg = row.evidence or {} %}
@@ -102,10 +102,10 @@
           </div>
           <small class="table-subline">{{ row.industry or '行业待补' }}</small>
         </td>
-        <td data-sort="{{ row.signal_date }}"><strong>首次触发：{{ row.duration_bars }}日窗口 · {{ row.signal_date }}</strong><small class="table-subline">B1：{{ leg.b1_bars or row.duration_bars }} 个交易日 · {{ leg.b1_anchor_date or row.start_date }} → {{ leg.b1_end_date or row.signal_date }}</small><small class="table-subline">最大连续收涨：{{ leg.b1_max_consecutive_up_bars or row.duration_bars }} 日{% if leg.b1_max_consecutive_up_start %} · {{ leg.b1_max_consecutive_up_start }} → {{ leg.b1_max_consecutive_up_end }}{% endif %}</small><small class="table-subline">{{ '已冻结' if leg.b1_status == 'FROZEN' else '延伸中' }} · {{ '%.2f'|format(leg.b1_move_atr or row.move_atr) }} ATR{% if leg.b1_frozen_on %} · 冻结日 {{ leg.b1_frozen_on }}{% endif %}</small></td>
-        <td data-sort="{{ row.path_efficiency }}"><div>效率 <strong>{{ '%.1f%%'|format(row.path_efficiency * 100) }}</strong>{% if row.priority_quality %} <span class="brooks-quality-tag">触发优质</span>{% endif %}</div><small class="table-subline">CLV {{ '%.1f%%'|format(row.mean_close_location * 100) }} · 重叠 {{ '%.1f%%'|format(row.mean_overlap * 100) }}</small><small class="table-subline">阳线 {{ row.bullish_body_count }}/{{ row.duration_bars }} · 20日额 {{ '%.2f'|format(row.median_amount20_yi) }}亿</small><small class="table-subline">完整B1效率 {{ '%.1f%%'|format((leg.b1_path_efficiency or row.path_efficiency) * 100) }}</small></td>
+        <td data-sort="{{ row.signal_date }}"><strong>首次触发：{{ row.duration_bars }}日窗口 · {{ row.signal_date }}</strong><small class="table-subline">Leg1：{{ leg.b1_bars or row.duration_bars }} 个交易日 · {{ leg.b1_anchor_date or row.start_date }} → {{ leg.b1_end_date or row.signal_date }}</small><small class="table-subline">最大连续收涨：{{ leg.b1_max_consecutive_up_bars or row.duration_bars }} 日{% if leg.b1_max_consecutive_up_start %} · {{ leg.b1_max_consecutive_up_start }} → {{ leg.b1_max_consecutive_up_end }}{% endif %}</small><small class="table-subline">{{ '已冻结' if leg.b1_status == 'FROZEN' else '延伸中' }} · {{ '%.2f'|format(leg.b1_move_atr or row.move_atr) }} ATR{% if leg.b1_frozen_on %} · 冻结日 {{ leg.b1_frozen_on }}{% endif %}</small></td>
+        <td data-sort="{{ row.path_efficiency }}"><div>效率 <strong>{{ '%.1f%%'|format(row.path_efficiency * 100) }}</strong>{% if row.priority_quality %} <span class="brooks-quality-tag">触发优质</span>{% endif %}</div><small class="table-subline">CLV {{ '%.1f%%'|format(row.mean_close_location * 100) }} · 重叠 {{ '%.1f%%'|format(row.mean_overlap * 100) }}</small><small class="table-subline">阳线 {{ row.bullish_body_count }}/{{ row.duration_bars }} · 20日额 {{ '%.2f'|format(row.median_amount20_yi) }}亿</small><small class="table-subline">完整Leg1效率 {{ '%.1f%%'|format((leg.b1_path_efficiency or row.path_efficiency) * 100) }}</small></td>
         <td data-sort="{{ row.maximum_low_retracement }}"><strong>收盘回调 {{ '%.1f%%'|format(row.retracement_pct) }}</strong><small class="table-subline">盘中最大 {{ '%.1f%%'|format(row.maximum_retracement_pct) }} · {{ '%.2f'|format(row.pullback_atr) }} ATR</small><small class="table-subline">{{ leg.pullback_bars or 0 }} 个交易日 · 低点 {{ '%.2f'|format(row.pullback_low_anchor) }}</small><small class="table-subline">touch25：人工判断</small></td>
-        <td data-sort="{{ row.h1_date }}"><strong>{{ row.h1_date or '尚未出现' }}</strong><small class="table-subline">{% if leg.pullback_cycle == 1 %}B1后首次H1{% elif leg.pullback_cycle %}第 {{ leg.pullback_cycle }} 轮后续周期H1{% else %}尚未进入H1周期{% endif %} · {{ row.pullback_tier_label }}</small><small class="table-subline">阳线 · CLV {% if leg.h1_clv is not none %}{{ '%.1f%%'|format(leg.h1_clv * 100) }}{% else %}—{% endif %}</small><small class="table-subline">突破前日高点 {% if leg.h1_breakout_pct is not none %}{{ '%+.2f%%'|format(leg.h1_breakout_pct * 100) }}{% else %}—{% endif %}</small></td>
+        <td data-sort="{{ row.h1_date }}"><strong>{{ row.h1_date or '尚未出现' }}</strong><small class="table-subline">{% if leg.pullback_cycle == 1 %}Leg1后首次H1{% elif leg.pullback_cycle %}第 {{ leg.pullback_cycle }} 轮后续周期H1{% else %}尚未进入H1周期{% endif %} · {{ row.pullback_tier_label }}</small><small class="table-subline">阳线 · CLV {% if leg.h1_clv is not none %}{{ '%.1f%%'|format(leg.h1_clv * 100) }}{% else %}—{% endif %}</small><small class="table-subline">突破前日高点 {% if leg.h1_breakout_pct is not none %}{{ '%+.2f%%'|format(leg.h1_breakout_pct * 100) }}{% else %}—{% endif %}</small></td>
         <td data-sort="{{ row.structural_risk_pct or 0 }}"><div>紧 {{ '%.2f'|format(row.tight_invalidation) }}{% if row.tight_risk_pct is not none %} · {{ '%+.1f%%'|format(row.tight_risk_pct) }}{% endif %}</div><small class="table-subline">结构 {{ '%.2f'|format(row.structural_invalidation) }}{% if row.structural_risk_pct is not none %} · {{ '%+.1f%%'|format(row.structural_risk_pct) }}{% endif %}</small></td>
         <td data-sort="{{ row_date }}"><strong>{{ row_date }}</strong><small class="table-subline">{{ row.state_reason }}</small><details class="brooks-evidence"><summary>逐项证据</summary><small>回调起点 {{ leg.pullback_start_date or '—' }} · H1 {{ row.h1_date or '—' }}</small><small>次日状态 {{ row.next_open_status }} · 已观察 {{ row.bars_after_signal }} 个交易日</small></details></td>
       </tr>
@@ -117,7 +117,7 @@
   <div class="brooks-empty" role="status">
     {% if not schema_ready %}
     <h3>Brooks 方法尚未初始化</h3>
-    <p>独立事实表准备完成后，这里会显示 B1 触发/冻结、跟随周期、回调观察和 H1 出现日。</p>
+    <p>独立事实表准备完成后，这里会显示 Leg1 触发/冻结、跟随周期、回调观察和 H1 出现日。</p>
     {% elif date_missing %}
     <h3>尚无 Brooks 计算事实</h3>
     <p>请求日期 {{ date_missing }} 尚未生成 Brooks 事实；本页不会自动回退日期。</p>
@@ -138,10 +138,10 @@
 <details class="section stock-disclosure methodology-context brooks-method-boundary" role="note">
   <summary><span><strong>冻结方法边界</strong><small>≥3 ATR · 路径效率≥0.75 · CLV≥0.65 · 重叠≤0.35 · 40日冷却</small></span><span class="disclosure-action">展开</span></summary>
   <div class="stock-disclosure-body methodology-context-body">
-    <p>系统以 3/5/8 日窗口触发 B1；触发后只在首次收盘回调前延伸 B1。首次出现收盘低于 B1 最高收盘价时，B1 永久冻结；后续新高只更新跟随周期峰值。</p>
+    <p>系统以 3/5/8 日窗口触发 Leg1；触发后只在首次收盘回调前延伸 Leg1。首次出现收盘低于 Leg1 最高收盘价时，Leg1 永久冻结；后续新高只更新跟随周期峰值。</p>
     <p>回调观察分层同样适用于H1当日：未成熟表示时间或深度不足；重点观察表示回调2–10日、15%–50%且0.5–3 ATR；更深、更久的事件降入深回调/老化。出现H1不会绕过该分层。</p>
-    <p>“今日B1首次H1”只包含 B1 后第1轮回调；第2轮及以后的H1保留为客观周期事实，但单独进入“今日后续周期H1”，不与B1首次H1混合。</p>
-    <p>“触发优质”只评价原始 3/5/8 日窗口：路径效率≥0.85、CLV≥0.75且重叠≤0.30。完整B1指标另行陈列，暂不改变排序和 H1 定义。</p>
+    <p>“今日Leg1首次H1”只包含 Leg1 后第1轮回调；第2轮及以后的H1保留为客观周期事实，但单独进入“今日后续周期H1”，不与Leg1首次H1混合。</p>
+    <p>“触发优质”只评价原始 3/5/8 日窗口：路径效率≥0.85、CLV≥0.75且重叠≤0.30。完整Leg1指标另行陈列，暂不改变排序和 H1 定义。</p>
     <p>touch25 不再是自动门槛或状态。页面只陈列收盘回调、盘中最大回调、ATR 深度、天数和低点，由用户人工判断回调是否充分。</p>
     <p class="method-boundary-copy">H1 只是回调后的首次向上尝试，不是机械买点；本页不与 Weinstein、Minervini 合成总分，也不代替用户选择止损或仓位。</p>
   </div>

@@ -55,7 +55,7 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
         method: str = "all",
         state: str = "all",
         manual: str = "all",
-        min_cap: int = Query(default=50),
+        min_cap: int = Query(default=0),
         industry: str = "",
         q: str = "",
     ) -> Response:
@@ -74,8 +74,8 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
         validate_date(date)
         market_cap_floor = _market_cap_floor(min_cap)
         query_date = date or _selected_date(repository, None, market_reader)
-        # 首页仍取总市值以执行默认的小市值过滤，但不加载流通市值和
-        # 20 日成交额中位数，减少首次打开观察池的数据库工作量。
+        # 列表仍取总市值供用户按需筛选，但不加载流通市值和20日成交额
+        # 中位数，减少首次打开观察池的数据库工作量。
         formal_rows = rows_for_user(request, query_date, include_liquidity=False)
         formal_base_rows = _base_filter_rows(
             formal_rows,
@@ -415,7 +415,7 @@ def build_pool_router(context: WatchlistRouteContext) -> APIRouter:
     def api_watchlist(
         query_date: str,
         method: str = Query(default="all", pattern="^(all|minervini|weinstein|both)$"),
-        min_cap: int = Query(default=50),
+        min_cap: int = Query(default=0),
     ) -> dict[str, Any]:
         market_cap_floor = _market_cap_floor(min_cap)
         rows = cached_rows(query_date, include_liquidity=True)

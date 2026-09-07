@@ -1509,7 +1509,8 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "Brooks 强势股与 H1 独立证据" in detail.text
     assert "最近 H1 / 回调判断" in detail.text
     assert "首次触发窗口" in detail.text
-    assert "Brooks B1·第一腿" in detail.text
+    assert "Brooks Leg1" in detail.text
+    assert "Brooks B1·第一腿" not in detail.text
     assert "峰值扩展跨度" not in detail.text
     assert "第一腿扩展" not in detail.text
     assert "/ 人工" in detail.text
@@ -1827,7 +1828,7 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     _seed_chart_market(tmp_path / "market.sqlite3")
     client = _client(tmp_path)
 
-    page = client.get("/a/industries?date=2026-07-31")
+    page = client.get("/a/industries?date=2026-07-31&view=all")
     chart = client.get("/a/industries/851911.SI/chart?date=2026-07-31")
     payload = client.get("/api/a/industries/2026-07-31").json()
     detail = client.get("/api/a/industries/2026-07-31/851911.SI").json()
@@ -2128,7 +2129,7 @@ def test_legacy_product_pages_are_not_mounted(tmp_path):
         assert client.get(path).status_code == 404
 
 
-def test_watchlist_excludes_st_and_hides_small_cap_by_default(tmp_path):
+def test_watchlist_excludes_st_and_includes_small_cap_by_default(tmp_path):
     watchlist_path = tmp_path / "master_watchlist.sqlite3"
     market_path = tmp_path / "market.sqlite3"
     _seed_watchlist(watchlist_path)
@@ -2154,7 +2155,7 @@ def test_watchlist_excludes_st_and_hides_small_cap_by_default(tmp_path):
     assert "ST未来名称" not in default_page.text
     assert "ST未来名称" not in stock_page.text
     assert "平安银行" in default_page.text
-    assert "小盘示例" not in default_page.text
+    assert "小盘示例" in default_page.text
     assert "小盘示例" in all_page.text
     assert "总市值" in default_page.text
     assert "20日成交中位" not in default_page.text
@@ -2165,6 +2166,12 @@ def test_watchlist_excludes_st_and_hides_small_cap_by_default(tmp_path):
     assert 'data-copy-tradingview-list="daily-results"' in default_page.text
     assert 'data-tradingview-symbol="SZSE:000001"' in default_page.text
     assert "小盘示例" not in filtered_page.text
+    default_payload = client.get("/api/a/watchlist/2026-07-31").json()
+    assert default_payload["min_cap"] == 0
+    assert {row["symbol"] for row in default_payload["rows"]} == {
+        "000001.SZ",
+        "000003.SZ",
+    }
     assert {row["symbol"] for row in payload["rows"]} == {"000001.SZ"}
     assert payload["rows"][0]["total_market_cap_yi"] == 80.0
     assert payload["rows"][0]["median_amount_20d_yi"] == 2.0
@@ -2328,7 +2335,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'chartLayersStorageKey = "masterstock-chart:layers:v3"' in controller
     assert 'const tradeInfoInput = root.querySelector("[data-trade-info]");' in controller
     assert 'const b1Input = root.querySelector("[data-b1]");' in controller
-    assert 'text: "B1"' in controller
+    assert 'text: "Leg1"' in controller
     assert "id: `${leg.id}:start`" in controller
     assert "payload.brooks_first_legs" in controller
     assert "tradeInfoInput?.addEventListener" in controller

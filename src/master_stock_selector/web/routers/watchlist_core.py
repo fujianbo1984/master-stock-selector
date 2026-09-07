@@ -55,6 +55,13 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
             }
             for row in active_reviews[:6]
         ]
+        hot_industries = sorted(
+            [row for row in context.cached_industry_heat(query_date) if bool(row.get("is_hot"))],
+            key=lambda row: (
+                int(row.get("return_5d_rank") or 1000000),
+                str(row.get("industry_code") or ""),
+            ),
+        )[:5]
         return context.render(
             request,
             "ashare/dashboard.html",
@@ -63,6 +70,7 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
                 "query_date": query_date,
                 "recent_observations": recent,
                 "observation_count": len(active_reviews),
+                "hot_industries": hot_industries,
             },
         )
 

@@ -567,10 +567,25 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); box-
 .table-pagination span { min-width: 145px; color: var(--muted); font-size: 11px; text-align: center; }
 .industry-observation-table { min-width: 1040px; }
 .industry-observation-table-compact { min-width: 780px; }
+.industry-heat-table { min-width: 1380px; }
 .industry-observation-table-compact th:first-child { width: 24%; }
 .industry-observation-table-compact th:nth-child(3),
 .industry-observation-table-compact th:nth-child(4) { width: 22%; }
+.industry-heat-table th:first-child { width: 17%; }
+.industry-heat-table th:nth-child(3),
+.industry-heat-table th:nth-child(4) { width: auto; }
+.industry-heat-table th:nth-child(7) { width: 18%; }
+.industry-heat-table td { vertical-align: top; }
 .industry-observation-table td small, .table-subline { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.heat-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.heat-tags-roomy { margin: 14px 0; }
+.workspace-hot-industries .muted { margin: 14px 0 0; }
+.hot-industry-list { display: grid; border: 1px solid var(--line); border-bottom: 0; }
+.hot-industry-list > a { display: grid; grid-template-columns: minmax(180px, 1.25fr) repeat(3, minmax(150px, 1fr)); gap: 18px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
+.hot-industry-list > a:hover { background: #fbf3e4; }
+.hot-industry-list span { display: grid; gap: 3px; }
+.hot-industry-list small { color: var(--muted); font-size: 10px; }
+.industry-heat-evidence .industry-chart-kpis { margin-bottom: 0; }
 
 .stock-primary-link { display: grid; gap: 3px; }
 .stock-primary-link strong { font-family: "Songti SC", "STSong", serif; font-size: 15px; }

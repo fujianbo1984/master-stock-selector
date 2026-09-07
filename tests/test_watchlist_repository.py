@@ -427,6 +427,7 @@ def test_stock_and_industry_lookup_scope_to_requested_rows(tmp_path):
                 ("000001.SZ", "850001.SI", "目标行业"),
                 ("000002.SZ", "850001.SI", "目标行业"),
                 ("000003.SZ", "850002.SI", "其他行业"),
+                ("000004.SZ", "850001.SI", "目标行业"),
             ],
         )
         connection.execute(
@@ -450,6 +451,18 @@ def test_stock_and_industry_lookup_scope_to_requested_rows(tmp_path):
     )
     assert repository.industry_member_symbols("2026-07-31", "850001.SI") == [
         "000001.SZ"
+    ]
+    assert repository.industry_memberships("2026-07-31") == [
+        {
+            "symbol": "000001.SZ",
+            "industry_code": "850001.SI",
+            "industry_name": "目标行业",
+        },
+        {
+            "symbol": "000003.SZ",
+            "industry_code": "850002.SI",
+            "industry_name": "其他行业",
+        },
     ]
 
 
@@ -500,6 +513,32 @@ def test_market_reader_builds_disclosed_equal_weight_industry_proxy(tmp_path):
         }
     ]
     assert MarketDataReader(path).trade_drawdown_low("000001.SZ", "2026-07-30", "2026-07-31") == 9.0
+
+
+def test_market_reader_returns_bounded_point_in_time_period_changes(tmp_path):
+    path = tmp_path / "market.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE daily_bars (
+                market TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
+                close REAL, adj_type TEXT NOT NULL,
+                PRIMARY KEY (market, symbol, trade_date, adj_type)
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO daily_bars VALUES ('ashare', '000001.SZ', ?, ?, 'qfq')",
+            [(f"2026-07-{day:02d}", float(day)) for day in range(1, 22)],
+        )
+
+    values = MarketDataReader(path).stock_period_returns(
+        ["000001.SZ"], "2026-07-21", horizons=(1, 5, 20)
+    )["000001.SZ"]
+
+    assert values["return_1d_pct"] == 5.0
+    assert values["return_5d_pct"] == 31.25
+    assert values["return_20d_pct"] == 2000.0
 
 
 def test_industry_proxy_calendar_ignores_unrelated_newer_symbols(tmp_path):

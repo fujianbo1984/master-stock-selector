@@ -139,7 +139,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         method: str = "all",
         state: str = "all",
         manual: str = "all",
-        min_cap: int = Query(default=50),
+        min_cap: int = Query(default=0),
         industry: str = "",
         q: str = "",
         section: str = "",
@@ -306,7 +306,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             ):
                 cycle = int((brooks.get("evidence") or {}).get("pullback_cycle") or 0)
                 brooks["state_label"] = (
-                    "今日B1首次H1" if cycle == 1 else "今日后续周期H1"
+                    "今日Leg1首次H1" if cycle == 1 else "今日后续周期H1"
                 )
             current_close = float(brooks.get("evidence", {}).get("current_close") or 0)
             brooks["current_close"] = current_close
@@ -362,7 +362,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         method: str = "all",
         state: str = "all",
         manual: str = "all",
-        min_cap: int = Query(default=50),
+        min_cap: int = Query(default=0),
         industry: str = "",
         q: str = "",
         section: str = "",
@@ -488,7 +488,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         method: str = "all",
         state: str = "all",
         manual: str = "all",
-        min_cap: int = Query(default=50),
+        min_cap: int = Query(default=0),
         industry: str = "",
         q: str = "",
         section: str = "",

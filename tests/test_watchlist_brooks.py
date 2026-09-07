@@ -807,18 +807,18 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "不与 Weinstein、Minervini 合成总分" in page.text
     assert "机械买点" in page.text
     assert "观察链" in page.text
-    assert "今日B1触发" in page.text
-    assert "B1延伸中" in page.text
+    assert "今日Leg1触发" in page.text
+    assert "Leg1延伸中" in page.text
     assert "跟随上涨" in page.text
     assert "回调观察" in page.text
     assert 'aria-label="回调观察分层"' not in page.text  # H1 阶段不重复显示回调筛选
-    assert "今日B1首次H1" in page.text
+    assert "今日Leg1首次H1" in page.text
     assert "今日后续周期H1" in page.text
-    assert "B1后首次H1" in page.text
+    assert "Leg1后首次H1" in page.text
     assert "重点观察区间" in page.text
     assert "收盘回调" in page.text
     assert "首次触发：8日窗口" in page.text
-    assert "B1：8 个交易日" in page.text
+    assert "Leg1：8 个交易日" in page.text
     assert "峰值扩展跨度" not in page.text
     assert "最大连续收涨：6 日" in page.text
     assert "data-download-tradingview-list=\"brooks-results\"" in page.text

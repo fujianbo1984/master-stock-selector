@@ -19,5 +19,19 @@
 {% if not current_user %}<p class="muted">公开查询无需登录。<a class="text-link" href="/login?next=/a/dashboard">登录后保存观察和复盘记录 →</a></p>{% else %}<p class="muted">还没有进行中的观察。从个股研究页加入后，会在这里继续。</p>{% endif %}
 </section>
 {% endif %}
+{% if hot_industries %}
+<section class="section panel workspace-hot-industries">
+  <div class="section-heading"><div><p class="eyebrow">近期热点观察</p><h2>价格走强且多数成员同步上涨</h2></div><a class="text-link" href="/a/industries?date={{ query_date }}&amp;view=hot">查看全部候选 →</a></div>
+  <div class="hot-industry-list">
+    {% for row in hot_industries %}<a href="/a/industries/{{ row.industry_code }}/chart?date={{ query_date }}">
+      <span><strong>{{ row.industry_name }}</strong><small>{{ row.industry_code }}</small></span>
+      <span><small>5日成员等权</small><strong class="{{ 'positive' if row.return_5d_pct >= 0 else 'negative' }}">{{ '+' if row.return_5d_pct >= 0 else '' }}{{ row.return_5d_pct }}%</strong></span>
+      <span><small>上涨广度</small><strong>{{ row.up_5d_count }} / {{ row.priced_5d_count }}</strong></span>
+      <span><small>今日方法动态</small><strong>Leg1 H1 {{ row.brooks_h1_count + row.brooks_cycle_h1_count }} · 新Leg1 {{ row.brooks_new_count }}</strong><small>W {{ row.weinstein_pass_count }} · M {{ row.minervini_pass_count }}</small></span>
+    </a>{% endfor %}
+  </div>
+  <p class="muted">热点资格只看价格与上涨广度；Brooks、Weinstein、Minervini 事实保持独立。</p>
+</section>
+{% endif %}
 <section class="section workspace-support"><div><strong>需要先了解市场？</strong><p>四指数周线 Stage 与行业观察，为个股研究提供背景。</p><a class="text-link" href="/a/indices?date={{ query_date }}">查看市场背景 →</a></div><div><strong>已有自己的交易？</strong><p>交易计划可按需制定；发生实际成交后，记录并回到复盘。</p><a class="text-link" href="/a/review">进入交易复盘 →</a></div></section>
 {% endblock %}

@@ -1253,6 +1253,75 @@ class MarketDataReader:
         except (FileNotFoundError, sqlite3.Error):
             return {}
 
+    def stock_period_returns(
+        self,
+        symbols: Sequence[str],
+        end_date: str,
+        *,
+        horizons: Sequence[int] = (1, 5, 20),
+    ) -> dict[str, dict[str, float | None]]:
+        """Return PIT point-to-point qfq returns for a bounded set of horizons."""
+
+        requested = sorted({str(symbol).upper() for symbol in symbols if symbol})
+        periods = sorted({int(value) for value in horizons if int(value) > 0})
+        if not requested or not end_date or not periods:
+            return {}
+        dates = self.trading_dates(end_date)
+        if not dates:
+            return {}
+        latest_date = dates[-1]
+        anchors = {
+            period: dates[-period - 1] if len(dates) > period else "" for period in periods
+        }
+        target_dates = {latest_date, *(value for value in anchors.values() if value)}
+        closes: dict[str, dict[str, float]] = defaultdict(dict)
+        with self.connect() as connection:
+            date_placeholders = ",".join("?" for _ in target_dates)
+            ordered_dates = sorted(target_dates)
+            for start in range(0, len(requested), 700):
+                batch = requested[start : start + 700]
+                symbol_placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"""
+                    SELECT symbol, trade_date, close
+                    FROM daily_bars
+                    WHERE market='ashare' AND adj_type='qfq'
+                      AND symbol IN ({symbol_placeholders})
+                      AND trade_date IN ({date_placeholders})
+                    """,
+                    (*batch, *ordered_dates),
+                ).fetchall()
+                for row in rows:
+                    close = row["close"]
+                    if close is not None and float(close) > 0:
+                        closes[str(row["symbol"]).upper()][str(row["trade_date"])] = float(close)
+
+        result: dict[str, dict[str, float | None]] = {}
+        for symbol in requested:
+            latest_close = closes.get(symbol, {}).get(latest_date)
+            item: dict[str, float | None] = {}
+            for period in periods:
+                anchor_close = closes.get(symbol, {}).get(anchors[period]) if anchors[period] else None
+                item[f"return_{period}d_pct"] = (
+                    round((latest_close / anchor_close - 1.0) * 100.0, 6)
+                    if latest_close is not None and anchor_close is not None and anchor_close > 0
+                    else None
+                )
+            result[symbol] = item
+        return result
+
+    def safe_stock_period_returns(
+        self,
+        symbols: Sequence[str],
+        end_date: str,
+        *,
+        horizons: Sequence[int] = (1, 5, 20),
+    ) -> dict[str, dict[str, float | None]]:
+        try:
+            return self.stock_period_returns(symbols, end_date, horizons=horizons)
+        except (FileNotFoundError, sqlite3.Error, TypeError, ValueError):
+            return {}
+
     def industry_proxy_bars(
         self,
         symbols: Sequence[str],
@@ -3600,7 +3669,9 @@ class WatchlistRepository:
         members: list[dict[str, Any]] = []
         for membership in memberships:
             symbol = str(membership["symbol"])
-            identity = identities.get(symbol) or {}
+            identity = identities.get(symbol)
+            if identity is None:
+                continue
             if bool(identity.get("is_st")):
                 continue
             symbol_facts = facts.get(symbol, {})
@@ -3653,10 +3724,45 @@ class WatchlistRepository:
                 for row in memberships
                 if str(row.get("industry_code") or "").upper() == code
                 and str(row.get("assignment_state") or "") == "VERIFIED"
+                and str(row.get("symbol") or "") in identities
                 and not bool(identities.get(str(row.get("symbol") or ""), {}).get("is_st"))
             }
             - {""}
         )
+
+    def industry_memberships(self, as_of_date: str) -> list[dict[str, str]]:
+        """Return unique verified, non-ST PIT SW2021 L3 memberships in one read."""
+
+        self.initialize()
+        with self.connect() as connection:
+            memberships = self._membership_rows_as_of(connection, as_of_date)
+            identities = {
+                str(row["symbol"]): row for row in self._identity_rows_as_of(connection, as_of_date)
+            }
+        verified_by_symbol: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in memberships:
+            symbol = str(row.get("symbol") or "").upper()
+            if (
+                symbol
+                and str(row.get("assignment_state") or "") == "VERIFIED"
+                and symbol in identities
+                and not bool(identities.get(symbol, {}).get("is_st"))
+            ):
+                verified_by_symbol[symbol].append(row)
+        result: list[dict[str, str]] = []
+        for symbol, rows in verified_by_symbol.items():
+            codes = {str(row.get("industry_code") or "").upper() for row in rows}
+            if len(codes) != 1:
+                continue
+            row = rows[0]
+            result.append(
+                {
+                    "symbol": symbol,
+                    "industry_code": str(row.get("industry_code") or "").upper(),
+                    "industry_name": str(row.get("industry_name") or ""),
+                }
+            )
+        return sorted(result, key=lambda row: (row["industry_code"], row["symbol"]))
 
     def stock_industry(self, symbol: str, as_of_date: str) -> dict[str, Any]:
         """Return the verified PIT industry row for one stock without scanning all members."""

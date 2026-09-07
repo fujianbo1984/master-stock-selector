@@ -47,6 +47,21 @@
 <section class="section panel"><div class="empty">当前市场库没有足够的该行业成分股开盘、最高、最低、收盘日线，不生成代理日线。</div></section>
 {% endif %}
 
+{% if heat %}
+<section class="section panel industry-heat-evidence">
+  <div class="section-heading"><div><p class="eyebrow">近期热度证据</p><h2>价格、广度与独立方法动态</h2></div><span class="status-marker status-{{ 'pass' if heat.is_hot else 'unknown' }}">{{ '近期热点候选' if heat.is_hot else '未进入热点候选' }}</span></div>
+  <div class="grid industry-chart-kpis">
+    <div class="kpi"><span>1日成员等权</span><strong class="{{ 'positive' if heat.return_1d_pct is not none and heat.return_1d_pct >= 0 else 'negative' if heat.return_1d_pct is not none else '' }}">{% if heat.return_1d_pct is not none %}{{ '+' if heat.return_1d_pct >= 0 else '' }}{{ heat.return_1d_pct }}%{% else %}—{% endif %}</strong></div>
+    <div class="kpi kpi-accent"><span>5日成员等权</span><strong class="{{ 'positive' if heat.return_5d_pct is not none and heat.return_5d_pct >= 0 else 'negative' if heat.return_5d_pct is not none else '' }}">{% if heat.return_5d_pct is not none %}{{ '+' if heat.return_5d_pct >= 0 else '' }}{{ heat.return_5d_pct }}%{% else %}—{% endif %}</strong><small>{% if heat.return_5d_rank %}第 {{ heat.return_5d_rank }} / {{ heat.ranked_industry_count }}{% else %}暂无排名{% endif %}</small></div>
+    <div class="kpi"><span>5日上涨广度</span><strong>{% if heat.breadth_5d_pct is not none %}{{ heat.up_5d_count }} / {{ heat.priced_5d_count }}{% else %}—{% endif %}</strong><small>{% if heat.breadth_5d_pct is not none %}{{ heat.breadth_5d_pct }}%{% else %}暂无{% endif %}</small></div>
+    <div class="kpi"><span>20日成员等权</span><strong class="{{ 'positive' if heat.return_20d_pct is not none and heat.return_20d_pct >= 0 else 'negative' if heat.return_20d_pct is not none else '' }}">{% if heat.return_20d_pct is not none %}{{ '+' if heat.return_20d_pct >= 0 else '' }}{{ heat.return_20d_pct }}%{% else %}—{% endif %}</strong></div>
+  </div>
+  {% if heat.heat_reasons %}<div class="heat-tags heat-tags-roomy">{% for reason in heat.heat_reasons %}<span class="tag tag-{{ 'pass' if reason in ['价格强','广度强'] else 'muted' }}">{{ reason }}</span>{% endfor %}</div>{% endif %}
+  <div class="quality-strip"><span>Brooks：当前Leg1 {{ heat.brooks_current_count }}</span><span>今日首次H1 {{ heat.brooks_h1_count }}</span><span>今日周期H1 {{ heat.brooks_cycle_h1_count }}</span><span>今日新Leg1 {{ heat.brooks_new_count }}</span><span>Weinstein {{ heat.weinstein_pass_count }} / {{ heat.weinstein_evaluable_count }}</span><span>Minervini {{ heat.minervini_pass_count }} / {{ heat.minervini_evaluable_count }}</span></div>
+  <p class="muted">热点资格只使用5日成员等权涨幅、上涨广度、成员数和价格覆盖率。三套方法保持独立，不合成总分，不构成买卖建议。</p>
+</section>
+{% endif %}
+
 <section class="section panel industry-confirmation-panel">
   <div class="section-heading"><div><p class="eyebrow">Weinstein 行业背景</p><h2>行业技术确认</h2></div><span class="status-marker status-{{ 'pass' if confirmation.stage == 'STAGE_2' else 'unknown' if confirmation.stage in ['UNKNOWN','TRANSITION','STAGE_1'] else 'fail' }}">{{ confirmation.stage_label }}</span></div>
   <p class="reading-note">{{ confirmation.summary }}</p>
@@ -60,9 +75,10 @@
 
 <section class="section panel">
   <div class="section-heading"><div><p class="eyebrow">行业成员</p><h2>当期成员与入选事实</h2></div><span class="muted">{{ members|length }} 只 · 点名称进入外部行情网站，点代码进入同花顺</span></div>
-  <div class="table-wrap"><table data-sortable="true"><thead><tr><th>股票</th><th>Weinstein</th><th>Minervini</th><th>站内分析</th></tr></thead><tbody>
+  <div class="table-wrap"><table data-sortable="true"><thead><tr><th>股票</th><th>Brooks</th><th>Weinstein</th><th>Minervini</th><th>站内分析</th></tr></thead><tbody>
     {% for row in members %}<tr>
       <td data-sort="{{ row.symbol }}"><div class="stock-primary-link">{% if row.tradingview_url %}<a class="instrument-name-link" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}<span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a></span></div></td>
+      <td data-sort="{{ 2 if row.brooks_phase in ['h1','cycle_h1','new'] else 1 if row.brooks_phase else 0 }}"><span class="status-marker status-{{ 'pass' if row.brooks_phase in ['h1','cycle_h1','new'] else 'unknown' }}">{{ row.brooks_phase_label }}</span></td>
       <td><span class="status-marker status-{{ 'pass' if row.weinstein_result == 'PASS' else 'fail' if row.weinstein_result == 'FAIL' else 'unknown' }}">{{ row.weinstein_result_label }}</span>{% if row.weinstein_state_label %}<small class="table-subline">{{ row.weinstein_state_label }}</small>{% endif %}</td>
       <td><span class="status-marker status-{{ 'pass' if row.minervini_result == 'PASS' else 'fail' if row.minervini_result == 'FAIL' else 'unknown' }}">{{ row.minervini_result_label }}</span>{% if row.minervini_state_label %}<small class="table-subline">{{ row.minervini_state_label }}</small>{% endif %}</td>
       <td>{% if row.weinstein_result or row.minervini_result %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}">查看详情</a>{% else %}<span class="muted">当日未入选</span>{% endif %}</td>

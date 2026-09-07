@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from ...watchlist.brooks import BROOKS_POLICY_VERSION
+from ...watchlist.industry_heat import build_industry_heat_rows
 from ...watchlist.repository import MarketDataReader, WatchlistRepository
 from ..users import (
     AuthenticatedUser,
@@ -171,6 +172,7 @@ def build_watchlist_router(
     daily_aux_cache: dict[
         str, tuple[tuple[int, int], tuple[list[dict[str, Any]], list[dict[str, Any]]]]
     ] = {}
+    industry_heat_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
 
     def database_fingerprint() -> tuple[int, int]:
         def modified_at(path: Path) -> int:
@@ -253,10 +255,36 @@ def build_watchlist_router(
         projection_cache[query_date] = (fingerprint, rows)
         return rows
 
+    def cached_industry_heat(query_date: str) -> list[dict[str, Any]]:
+        fingerprint = database_fingerprint()
+        cached = industry_heat_cache.get(query_date)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        observations = repository.industry_observations(query_date)
+        memberships = repository.industry_memberships(query_date)
+        stock_returns = market_reader.safe_stock_period_returns(
+            [str(row.get("symbol") or "") for row in memberships], query_date
+        )
+        brooks_rows = [
+            {**row, "brooks_phase": _brooks_phase(row)}
+            for row in repository.brooks_rows(query_date, BROOKS_POLICY_VERSION)
+        ]
+        rows = build_industry_heat_rows(
+            observations=observations,
+            memberships=memberships,
+            stock_returns=stock_returns,
+            brooks_rows=brooks_rows,
+        )
+        if len(industry_heat_cache) >= 4:
+            industry_heat_cache.pop(next(iter(industry_heat_cache)))
+        industry_heat_cache[query_date] = (fingerprint, rows)
+        return rows
+
     def clear_row_caches() -> None:
         row_cache.clear()
         navigation_cache.clear()
         daily_aux_cache.clear()
+        industry_heat_cache.clear()
         projection_cache.clear()
 
     def rows_for_user(
@@ -402,6 +430,7 @@ def build_watchlist_router(
         site_owner_username=site_owner_username,
         cached_rows=cached_rows,
         cached_daily_auxiliary=cached_daily_auxiliary,
+        cached_industry_heat=cached_industry_heat,
         cached_projection_rows=cached_projection_rows,
         clear_row_caches=clear_row_caches,
         rows_for_user=rows_for_user,
@@ -813,6 +842,12 @@ def _decorate_industry(row: dict[str, Any]) -> dict[str, Any]:
         "SMALL_SAMPLE": "小样本，仅看数量",
         "UNKNOWN": "来源不足",
     }.get(str(row.get("quality_state") or ""), "未知")
+    item["heat_quality_label"] = {
+        "COMPLETE": "热度可比较",
+        "SMALL_SAMPLE": "小样本",
+        "PRICE_INSUFFICIENT": "价格覆盖不足",
+        "UNKNOWN": "来源不足",
+    }.get(str(row.get("heat_quality_state") or ""), "暂无热度")
     return item
 
 
@@ -1291,12 +1326,12 @@ def _filter_brooks_rows(
             "watch": "H1重点观察",
             "immature": "回调未成熟",
             "deep": "深回调/老化",
-            "expanding": "B1延伸中",
+            "expanding": "Leg1延伸中",
             "followthrough": "跟随上涨",
             "cycle_done": "本轮H1已过",
-            "h1": "今日B1首次H1",
+            "h1": "今日Leg1首次H1",
             "cycle_h1": "今日后续周期H1",
-            "new": "今日B1触发",
+            "new": "今日Leg1触发",
         }.get(phase, BROOKS_STATE_LABELS.get(str(row.get("state") or ""), "未知"))
         row["retracement_pct"] = float(row.get("current_retracement") or 0) * 100
         row["maximum_retracement_pct"] = float(row.get("maximum_low_retracement") or 0) * 100

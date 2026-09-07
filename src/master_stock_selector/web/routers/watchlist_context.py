@@ -22,6 +22,7 @@ class WatchlistRouteContext:
     site_owner_username: str
     cached_rows: Callable[..., list[dict[str, Any]]]
     cached_daily_auxiliary: Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]
+    cached_industry_heat: Callable[[str], list[dict[str, Any]]]
     cached_projection_rows: Callable[..., list[dict[str, Any]]]
     clear_row_caches: Callable[[], None]
     rows_for_user: Callable[..., list[dict[str, Any]]]
