@@ -230,6 +230,16 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             if user is not None
             else [{"value": OTHER_SETUP_ID, "label": OTHER_SETUP_LABEL}]
         )
+        if user is not None and editing_trade and editing_trade.get("plan_version_id"):
+            # Keep the frozen version's choices available for faithful display, but
+            # also allow an old execution to be deliberately reclassified into a
+            # setup added by the current plan version (for example C2).
+            known_values = {str(option["value"]) for option in setup_options}
+            setup_options.extend(
+                option
+                for option in users.trade_setup_options(user.user_id)
+                if str(option["value"]) not in known_values
+            )
         current_plan = users.trading_plans.current(user.user_id) if user is not None else None
         setup_observations = (
             users.setup_observations(user.user_id, symbol) if user is not None else []

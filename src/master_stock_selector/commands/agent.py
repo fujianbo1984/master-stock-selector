@@ -121,6 +121,12 @@ def _dispatch_agent(
             return _request_json(
                 base_url, token, "POST", path + "/answers", _load_json_object(args.file, parser)
             )
+        if grill == "setup-save":
+            if args.token_stdin and args.file == "-":
+                parser.error("--token-stdin 不能与从标准输入读取形态 JSON 同时使用")
+            return _request_json(
+                base_url, token, "POST", path + "/setups", _load_json_object(args.file, parser)
+            )
         if grill == "publish":
             if not args.commit:
                 parser.error("publish 会发布冻结版本；必须显式传入 --commit")

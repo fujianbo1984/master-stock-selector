@@ -401,6 +401,26 @@ class UserTradeStore(UserStore):
                     ):
                         plan = self.trading_plans.current(user_id)
                         plan_version_id = plan["version_id"] if plan else None
+                    elif requested_setup not in {"", OTHER_SETUP_ID} and plan is not None:
+                        historical_match = next(
+                            (
+                                item
+                                for item in plan.get("setup_catalog", [])
+                                if requested_setup
+                                in {
+                                    str(item.get("setup_id") or "").upper(),
+                                    str(item.get("code") or "").upper(),
+                                }
+                                and bool(item.get("enabled"))
+                                and str(item.get("status") or "ACTIVE").upper() == "ACTIVE"
+                            ),
+                            None,
+                        )
+                        if historical_match is None:
+                            current_plan = self.trading_plans.current(user_id)
+                            if current_plan is not None:
+                                plan = current_plan
+                                plan_version_id = current_plan["version_id"]
                     assignment = _setup_assignment(
                         plan,
                         plan_setup_id=plan_setup_id,

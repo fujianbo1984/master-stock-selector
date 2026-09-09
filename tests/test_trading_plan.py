@@ -1063,3 +1063,79 @@ def test_web_trade_edit_binds_legacy_buy_to_current_plan(tmp_path: Path) -> None
     assert saved is not None
     assert saved["plan_version_id"] == plan["version_id"]
     assert saved["plan_setup_id"] == "A1"
+
+
+def test_web_trade_edit_can_rebind_old_plan_buy_to_setup_added_by_current_plan(
+    tmp_path: Path,
+) -> None:
+    client = _client(tmp_path)
+    repository = client.app.state.user_repository
+    user = repository.session_user(client.cookies.get(SESSION_COOKIE))
+    assert user is not None
+
+    old_draft = repository.trading_plans.start(
+        user.user_id, template="personal-a-share-v1"
+    )
+    while True:
+        question = repository.trading_plans.next(user.user_id, old_draft["session_id"])
+        if question["status"] == "COMPLETE":
+            break
+        status = repository.trading_plans.status(user.user_id, old_draft["session_id"])
+        assert status is not None
+        identifier = question["question"]["question_id"]
+        proposed = status["answers"].get(identifier, {}).get("value")
+        value = "A1,A3,B1,B2,C1" if identifier == "setup.enabled" else proposed
+        repository.trading_plans.answer(
+            user.user_id,
+            old_draft["session_id"],
+            {
+                "question_id": identifier,
+                "expected_revision": status["revision"],
+                "decision": {"state": "CONFIRMED", "value": value},
+            },
+        )
+    old_status = repository.trading_plans.status(user.user_id, old_draft["session_id"])
+    assert old_status is not None
+    old_plan = repository.trading_plans.publish(
+        user.user_id, old_draft["session_id"], old_status["revision"]
+    )
+    execution_id = repository.record_trade(
+        user.user_id,
+        traded_on="2026-07-31",
+        symbol="000001.SZ",
+        side="BUY",
+        quantity=100,
+        price=12.5,
+        fee=0,
+        method="MANUAL",
+        plan_setup_id="C1",
+    )
+    current_plan = _published_demo(repository, user.user_id)
+
+    edit_page = client.get(f"/a/stocks/000001.SZ?edit_trade={execution_id}")
+    assert edit_page.status_code == 200
+    assert '<option value="C2"' in edit_page.text
+
+    response = client.post(
+        f"/a/trades/{execution_id}",
+        data={
+            "csrf_token": _csrf(client),
+            "traded_on": "2026-07-31",
+            "traded_at": "",
+            "side": "BUY",
+            "quantity": "100",
+            "price": "12.5",
+            "fee": "0",
+            "plan_setup_id": "C2",
+            "stop_price": "12.0",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = repository.trade_execution(user.user_id, execution_id)
+    assert saved is not None
+    assert saved["plan_version_id"] != old_plan["version_id"]
+    assert saved["plan_version_id"] == current_plan["version_id"]
+    assert saved["plan_setup_id"] == "C2"
+    assert saved["setup_code_snapshot"] == "C2"
