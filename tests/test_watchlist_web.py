@@ -3047,7 +3047,8 @@ def test_research_routes_guest_and_private_observation_return(tmp_path):
     discover = guest.get("/a/discover?date=2026-07-31")
     assert 'href="/a/daily?date=2026-07-31"' in discover.text
     assert 'href="/a/brooks-second-leg?date=2026-07-31"' in discover.text
-    assert "两条路线平等、独立" in discover.text
+    assert "各观察视角彼此独立" in discover.text
+    assert 'href="/a/experimental"' in discover.text
     assert guest.get("/a/observations", follow_redirects=False).status_code == 303
     path = "/a/stocks/000001.SZ?date=2026-07-31&section=personal-observations"
     detail = client.get(path)

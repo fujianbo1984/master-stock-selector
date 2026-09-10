@@ -181,6 +181,7 @@ def create_app(
                     ("发现股票", "/a/discover"),
                     ("趋势候选", "/a/daily"),
                     ("价格行为事件", "/a/brooks-second-leg"),
+                    ("实验筛选", "/a/experimental"),
                 ],
             },
             {

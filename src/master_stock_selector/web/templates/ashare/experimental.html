@@ -1,0 +1,54 @@
+{% extends "market.html" %}
+{% set suppress_page_intro = true %}
+{% block heading %}早期活跃观察 · 实验筛选{% endblock %}
+{% block subtitle %}冻结参数 · 独立观察 · 每日最多20只{% endblock %}
+{% block content %}
+<section class="section panel">
+  <p class="eyebrow">实验筛选 · 观察用途</p>
+  <h1>早期活跃观察</h1>
+  <p>从尚未近期涨停加速的股票中，观察量价活跃状态。入池、移出均不表示买卖；活跃度分数仅用于本池排序，不是上涨概率。</p>
+  <p role="status"><strong>研究数据截至 {{ latest_date or '未准备' }}</strong> · {{ '历史回填，非实时行情' if latest_date else '暂无实验数据' }} · {{ models[model] }}</p>
+</section>
+<section class="section panel">
+  <form class="brooks-filter-bar" method="get" action="/a/experimental">
+    <label>观察日期 <input type="date" name="date" value="{{ query_date }}" {% if earliest_date %}min="{{ earliest_date }}" max="{{ latest_date }}"{% endif %}></label>
+    <label>固定版本 <select name="model">{% for value, label in models.items() %}<option value="{{ value }}" {% if model == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button class="button" type="submit">查看名单</button>
+    {% if previous_date %}<a class="text-link" href="?date={{ previous_date }}&amp;model={{ model }}">← 前一数据日</a>{% endif %}
+    {% if next_date %}<a class="text-link" href="?date={{ next_date }}&amp;model={{ model }}">后一数据日 →</a>{% endif %}
+    {% if latest_date %}<a class="text-link" href="?model={{ model }}">最新可用数据</a>{% endif %}
+  </form>
+  {% if available %}
+  <div class="brooks-results-heading"><h2>{{ rows|length }} 只观察股票 <small>基础特征池 {{ pool_count }} 只</small></h2><span class="muted">分数降序 · 同分按代码升序 · 不补足名额</span></div>
+  {% if rows %}
+  <div class="table-wrap"><table class="watchlist-table">
+    <thead><tr><th>排名 / 股票</th><th>活跃度<br>0–12分</th><th>换手率</th><th>5/20日<br>均量比</th><th>20日涨/跌<br>成交额比</th><th>20日相对<br>大盘收益</th><th>前60日<br>涨停次数</th><th>20日<br>高低区间</th><th>观察记录</th></tr></thead>
+    <tbody>{% for row in rows %}<tr>
+      <td><strong>{{ row.rank }} · <a href="/a/stocks/{{ row.symbol }}?date={{ query_date }}">{{ row.name or row.symbol }}</a></strong><small class="table-subline">{{ row.symbol }} · <a href="/a/stocks/{{ row.symbol }}/chart?date={{ query_date }}">K线</a></small></td>
+      <td>{{ '%.3f'|format(row.score) }}</td>
+      <td>{{ '%.2f%%'|format(row.turnover) }}</td>
+      <td>{{ '%.2f'|format(row.volume_dry) }}倍</td>
+      <td>{{ '%.2f'|format(row.up_down_amount) }}倍</td>
+      <td>{{ '%+.2f%%'|format(row.rs20 * 100) }}</td>
+      <td>{{ row.limit60|int }}次</td>
+      <td>{{ '%.2f%%'|format(row.range20 * 100) }}</td>
+      <td><strong>{{ '新观察批次' if row.new_episode else '批次内重复观察' }}</strong><small class="table-subline">本批 {{ row.episode_start }}</small><small class="table-subline">首次 {{ row.first_seen }}</small></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p role="status">当日已计算，没有股票满足此版本条件。不会放宽参数补足20只。</p>{% endif %}
+  {% else %}<p role="status">{{ error }}</p>{% endif %}
+</section>
+<section class="section panel">
+  <h2>本版本如何筛选</h2>
+  {% if model == 'selected' %}<p>六项同时满足：换手率4%–20%、均量比≥1.30、涨跌日成交额比≥1.00、相对大盘收益≥5%、前60日涨停≥1次、20日高低区间25%–80%。</p>
+  {% else %}<p>硬条件仅为换手率4%–20%、20日高低区间25%–80%；其余四项仍须有有效值，并共同参与同一固定排序。</p>{% endif %}
+  <details><summary>共同资格、排序公式与数据边界</summary>
+    <p>沪深、上市≥120个市场交易日、当时非ST且状态已知、60日连续有效OHLC及正成交量；原价≥3元，当日及20日平均成交额≥5000万元；近10日含今日无涨停、10日复权收益≤20%；六项特征均为有限值，无市值上限。不保证处于长期底部。</p>
+    <p>各项先除以分母，再分别截取至0–2分后相加：换手率÷6、均量比÷1.2、成交额比÷1.5、相对收益÷0.10、前60日涨停次数÷2、高低区间÷0.30。换手率4%填4，相对收益5%填0.05。</p>
+    <p>价格使用原价乘复权因子的同尺度比值；相对收益采用个股价格比÷中证全指价格比−1。涨停次数不含当日；跌日成交额为零时特征未知，不填充。涨日成交额占优不代表实际资金净流入。</p>
+    <p>每日名单允许重复出现。每只股票首次入选后20个市场日内不新记批次，第21日后再次入选才形成新批次；首次日期指当前导入历史范围内、该版本的首次观察。名单选择不读取未来涨幅或标签，也不剔除历史年末20日。</p>
+    <p>研究源为历史回填；名称仅用于识别，不保证历史时点名称。当前网站只应用已核验的研究特征，尚未接入日常实时采集。缺失日期保留为空，不拼接现有行情。个股图形的历史覆盖以该页面提示为准。</p>
+  </details>
+  <details><summary>如何理解报告中的历史结果</summary><p>2024–2025去重观察批次命中率：冻结窄池3.98%，简单参考4.72%。目标为未来20日某收盘上涨≥50%，且同一天相对中证全指价格比上涨≥30%，不是交易胜率。前两轮已看过相同历史数据，非完全独立盲测；没有证明唯一最优、盈利能力或可靠的提前连板预测。简单参考名单通常更长，不能只比较命中总数。</p></details>
+</section>
+{% endblock %}

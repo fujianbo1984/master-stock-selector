@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from datetime import date as CalendarDate
+from pathlib import Path
+from typing import Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from ...watchlist.experimental import MODELS, read_snapshot
 from ..display_time import sqlite_utc_to_shanghai
 from .auth import current_user
 from .watchlist import _selected_date
@@ -86,6 +90,19 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
                 else _selected_date(repository, None, market_reader),
             },
         )
+
+    @router.get("/a/experimental", response_class=HTMLResponse)
+    def experimental(
+        request: Request,
+        date: CalendarDate | None = None,
+        model: Literal["selected", "reference"] = "selected",
+    ) -> Response:
+        path = Path(os.environ.get("MASTERSTOCK_EXPERIMENT_DATABASE") or
+                    repository.path.with_name("experimental_watchlist.sqlite3"))
+        snapshot = read_snapshot(path, date.isoformat() if date else None, model)
+        return context.render(request, "ashare/experimental.html", {
+            **snapshot, "active": "实验筛选", "model": model, "models": MODELS,
+        })
 
     @router.get("/a/focus", include_in_schema=False)
     def focus_redirect(request: Request) -> RedirectResponse:

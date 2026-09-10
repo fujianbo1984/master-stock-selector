@@ -250,3 +250,31 @@ git diff --check
 CLI 运行时错误以单个 JSON 对象写入标准错误并返回 `1`；参数错误返回 `2`；
 诊断降级返回 `3`。默认不输出 Python traceback，需要开发排障时可把全局
 `--debug` 放在子命令之前，例如 `.venv/bin/masterstock --debug doctor`。
+
+## 早期活跃实验筛选
+
+`/a/experimental` 提供 `watchlist_tuning` 报告的第190组冻结窄池与预设简单参考，
+各按原公式排序、同分代码升序、每日最多20只。两版均为独立观察用途，不进入既有方法交集。
+网站保留首次观察日与20个市场日的观察批次；无数据日期不回退到其他日期。
+原研究评估为保证未来标签完整而剔除的年末日期，在实际观察列表中正常计算，
+因此全历史批次与报告评估批次不能直接混用。名称仅作识别，不保证历史时点名称。
+
+第一版使用经过指纹核验的研究特征面板，数据截至2026-08-26，尚未接入日常行情采集。
+当前市场库没有报告所需的实际涨跌停价，不能用统一涨幅阈值替代。
+未来若接入日常计算，必须先补齐时点资格与实际涨跌停价，并验证六项特征口径。
+
+本地计算命令（需开发环境的 NumPy）只生成网站读取的独立 SQLite 数据文件：
+
+```bash
+.venv/bin/python -m master_stock_selector.watchlist.experimental_import \
+  --panel /path/to/watchlist_tuning/output/panel.npz \
+  --lock /path/to/watchlist_tuning/output/parameter_lock.json \
+  --audit /path/to/watchlist_tuning/output/source_audit.json \
+  --output data/experimental_watchlist.sqlite3
+```
+
+导入只读取时点特征，不加载未来标签、原分数或年度评估标记，不重新训练参数。
+默认数据文件位于观察池库同目录；可用 `MASTERSTOCK_EXPERIMENT_DATABASE` 指定绝对路径。
+更新时写入新文件、验证后再切换配置，保留旧文件以便回滚；命令拒绝覆盖任何已有文件。
+实验库不写入三个运行库、不提交Git，也不自动部署到ECS。历史结果只证明原研究目标下的
+观察特征表现，不证明盈利能力、唯一最优或连板预测；本地复算一致也不是新的独立盲测。
