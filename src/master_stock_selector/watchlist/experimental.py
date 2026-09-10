@@ -53,6 +53,7 @@ def read_snapshot(path: Path, query_date: str | None, model: str) -> dict[str, A
     result: dict[str, Any] = dict(rows=[], query_date=query_date or "", latest_date="",
                                   earliest_date="", available=False, metadata={}, pool_count=0,
                                   previous_date=None, next_date=None, error="")
+    result.update(daily_mode=False, daily_run={}, failed_date="")
     if not path.is_file():
         result["error"] = "实验数据尚未准备，当前没有可展示的名单。"
         return result
@@ -66,6 +67,13 @@ def read_snapshot(path: Path, query_date: str | None, model: str) -> dict[str, A
             selected_date = query_date or latest
             result.update(query_date=selected_date, latest_date=latest, earliest_date=first,
                           metadata=metadata)
+            has_daily = con.execute("SELECT 1 FROM sqlite_master WHERE name='experiment_daily_runs'").fetchone()
+            if has_daily:
+                run = con.execute("SELECT payload FROM experiment_daily_runs WHERE date=? AND status='SUCCESS'", (selected_date,)).fetchone()
+                if run:
+                    result.update(daily_mode=True, daily_run=json.loads(run[0]))
+                failed = con.execute("SELECT max(date) FROM experiment_daily_runs WHERE status='FAILED'").fetchone()[0]
+                result["failed_date"] = failed if failed and (not latest or failed > latest) else ""
             day = con.execute("SELECT pool_count FROM observation_days WHERE date=?", (selected_date,)).fetchone()
             if day is not None:
                 result.update(available=True, pool_count=day[0])

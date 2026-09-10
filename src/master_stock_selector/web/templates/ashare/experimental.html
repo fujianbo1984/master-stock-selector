@@ -7,7 +7,8 @@
   <p class="eyebrow">实验筛选 · 观察用途</p>
   <h1>早期活跃观察</h1>
   <p>从尚未近期涨停加速的股票中，观察量价活跃状态。入池、移出均不表示买卖；活跃度分数仅用于本池排序，不是上涨概率。</p>
-  <p role="status"><strong>研究数据截至 {{ latest_date or '未准备' }}</strong> · {{ '历史回填，非实时行情' if latest_date else '暂无实验数据' }} · {{ models[model] }}</p>
+  <p role="status"><strong>实验名单截至 {{ latest_date or '未准备' }}</strong> · {% if daily_mode %}服务器行情 · 每日收盘计算{% if daily_run.origin == 'RECONSTRUCTED' %} · 历史补算{% endif %}{% else %}{{ '历史回填，非实时行情' if latest_date else '暂无实验数据' }}{% endif %} · {{ models[model] }}</p>
+  {% if failed_date %}<p role="alert"><strong>{{ failed_date }} 实验计算未完成</strong>，保留上次成功名单，待补齐数据后重试。</p>{% elif market_latest and latest_date and market_latest > latest_date %}<p role="status">正式行情已到 {{ market_latest }}；实验名单尚未更新到该日，请按所示日期使用。</p>{% endif %}
 </section>
 <section class="section panel">
   <form class="brooks-filter-bar" method="get" action="/a/experimental">
@@ -47,7 +48,8 @@
     <p>各项先除以分母，再分别截取至0–2分后相加：换手率÷6、均量比÷1.2、成交额比÷1.5、相对收益÷0.10、前60日涨停次数÷2、高低区间÷0.30。换手率4%填4，相对收益5%填0.05。</p>
     <p>价格使用原价乘复权因子的同尺度比值；相对收益采用个股价格比÷中证全指价格比−1。涨停次数不含当日；跌日成交额为零时特征未知，不填充。涨日成交额占优不代表实际资金净流入。</p>
     <p>每日名单允许重复出现。每只股票首次入选后20个市场日内不新记批次，第21日后再次入选才形成新批次；首次日期指当前导入历史范围内、该版本的首次观察。名单选择不读取未来涨幅或标签，也不剔除历史年末20日。</p>
-    <p>研究源为历史回填；名称仅用于识别，不保证历史时点名称。当前网站只应用已核验的研究特征，尚未接入日常实时采集。缺失日期保留为空，不拼接现有行情。个股图形的历史覆盖以该页面提示为准。</p>
+    <p>每日版读取服务器原价、成交量、成交额、复权因子及中证全指，补充实际涨跌停价、ST和开盘停牌状态；数据不完整的股票保留为不足，不用涨幅阈值推定涨停。首次观察日从该数据版本实际开始计算之日记录。既有研究快照保留历史回填标识，名称不保证历史时点名称。缺失日期保留为空。个股图形的历史覆盖以该页面提示为准。</p>
+    {% if daily_mode %}<p>本次计算：{{ daily_run.finished_at }} · 最低单日原价覆盖 {{ daily_run.market_coverage_min }} 只 · 因历史不足排除 {{ daily_run.excluded.get('history', 0) }} 只 · 因涨跌停价不足排除 {{ daily_run.excluded.get('limits', 0) }} 只。排序仍使用冻结第190组与原参考公式。</p>{% endif %}
   </details>
   <details><summary>如何理解报告中的历史结果</summary><p>2024–2025去重观察批次命中率：冻结窄池3.98%，简单参考4.72%。目标为未来20日某收盘上涨≥50%，且同一天相对中证全指价格比上涨≥30%，不是交易胜率。前两轮已看过相同历史数据，非完全独立盲测；没有证明唯一最优、盈利能力或可靠的提前连板预测。简单参考名单通常更长，不能只比较命中总数。</p></details>
 </section>

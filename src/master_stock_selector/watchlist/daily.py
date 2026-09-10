@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -10,6 +11,7 @@ from .brooks_service import BrooksRunConfig, run_brooks_watchlist
 from .climax_service import ready as climax_ready
 from .climax_service import run_climax
 from .collector import CollectionConfig, MarketProvider, collect_market_data
+from .experimental_daily import run_experiment
 from .repository import WatchlistRepository
 from .service import WatchlistRunConfig, run_watchlist
 
@@ -97,4 +99,12 @@ def run_daily_closed_loop(
         "selection": selection,
         "brooks_selection": brooks_selection,
         "climax": run_climax(config.market_database, config.watchlist_database, target_date),
+        "experimental": run_experiment(
+            config.market_database,
+            Path(os.environ.get("MASTERSTOCK_EXPERIMENT_DATABASE") or
+                 config.watchlist_database.with_name("experimental_watchlist.sqlite3")),
+            target_date,
+            provider=provider,
+            minimum=config.minimum_stock_count,
+        ),
     }

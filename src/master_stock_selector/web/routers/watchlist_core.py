@@ -102,6 +102,7 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
         snapshot = read_snapshot(path, date.isoformat() if date else None, model)
         return context.render(request, "ashare/experimental.html", {
             **snapshot, "active": "实验筛选", "model": model, "models": MODELS,
+            "market_latest": repository.latest_fact_date(),
         })
 
     @router.get("/a/focus", include_in_schema=False)

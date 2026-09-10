@@ -259,22 +259,31 @@ CLI 运行时错误以单个 JSON 对象写入标准错误并返回 `1`；参数
 原研究评估为保证未来标签完整而剔除的年末日期，在实际观察列表中正常计算，
 因此全历史批次与报告评估批次不能直接混用。名称仅作识别，不保证历史时点名称。
 
-第一版使用经过指纹核验的研究特征面板，数据截至2026-08-26，尚未接入日常行情采集。
-当前市场库没有报告所需的实际涨跌停价，不能用统一涨幅阈值替代。
-未来若接入日常计算，必须先补齐时点资格与实际涨跌停价，并验证六项特征口径。
+每日闭环在正式观察池与扩张图层计算完成后，读取服务器权威行情库的61日原价、
+成交量、成交额、复权因子、换手率和中证全指。实际涨跌停价、开盘停牌状态及当日ST
+由 Tushare 补充并缓存在独立实验库；首次回补窗口，以后只采集缺失日。
+不修改三份权威库结构、不上传本地研究数据库、不使用统一涨幅推定涨停。
+失败有日期凭证，页面显示未完成并保留旧结果；下次运行按顺序补算缺日，已完成日幂等复用。
 
-本地计算命令（需开发环境的 NumPy）只生成网站读取的独立 SQLite 数据文件：
+首次启用必须显式初始化独立库（已有研究快照会先在同目录备份）：
 
 ```bash
-.venv/bin/python -m master_stock_selector.watchlist.experimental_import \
-  --panel /path/to/watchlist_tuning/output/panel.npz \
-  --lock /path/to/watchlist_tuning/output/parameter_lock.json \
-  --audit /path/to/watchlist_tuning/output/source_audit.json \
-  --output data/experimental_watchlist.sqlite3
+.venv/bin/python -m master_stock_selector.watchlist.experimental_daily \
+  --market-database /var/lib/masterstock/market.sqlite3 \
+  --database /var/lib/masterstock/experimental_watchlist.sqlite3 --migrate --apply
+.venv/bin/python -m master_stock_selector.watchlist.experimental_daily \
+  --market-database /var/lib/masterstock/market.sqlite3 \
+  --database /var/lib/masterstock/experimental_watchlist.sqlite3 --date YYYY-MM-DD --apply
 ```
 
-导入只读取时点特征，不加载未来标签、原分数或年度评估标记，不重新训练参数。
-默认数据文件位于观察池库同目录；可用 `MASTERSTOCK_EXPERIMENT_DATABASE` 指定绝对路径。
-更新时写入新文件、验证后再切换配置，保留旧文件以便回滚；命令拒绝覆盖任何已有文件。
-实验库不写入三个运行库、不提交Git，也不自动部署到ECS。历史结果只证明原研究目标下的
-观察特征表现，不证明盈利能力、唯一最优或连板预测；本地复算一致也不是新的独立盲测。
+此后既有 `masterstock-daily.timer`（上海时间17:10）通过 `daily` 自动运行实验计算，
+不用另建定时器。独立实验库默认与观察池库同目录，可通过 `MASTERSTOCK_EXPERIMENT_DATABASE`
+指定绝对路径；初始化命令和日常服务应使用同一路径。运行账号需要目录写权限、
+Tushare的 `stk_limit`、`suspend_d`、`stock_st` 与交易日历访问权限。
+服务返回成功前实验计算也必须完成；实验失败不会撤销已完成的正式计算。
+首次观察日从此库实际观察历史开始，不伪造研究阶段入池日期。
+首次启用失败可回滚代码并保留独立实验库；不恢复或覆盖三份权威库。
+
+`experimental_import` 仍可从已核验的 `panel.npz`、`parameter_lock.json` 和 `source_audit.json`
+构建独立历史研究快照（导入时需要开发环境 NumPy），拒绝覆盖旧文件；该快照不是每日版的前置条件。
+每日版无需 NumPy。历史结果不证明盈利能力、唯一最优或连板预测；复算一致也不是新的独立盲测。

@@ -145,6 +145,19 @@ class TushareMarketProvider:
         )
         return _rows_by_symbol(rows, trade_date)
 
+    def stock_limits(self, trade_date: str) -> dict[str, dict[str, Any]]:
+        rows = self._paged_rows(
+            "stk_limit", {"trade_date": _compact_date(trade_date)},
+            "ts_code,trade_date,pre_close,up_limit,down_limit",
+        )
+        return _rows_by_symbol(rows, trade_date)
+
+    def stock_suspensions(self, trade_date: str) -> list[dict[str, Any]]:
+        return self._paged_rows(
+            "suspend_d", {"trade_date": _compact_date(trade_date)},
+            "ts_code,trade_date,suspend_type,suspend_timing",
+        )
+
     def index_daily_bars(
         self,
         trade_date: str,
