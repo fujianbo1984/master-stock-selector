@@ -2492,3 +2492,12 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .watchlist-table .stock-primary-link { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .watchlist-table .stock-secondary-links { flex-basis: 100%; }
 .stock-price-workspace .stock-chart-stage { min-height: 360px; }
+
+/* Optional daily expansion facts; shares the existing KC. */
+.climax-panel { margin: 10px 0; padding: 12px 16px; border: 1px solid #d8d0c3; border-left: 3px solid #b97720; background: #fffdfa; font-size: 13px; }
+.climax-panel[hidden], .climax-panel [hidden] { display: none !important; }
+.climax-heading { display: flex; align-items: center; gap: 18px; }
+.climax-heading select { min-width: 245px; max-width: 350px; }
+.climax-panel p { margin: 8px 0; line-height: 1.7; }
+.climax-panel small { color: #6d716f; }
+.climax-timeline { display: flex; flex-wrap: wrap; gap: 8px 24px; padding-left: 20px; margin: 10px 0; }

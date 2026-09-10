@@ -7,6 +7,8 @@ from typing import Any
 
 from .brooks import BROOKS_POLICY_VERSION
 from .brooks_service import BrooksRunConfig, run_brooks_watchlist
+from .climax_service import ready as climax_ready
+from .climax_service import run_climax
 from .collector import CollectionConfig, MarketProvider, collect_market_data
 from .repository import WatchlistRepository
 from .service import WatchlistRunConfig, run_watchlist
@@ -31,6 +33,8 @@ def run_daily_closed_loop(
             "每日闭环只保存真实当日 OBSERVED 事实；历史数据请使用 watchlist reconstructed"
         )
     repository = WatchlistRepository(config.watchlist_database)
+    if not climax_ready(config.watchlist_database):
+        raise ValueError("扩张图层表尚未初始化；请先显式运行 climax_service --migrate --apply")
     if not repository.brooks_schema_ready():
         raise ValueError(
             "Brooks 表尚未初始化；发布前请显式运行 "
@@ -92,4 +96,5 @@ def run_daily_closed_loop(
         "collection": collection,
         "selection": selection,
         "brooks_selection": brooks_selection,
+        "climax": run_climax(config.market_database, config.watchlist_database, target_date),
     }

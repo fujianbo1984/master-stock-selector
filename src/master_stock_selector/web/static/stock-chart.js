@@ -321,6 +321,10 @@
     methodEventDetail.replaceChildren(title, summary, metadata);
     methodEventDetail.hidden = false;
   };
+  const climaxLayer = window.createClimaxLayer({ root, candles,
+    onChange: () => renderMarkers(),
+    restoreKc: () => { applyKcPreset(defaultKcPresetForInterval()); request(); },
+  });
   const renderMarkers = () => {
     if (!payload) return;
     methodEventsById = new Map((payload.method_events || []).map(item => [item.id, item]));
@@ -348,7 +352,7 @@
           size: 0.8,
         },
       }));
-    markersApi.setMarkers([...trades, ...methods]
+    markersApi.setMarkers([...trades, ...methods, ...climaxLayer.markers()]
       .sort((left, right) => left.marker.time.localeCompare(right.marker.time) || left.priority - right.priority || left.marker.id.localeCompare(right.marker.id))
       .map(item => item.marker));
   };
@@ -603,6 +607,7 @@
     })));
     if (tradeLegend) tradeLegend.hidden = !tradeInfoInput?.checked || !(payload.trade_overlay?.executions || []).length;
     syncVolumePane();
+    climaxLayer.render(payload);
     renderMarkers();
     renderB1();
     renderFrameworkPanel();
@@ -883,6 +888,7 @@
   retryButton?.addEventListener("click", request);
   chart.subscribeClick((param) => {
     if (!payload || !param.time) return;
+    if (climaxLayer.click(param.hoveredObjectId)) return;
     const methodEvent = methodEventsById.get(param.hoveredObjectId || "");
     if (methodEvent) { renderMethodEventDetail(methodEvent); return; }
     const selectedDate = chartDate(param.time);

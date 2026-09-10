@@ -1864,7 +1864,7 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert '<th colspan="4">热度表现</th>' in page.text
     assert '<th colspan="3">方法事实</th>' in page.text
     assert 'data-sort-column="6">Brooks Leg1</th>' in page.text
-    assert "app.css?v=20260907-industry-ledger-v1" in page.text
+    assert "app.css?v=20260910-climax-v1" in page.text
     assert "<th>Weinstein 新入/重进</th>" not in page.text
     assert "新/重" in page.text
     assert "小样本，仅看数量" in page.text
@@ -2268,7 +2268,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert "data-chart-source=" not in page.text
     assert "data-chart-pane=" not in page.text
-    assert "stock-chart.js?v=20260906-density-v1" in page.text
+    assert "stock-chart.js?v=20260910-climax-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert "data-chart-period-change" in page.text
     assert "data-chart-ohlcv" in page.text
@@ -2566,7 +2566,7 @@ def test_limited_stock_chart_reads_market_bars_once(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert len(calls) == 1
-    assert calls[0][1]["limit"] == 230
+    assert calls[0][1]["limit"] is None  # KC seed is independent of the visible window
 
 
 def test_private_review_overlays_public_cache_and_exposes_timing(tmp_path):

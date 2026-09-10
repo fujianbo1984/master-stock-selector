@@ -14,6 +14,7 @@ from ...watchlist.charting import (
     keltner_channels,
     keltner_config_payload,
 )
+from ...watchlist.climax_service import chart_climax
 from ..stock_catalog import StockCatalog
 from ..users import (
     C1_ENTRY_VARIANT_LABELS,
@@ -596,7 +597,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             band_style=band_style,
         )
         warmup_periods = max(200, length, atr_length)
-        analysis_limit = (
+        analysis_limit = None if interval == "day" else (
             None if limit is None else limit + warmup_periods * (6 if interval == "week" else 1)
         )
         analysis_daily_bars = market_reader.safe_stock_chart_bars(
@@ -671,6 +672,7 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
             "method_events": method_overlay["events"],
             "method_event_coverage": method_overlay["coverage"],
             "brooks_first_legs": brooks_first_legs,
+            "climax": chart_climax(repository.path, symbol, date, bars) if interval == "day" else {"status": "DAILY_ONLY", "events": []},
             "moving_averages": moving_averages,
             "keltner": [
                 point
