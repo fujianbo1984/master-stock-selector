@@ -52,7 +52,7 @@
       });
     }
   }
-  document.querySelectorAll('.watchlist-table, .observation-list, .workspace-recent-list').forEach(table => {
+  document.querySelectorAll('.watchlist-table, .observation-list, .workspace-recent-list, #industry-members table').forEach(table => {
     table.addEventListener('click', event => {
       const link = event.target.closest('a[href]');
       if (!link || !stockURL(link.href)) return;

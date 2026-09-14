@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import date, timedelta
+from html import unescape
 from typing import Any
 
 import pytest
@@ -1822,6 +1824,37 @@ def test_chart_review_keeps_position_when_manual_state_changes_sort_order(tmp_pa
     assert 'manual-focus">重点' in after.text
     assert "新进 / 重进 <b>2 / 2</b>" in after.text
     assert 'aria-label="上一只：小盘示例"' in after.text
+
+
+def test_industry_members_keep_detail_and_chart_navigation(tmp_path):
+    _seed_chart_market(tmp_path / "market.sqlite3")
+    client = _client(tmp_path)
+    _seed_filter_cases(tmp_path / "master_watchlist.sqlite3")
+    industry_url = "/a/industries/851911.SI/chart?date=2026-07-31"
+    listing = client.get(industry_url)
+    links = re.findall(r'class="stock-detail-link" href="([^"]+)"', listing.text)
+    assert len(links) == 2
+    assert all("section=industry-members" in link for link in links)
+    assert 'data-research-source-label="行业成员"' in listing.text
+    detail = client.get(unescape(links[0]))
+    assert detail.status_code == 200
+    chart_url = unescape(re.search(
+        r'href="([^"]+)">打开完整图表工作区', detail.text
+    ).group(1))
+    chart = client.get(chart_url)
+    assert chart.status_code == 200
+    assert "行业成员 <b>1 / 2</b>" in chart.text
+    assert "已是第一只" in chart.text
+    assert industry_url + '#industry-members' in chart.text
+    next_url = unescape(re.search(r'data-chart-next href="([^"]+)"', chart.text).group(1))
+    assert "/000003.SZ/chart?" in next_url
+    assert "date=2026-07-31" in next_url
+    last = client.get(next_url)
+    assert last.status_code == 200
+    assert "行业成员 <b>2 / 2</b>" in last.text
+    assert "已是最后一只" in last.text
+    previous_url = unescape(re.search(r'data-chart-previous href="([^"]+)"', last.text).group(1))
+    assert "行业成员 <b>1 / 2</b>" in client.get(previous_url).text
 
 
 def test_industry_observation_page_and_api_are_fact_only(tmp_path):

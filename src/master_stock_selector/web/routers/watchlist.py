@@ -1548,6 +1548,35 @@ def _stock_navigation(
     }
     if not query_date:
         return empty
+    if section == "industry-members":
+        # Use the same dated membership and order as the industry page, without
+        # applying the daily observation pool's method or market-cap filters.
+        payload = repository.industry_detail(query_date, industry)
+        members = payload.get("members", [])
+        navigation = {
+            **empty,
+            "section_label": "行业成员",
+            "list_url": f"/a/industries/{quote(industry, safe='')}/chart?"
+            + urlencode({"date": query_date}) + "#industry-members",
+        }
+        symbols = [str(row["symbol"]).upper() for row in members]
+        if symbol.upper() not in symbols:
+            return navigation
+        index = symbols.index(symbol.upper())
+
+        def member_at(position: int) -> dict[str, str] | None:
+            if not 0 <= position < len(members):
+                return None
+            row = members[position]
+            return {"symbol": str(row["symbol"]), "name": str(row.get("name") or row["symbol"])}
+
+        return {
+            **navigation,
+            "position": index + 1,
+            "total": len(members),
+            "previous": member_at(index - 1),
+            "next": member_at(index + 1),
+        }
     submitted_position = _navigation_count(nav_position)
     submitted_total = _navigation_count(nav_total)
     submitted_is_complete = bool(

@@ -73,15 +73,15 @@
   <p class="muted">代理周线按所选日期成员快照和前复权日线即时计算；{{ confirmation.policy_version }} · {{ confirmation.reason }}。仅供人工复核，不改变任何个股方法结论。</p>
 </section>
 
-<section class="section panel">
+<section id="industry-members" class="section panel">
   <div class="section-heading"><div><p class="eyebrow">行业成员</p><h2>当期成员与入选事实</h2></div><span class="muted">{{ members|length }} 只 · 点名称进入外部行情网站，点代码进入同花顺</span></div>
-  <div class="table-wrap"><table data-sortable="true"><thead><tr><th>股票</th><th>Brooks</th><th>Weinstein</th><th>Minervini</th><th>站内分析</th></tr></thead><tbody>
+  <div class="table-wrap"><table data-sortable="true" data-research-source-label="行业成员"><thead><tr><th>股票</th><th>Brooks</th><th>Weinstein</th><th>Minervini</th><th>站内分析</th></tr></thead><tbody>
     {% for row in members %}<tr>
       <td data-sort="{{ row.symbol }}"><div class="stock-primary-link">{% if row.tradingview_url %}<a class="instrument-name-link" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}<span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a></span></div></td>
       <td data-sort="{{ 2 if row.brooks_phase in ['h1','cycle_h1','new'] else 1 if row.brooks_phase else 0 }}"><span class="status-marker status-{{ 'pass' if row.brooks_phase in ['h1','cycle_h1','new'] else 'unknown' }}">{{ row.brooks_phase_label }}</span></td>
       <td><span class="status-marker status-{{ 'pass' if row.weinstein_result == 'PASS' else 'fail' if row.weinstein_result == 'FAIL' else 'unknown' }}">{{ row.weinstein_result_label }}</span>{% if row.weinstein_state_label %}<small class="table-subline">{{ row.weinstein_state_label }}</small>{% endif %}</td>
       <td><span class="status-marker status-{{ 'pass' if row.minervini_result == 'PASS' else 'fail' if row.minervini_result == 'FAIL' else 'unknown' }}">{{ row.minervini_result_label }}</span>{% if row.minervini_state_label %}<small class="table-subline">{{ row.minervini_state_label }}</small>{% endif %}</td>
-      <td>{% if row.weinstein_result or row.minervini_result %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}">查看详情</a>{% else %}<span class="muted">当日未入选</span>{% endif %}</td>
+      <td><a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?date={{ query_date }}&amp;industry={{ observation.industry_code|urlencode }}&amp;section=industry-members">查看详情</a></td>
     </tr>{% endfor %}
   </tbody></table></div>
 </section>
