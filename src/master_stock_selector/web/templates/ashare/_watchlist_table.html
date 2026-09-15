@@ -2,15 +2,14 @@
 <div class="table-wrap">
   <table class="watchlist-table" data-sortable="true"{% if filters.view == 'current' and section_rows|length > 40 %} data-page-size="40"{% endif %}>
     <thead>
-      <tr><th>股票</th><th>行业</th><th>行情</th><th>方法与状态</th><th>本轮开始</th><th>连续交易日</th>{% if current_user %}<th>我的观察</th>{% endif %}</tr>
+      <tr><th>股票</th><th>行业</th><th>行情</th><th>方法与状态</th><th>本轮开始 · 持续交易日</th>{% if current_user %}<th>我的观察</th>{% endif %}</tr>
     </thead>
     <tbody>
       {% for row in section_rows %}
       <tr>
         <td data-sort="{{ row.symbol }}">
           <div class="stock-primary-link">
-            <a class="instrument-name-link" href="/a/stocks/{{ row.symbol }}?{{ filters.query }}&amp;section={{ navigation_section }}{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}"><strong>{{ row.name or '名称待补' }}</strong></a>{% if row.tradingview_url %}<a class="text-link" data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">外部行情</a>{% endif %}
-            <span class="stock-secondary-links">{% if row.tonghuashun_url %}<a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.symbol }}">{{ row.symbol }}</a>{% else %}{{ row.symbol }}{% endif %}<a class="stock-detail-link" href="/a/stocks/{{ row.symbol }}?{{ filters.query }}&amp;section={{ navigation_section }}{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}">详情</a></span>
+            <a class="instrument-name-link" href="/a/stocks/{{ row.symbol }}?{{ filters.query }}&amp;section={{ navigation_section }}{% if not loop.first %}&amp;nav_previous={{ loop.previtem.symbol }}{% endif %}{% if not loop.last %}&amp;nav_next={{ loop.nextitem.symbol }}{% endif %}&amp;nav_position={{ loop.index }}&amp;nav_total={{ loop.length }}"><strong>{{ row.name or '名称待补' }}</strong></a><span class="stock-secondary-links">{{ row.symbol }}</span><details class="utility-menu stock-link-menu"><summary>外部行情</summary><div>{% if row.tradingview_url %}<a data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">TradingView</a>{% endif %}{% if row.tonghuashun_url %}<a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">同花顺</a>{% endif %}</div></details>
           </div>
           {% if row.is_suspended %}<span class="tag tag-muted">停牌</span>{% endif %}
         </td>
@@ -24,16 +23,15 @@
             <span class="method-line">
               <b>{{ method.method_label }}</b>
               <span class="status-marker status-{{ 'pass' if method.result == 'PASS' else 'unknown' if method.result in ['UNKNOWN', 'TRANSITION'] else 'fail' }}">{{ method.result_label }}</span>
-              {% if method.state_label %}<small>{{ method.state_label }}</small>{% endif %}
+              {% if method.state_label and method.state_label != '持续符合' %}<small>{{ method.state_label }}</small>{% endif %}
               {% if method.stage_label %}<small>{{ method.stage_label }}</small>{% endif %}
             </span>
           {% endfor %}
           </div>
         </td>
         <td data-sort="{{ row.display_start_sort }}">
-          {% for fact in row.display_facts %}<div>{{ fact.method_label }}：{{ fact.streak_started_on or '—' }}</div>{% endfor %}
+          {% for fact in row.display_facts %}<div>{{ fact.method_label }}：{{ fact.streak_started_on or '—' }} · <strong>{{ fact.consecutive_sessions }}日</strong></div>{% endfor %}
         </td>
-        <td data-sort="{{ row.display_max_streak }}">{% for fact in row.display_facts %}<div>{{ fact.method_label }}：<strong>{{ fact.consecutive_sessions }}</strong></div>{% endfor %}</td>
         {% if current_user %}<td class="observation-quick-cell">
           {% if row.manual.manual_state == 'UNREVIEWED' %}
           <form method="post" action="/a/stocks/{{ row.symbol }}/review" class="inline-observation-form">

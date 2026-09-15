@@ -808,26 +808,12 @@ def _market_cap_floor(value: int) -> int:
 
 def _decorate_index(row: dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
+    # Historical runtime databases may still contain the retired index-only
+    # Minervini facts.  The formal index product exposes Weinstein Stage alone.
+    item.pop("minervini", None)
     item["stage_label"] = STAGE_LABELS.get(str(row.get("stage") or ""), "未知")
     evidence = dict(row.get("evidence") or {})
     item["metrics"] = evidence
-    minervini = dict(row.get("minervini") or {})
-    minervini_evidence = dict(minervini.get("evidence") or {})
-    minervini_result = str(minervini.get("result") or "UNKNOWN")
-    minervini["result_label"] = {
-        "PASS": "是",
-        "FAIL": "否",
-        "UNKNOWN": "数据不足",
-    }.get(minervini_result, "数据不足")
-    minervini["status_class"] = {
-        "PASS": "pass",
-        "FAIL": "fail",
-        "UNKNOWN": "unknown",
-    }.get(minervini_result, "unknown")
-    minervini["metrics"] = dict(minervini_evidence.get("metrics") or {})
-    minervini["failed_checks"] = list(minervini_evidence.get("failed_checks") or [])
-    minervini["failed_check_count"] = len(minervini["failed_checks"])
-    item["minervini"] = minervini
     item.update(_index_external_urls(str(item.get("index_symbol") or "")))
     return item
 
@@ -1778,11 +1764,8 @@ def _market_overview_summary(
         headline = "市场内部与主要指数趋势独立呈现"
     else:
         weinstein_stage_2 = sum(1 for row in indices if row.get("stage") == "STAGE_2")
-        minervini_stage_2 = sum(
-            1 for row in indices if row.get("minervini", {}).get("result") == "PASS"
-        )
-        all_strong = weinstein_stage_2 == len(indices) and minervini_stage_2 == len(indices)
-        none_strong = weinstein_stage_2 == 0 and minervini_stage_2 == 0
+        all_strong = weinstein_stage_2 == len(indices)
+        none_strong = weinstein_stage_2 == 0
         tone = str(risk_context.get("tone") or "mixed")
         if tone == "positive" and none_strong:
             headline = "市场内部正在改善，主要指数趋势尚未转强"
@@ -1797,7 +1780,7 @@ def _market_overview_summary(
     return {
         "headline": headline,
         "detail": (
-            "四指数逐项展示 Weinstein 阶段与 Minervini 第二阶段结果；"
+            "四指数逐项展示 Weinstein 30周阶段；"
             "不投票、不加权、不合成市场总分。"
         ),
     }

@@ -78,7 +78,7 @@
         <h2 id="owner-activity-title">最近更新</h2>
         <span aria-live="polite" data-owner-status></span>
       </div>
-      <div class="owner-activity-list" data-owner-list>
+      <div class="owner-activity-list" data-owner-list data-research-list data-research-source-label="站主动态">
         {% set ns = namespace(day='') %}
         {% for item in activity_items %}
           {% if item.day != ns.day %}
@@ -88,7 +88,7 @@
           {% set ns.day = item.day %}
           {% endif %}
           <article class="owner-activity-row"
-                   data-owner-item
+                   data-owner-item data-research-row
                    data-owner-item-kind="{{ item.kind }}"
                    data-owner-item-side="{{ item.side }}"
                    data-owner-item-day="{{ item.day }}">
@@ -98,11 +98,11 @@
             </div>
             <div class="owner-activity-body">
               <header>
-                <a class="owner-activity-subject" href="{{ item.href }}">
+                <a class="owner-activity-subject" href="{{ item.href }}{% if item.href.startswith('/a/stocks/') %}?date={{ item.day }}{% endif %}">
                   <strong>{{ item.subject }}</strong>{% if item.symbol %}<small>{{ item.symbol }}</small>{% endif %}
                 </a>
                 <strong class="owner-activity-summary">{{ item.summary }}</strong>
-                <a class="owner-activity-action" href="{{ item.href }}">{{ item.action_label }} →</a>
+                <a class="owner-activity-action" href="{{ item.href }}{% if item.href.startswith('/a/stocks/') %}?date={{ item.day }}{% endif %}">{{ item.action_label }} →</a>
               </header>
               <div class="owner-activity-detail">
                 {% if item.facts %}<dl>{% for fact in item.facts %}<div class="owner-fact owner-fact-{{ fact.tone }}"><dt>{{ fact.label }}</dt><dd>{{ fact.value }}</dd></div>{% endfor %}</dl>{% endif %}
@@ -141,7 +141,7 @@
           <button type="button" data-owner-filter-shortcut="position">查看全部</button>
         </div>
         {% if positions %}
-        <div class="owner-rail-positions">
+        <div class="owner-rail-positions" data-research-list data-research-source-label="站主持仓">
           {% for item in positions[:4] %}
           <a href="/a/stocks/{{ item.symbol }}">
             <div class="owner-position-title"><span><strong>{{ item.stock_name }}</strong><small>{{ item.symbol }}</small></span><b>{{ item.remaining_percent }}%<small>剩余仓位</small></b></div>

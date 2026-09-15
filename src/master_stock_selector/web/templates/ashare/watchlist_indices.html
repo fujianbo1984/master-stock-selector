@@ -1,7 +1,7 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
 {% block heading %}四指数判断{% endblock %}
-{% block subtitle %}Weinstein 完整阶段 + Minervini 第二阶段是/否 · 数据截至 {{ query_date }}{% endblock %}
+{% block subtitle %}Weinstein 30周完整阶段 · 数据截至 {{ query_date }}{% endblock %}
 {% block content %}
 <section class="section daily-hero page-ledger-hero">
   <div><p class="eyebrow">四指数判断</p><h1>两种方法独立呈现市场阶段</h1><p>Weinstein 使用完整交易周；Minervini 只回答是否处于第二阶段。四指数不投票、不加权，也不直接决定个股能否进入观察池。</p></div>
@@ -12,7 +12,6 @@
   {% for row in indices %}<article class="index-stage-card stage-{{ row.stage|lower }}">
     <span class="index-instrument-links"><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_name }}</a><a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_symbol }}</a></span>
     <div class="index-method-result"><span>Weinstein</span><strong>{{ row.stage_label }}</strong></div>
-    <div class="index-method-result index-minervini-result"><span>Minervini 第二阶段</span><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></div>
   </article>{% endfor %}
 </section>{% endif %}
 
@@ -35,12 +34,7 @@
         <div><dt>价格位置</dt><dd>{{ '30周线上方' if row.metrics.close_above_ma30 else '30周线下方' if row.metrics.close_above_ma30 is not none else '暂无' }}</dd></div>
       </dl>
       {% if row.stage == 'UNKNOWN' %}<p class="muted">历史不足，不能强行判定阶段。</p>{% elif row.stage == 'TRANSITION' %}<p class="muted">当前证据冲突，保留为转换期。</p>{% endif %}
-      <div class="index-minervini-panel">
-        <div><span>Minervini 第二阶段</span><strong class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</strong></div>
-        <small>日线趋势模板 · {{ row.minervini.as_of_date }} · 不使用个股横截面相对强度排名</small>
-        {% if row.minervini.result == 'FAIL' %}<small>未通过 {{ row.minervini.failed_check_count }} 项趋势条件。</small>{% elif row.minervini.result == 'UNKNOWN' %}<small>历史或当日指数数据不足，不强行判定。</small>{% endif %}
-      </div>
-    </article>
+      </article>
     {% endfor %}
   </div>
   </details>
@@ -48,7 +42,7 @@
 </section>
 
 <details class="section stock-disclosure notes-panel">
-  <summary><span><strong>判定原则与口径边界</strong><small>展开查看阶段规则与指数 Minervini 适配说明</small></span><span class="disclosure-action">展开</span></summary>
-  <div class="stock-disclosure-body"><p>第二阶段要求价格位于上升的30周均线上方且中期回报为正；第四阶段为价格位于下降的30周均线下方且中期回报为负。均线走平时必须结合此前路径区分第一阶段与第三阶段，无法唯一判断时输出转换期。</p><p>Minervini 指数第二阶段使用50日、150日、200日均线关系、200日线方向与52周价格位置。因对象是指数，不把四个指数互相排名来代替个股横截面相对强度条件；结果只是“是”“否”或“数据不足”。</p></div>
+  <summary><span><strong>判定原则与口径边界</strong><small>展开查看Weinstein 30周阶段规则</small></span><span class="disclosure-action">展开</span></summary>
+  <div class="stock-disclosure-body"><p>第二阶段要求价格位于上升的30周均线上方且中期回报为正；第四阶段为价格位于下降的30周均线下方且中期回报为负。均线走平时必须结合此前路径区分第一阶段与第三阶段，无法唯一判断时输出转换期。</p></div>
 </details>
 {% endblock %}

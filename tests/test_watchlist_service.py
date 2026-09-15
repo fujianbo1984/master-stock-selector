@@ -156,9 +156,14 @@ def test_service_builds_two_independent_stock_methods_and_four_index_stages(tmp_
     assert {row["index_symbol"] for row in indices} == {
         "000300.SH", "000852.SH", "399006.SZ", "000688.SH"
     }
-    assert payload["counts"]["index_minervini_facts"] == 4
-    assert payload["counts"]["index_minervini_stage2"] == 4
-    assert {row["minervini"]["result"] for row in indices} == {"PASS"}
+    assert "index_minervini_facts" not in payload["counts"]
+    assert "index_minervini_stage2" not in payload["counts"]
+    with sqlite3.connect(runtime_path) as connection:
+        persisted_index_minervini_count = connection.execute(
+            "SELECT COUNT(*) FROM index_minervini_stage2_daily_fact"
+        ).fetchone()[0]
+    assert persisted_index_minervini_count == 0
+    assert all("minervini" not in row for row in indices)
     rising = next(row for row in rows if row["symbol"] == "000001.SZ")
     assert rising["methods"]["minervini"]["result"] == "PASS"
     assert rising["methods"]["weinstein"]["result"] == "PASS"
@@ -197,8 +202,4 @@ def test_service_persists_explicit_unknown_for_missing_index(tmp_path):
     missing = next(row for row in rows if row["index_symbol"] == "000688.SH")
     assert missing["stage"] == "UNKNOWN"
     assert missing["evidence"]["reason"] == "NO_COMPLETED_LOCAL_INDEX_WEEK"
-    assert missing["minervini"]["result"] == "UNKNOWN"
-    assert (
-        missing["minervini"]["evidence"]["reason"]
-        == "MISSING_BAR_FOR_AS_OF_DATE"
-    )
+    assert "minervini" not in missing

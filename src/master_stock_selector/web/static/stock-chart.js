@@ -103,6 +103,28 @@
     root.querySelector("[data-kc-ma]").value = preset.use_ema ? "ema" : "sma";
     root.querySelector("[data-kc-style]").value = preset.band_style;
   };
+  const kcFields = ['ma', 'style', 'length', 'atr-length', 'multiplier', 'source'];
+  const storeKcSettings = () => {
+    try {
+      const values = Object.fromEntries(kcFields.map(key => [key, root.querySelector(`[data-kc-${key}]`).value]));
+      values.preset = kcPresetInput.value;
+      sessionStorage.setItem(`masterstock-chart:kc:${interval}`, JSON.stringify(values));
+    } catch (_) { /* Optional preference only. */ }
+  };
+  const restoreKcSettings = () => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(`masterstock-chart:kc:${interval}`) || 'null');
+      if (!saved || typeof saved !== 'object') return;
+      kcFields.forEach(key => {
+        const input = root.querySelector(`[data-kc-${key}]`);
+        const value = saved[key];
+        if (input.tagName === 'SELECT') {
+          if ([...input.options].some(option => option.value === value)) input.value = value;
+        } else if (Number.isFinite(Number(value)) && Number(value) >= Number(input.min) && Number(value) <= Number(input.max)) input.value = value;
+      });
+      kcPresetInput.value = Object.hasOwn(kcPresets, saved.preset) ? saved.preset : 'custom';
+    } catch (_) { /* Optional preference only. */ }
+  };
   const frameworkLayerVisible = () => root.querySelector(`[data-framework-layer="${frameworkForInterval()}"]`)?.checked === true;
   const syncChartViewControls = () => {
     root.querySelectorAll("[data-chart-interval]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.chartInterval === interval)));
@@ -165,6 +187,7 @@
   restoreLayerSettings();
   restoreAppearance();
   applyKcPreset(defaultKcPresetForInterval());
+  restoreKcSettings();
   syncChartViewControls();
   syncAppearanceControls();
   const chart = LightweightCharts.createChart(chartNode, {
@@ -323,7 +346,7 @@
   };
   const climaxLayer = window.createClimaxLayer({ root, candles,
     onChange: () => renderMarkers(),
-    restoreKc: () => { applyKcPreset(defaultKcPresetForInterval()); request(); },
+    restoreKc: () => { applyKcPreset(defaultKcPresetForInterval()); storeKcSettings(); updateKcSummary(); request(); },
   });
   const renderMarkers = () => {
     if (!payload) return;
@@ -907,13 +930,13 @@
     if (!["ArrowLeft", "ArrowRight"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
     const active = document.activeElement;
     if (active?.isContentEditable || ["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(active?.tagName)) return;
-    const target = document.querySelector(event.key === "ArrowLeft" ? "[data-chart-previous]" : "[data-chart-next]");
-    if (!target) return;
+    const target = document.querySelector(event.key === "ArrowLeft" ? "[data-chart-previous], [data-research-previous]" : "[data-chart-next], [data-research-next]");
+    if (!target || target.hidden) return;
     event.preventDefault();
     window.location.assign(target.href);
   });
   root.querySelectorAll("[data-chart-limit]").forEach(button => button.addEventListener("click", () => { limit = button.dataset.chartLimit === "all" ? null : Number(button.dataset.chartLimit); syncChartViewControls(); storeChartView(); request(); }));
-  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; applyKcPreset(defaultKcPresetForInterval()); syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
+  root.querySelectorAll("[data-chart-interval]").forEach(button => button.addEventListener("click", () => { closeTextEditor(); interval = button.dataset.chartInterval; applyKcPreset(defaultKcPresetForInterval()); restoreKcSettings(); syncChartViewControls(); updateKcSummary(); renderMethodEventDetail(null); storeChartView(); request(); }));
   root.querySelectorAll("[data-candle-style]").forEach(button => button.addEventListener("click", () => {
     candleStyle = button.dataset.candleStyle;
     syncAppearanceControls();
@@ -921,7 +944,7 @@
     if (payload) drawPayload(payload);
     else candles.applyOptions(candleStyles[candleStyle].candles);
   }));
-  kcPresetInput.addEventListener("change", () => { if (kcPresetInput.value !== "custom") applyKcPreset(kcPresetInput.value); updateKcSummary(); request(); });
-  root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { kcPresetInput.value = "custom"; updateKcSummary(); request(); }));
+  kcPresetInput.addEventListener("change", () => { if (kcPresetInput.value !== "custom") applyKcPreset(kcPresetInput.value); storeKcSettings(); updateKcSummary(); request(); });
+  root.querySelectorAll("[data-kc-ma], [data-kc-style], [data-kc-length], [data-kc-atr-length], [data-kc-multiplier], [data-kc-source]").forEach(input => input.addEventListener("change", () => { kcPresetInput.value = "custom"; storeKcSettings(); updateKcSummary(); request(); }));
   chart.timeScale().subscribeVisibleTimeRangeChange(renderDrawings); window.addEventListener("resize", resize); setActiveTool("browse"); updateKcSummary(); syncVolumePane(); resize(); void loadAnomalyEvidence(); request();
 })();

@@ -178,8 +178,8 @@ def create_app(
             {
                 "label": "发现股票",
                 "items": [
-                    ("发现股票", "/a/discover"),
                     ("趋势候选", "/a/daily"),
+                    ("发现股票", "/a/discover"),
                     ("价格行为事件", "/a/brooks-second-leg"),
                     ("实验筛选", "/a/experimental"),
                 ],

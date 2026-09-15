@@ -1052,7 +1052,7 @@ def test_daily_query_scopes_current_and_change_states_to_selected_method(tmp_pat
     assert "魏续米进" in weinstein_continuing.text
     assert "魏退米进" not in weinstein_continuing.text
     assert "Weinstein：" in weinstein_continuing.text
-    assert "<strong>23</strong>" in weinstein_continuing.text
+    assert "<strong>23日</strong>" in weinstein_continuing.text
 
 
 def test_daily_query_preserves_filters_and_discloses_fallbacks(tmp_path):
@@ -1116,9 +1116,12 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert "Weinstein" in response.text
     assert "Minervini" in response.text
     assert "两法同时符合" in response.text
-    assert "行业观察" in response.text
+    assert "市场背景" in response.text
     assert "当前观察池" in response.text
-    assert "Weinstein 周内预变化" in response.text
+    assert "Weinstein 周内预变化" not in response.text
+    weinstein = client.get("/a/daily?method=weinstein")
+    assert "Weinstein 周内预变化" in weinstein.text
+    assert "非正式完整周结论" in weinstein.text
     assert "正式状态变化" in response.text
     assert 'id="daily-results"' in response.text
     assert 'id="continuing-candidates"' not in response.text
@@ -1131,7 +1134,7 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert response.text.count("kpi-link") == 4
     assert "view=current" in response.text
     assert "view=changes" in response.text
-    assert "view=projection" in response.text
+    assert "view=projection" in weinstein.text
     assert '<select name="state">' not in response.text
     assert "manual=FOCUS" not in response.text
     assert "人工状态" not in response.text
@@ -1255,7 +1258,7 @@ def test_projection_detail_and_charts_keep_previous_next_navigation(tmp_path):
     assert "/a/stocks/000003.SZ/realtime?date=2026-07-31" in realtime.text
 
 
-def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composite(
+def test_four_indices_show_only_weinstein_stage_without_composite(
     tmp_path,
 ):
     client = _client(tmp_path)
@@ -1263,9 +1266,9 @@ def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composit
     response = client.get("/a/indices?date=2026-07-31")
 
     assert response.status_code == 200
-    assert "Weinstein 完整阶段 + Minervini 第二阶段是/否" in response.text
-    assert response.text.count("Minervini 第二阶段") >= 4
-    assert "不使用个股横截面相对强度排名" in response.text
+    assert "Weinstein 30周完整阶段" in response.text
+    assert "Minervini 第二阶段" not in response.text
+    assert "四指数仅使用 Weinstein 30周完整阶段" in response.text
     assert "沪深300" in response.text
     assert "中证1000" in response.text
     assert "创业板指" in response.text
@@ -1276,16 +1279,14 @@ def test_four_indices_show_weinstein_stage_and_minervini_stage2_without_composit
     assert "000688.SH" in response.text
     assert "不合成市场总分" in response.text
     assert "不构成投资建议或自动买卖指令" in response.text
-    assert 'class="section index-stage-grid index-overview-grid"' in response.text
+    assert 'aria-label="四指数阶段摘要"' in response.text
     assert 'class="index-evidence-disclosure"' in response.text
     payload = client.get("/api/a/indices/2026-07-31").json()
     assert payload["methods"] == {
         "weinstein": "full_stage",
-        "minervini": "stage2_only",
     }
     assert {row["stage"] for row in payload["rows"]} == {"STAGE_2"}
-    assert {row["minervini"]["result"] for row in payload["rows"]} == {"PASS"}
-    assert {row["minervini"]["result_label"] for row in payload["rows"]} == {"是"}
+    assert all("minervini" not in row for row in payload["rows"])
 
 
 def test_anonymous_user_can_open_combined_indices_and_market_breadth_page(tmp_path):
@@ -1506,7 +1507,8 @@ def test_stock_detail_keeps_method_facts_separate_from_manual_review(tmp_path):
     assert "三套独立方法证据" in detail.text
     assert "30周线" in detail.text
     assert "股份制银行III（申万2021三级）" in detail.text
-    assert detail.text.index("method-evidence-grid") < detail.text.index("manual-review-panel")
+    assert detail.text.index("stock-method-summary") < detail.text.index("manual-review-panel")
+    assert detail.text.count('id="personal-research"') == 1
     assert "两种方法逐项对照" in detail.text
     assert "Brooks 强势股与 H1 独立证据" in detail.text
     assert "最近 H1 / 回调判断" in detail.text
@@ -1693,7 +1695,7 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     next_href = chart.text.split('data-chart-next href="', 1)[1].split('"', 1)[0]
     assert "#stock-chart" not in next_href
     assert "数据截至 2026-07-31 · 收盘后复盘" not in chart.text
-    assert "<summary><span>通道设置</span></summary>" in chart.text
+    assert "<summary><span>图表设置</span></summary>" in chart.text
     assert chart.text.index("kc-settings-panel") < chart.text.index("data-kc-summary")
     assert "data-volume checked" not in chart.text
     assert "data-chart-status" not in chart.text
@@ -1838,9 +1840,8 @@ def test_industry_members_keep_detail_and_chart_navigation(tmp_path):
     assert 'data-research-source-label="行业成员"' in listing.text
     detail = client.get(unescape(links[0]))
     assert detail.status_code == 200
-    chart_url = unescape(re.search(
-        r'href="([^"]+)">打开完整图表工作区', detail.text
-    ).group(1))
+    assert "data-workspace-expand" in detail.text
+    chart_url = unescape(links[0]).replace("?", "/chart?", 1)
     chart = client.get(chart_url)
     assert chart.status_code == 200
     assert "行业成员 <b>1 / 2</b>" in chart.text
@@ -1897,7 +1898,7 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert '<th colspan="4">热度表现</th>' in page.text
     assert '<th colspan="3">方法事实</th>' in page.text
     assert 'data-sort-column="6">Brooks Leg1</th>' in page.text
-    assert "app.css?v=20260910-climax-v1" in page.text
+    assert "app.css?v=20260915-research-v2" in page.text
     assert "<th>Weinstein 新入/重进</th>" not in page.text
     assert "新/重" in page.text
     assert "小样本，仅看数量" in page.text
@@ -2301,7 +2302,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert "data-chart-source=" not in page.text
     assert "data-chart-pane=" not in page.text
-    assert "stock-chart.js?v=20260910-climax-v1" in page.text
+    assert "stock-chart.js?v=20260915-research-v3" in page.text
     assert "stock-chart-source.js" not in page.text
     assert "data-chart-period-change" in page.text
     assert "data-chart-ohlcv" in page.text
@@ -3116,3 +3117,27 @@ def test_research_routes_guest_and_private_observation_return(tmp_path):
     assert note not in client.get("/a/dashboard").text
     assert note in client.get("/a/observations?state=ARCHIVED").text
     assert "没有匹配此标签的观察" in client.get("/a/observations?tag=不存在").text
+
+
+def test_dashboard_changes_are_date_scoped_and_private(tmp_path):
+    client = _client(tmp_path)
+    user = client.app.state.user_repository.session_user(client.cookies.get(SESSION_COOKIE))
+    assert user is not None
+    client.app.state.user_repository.save_review(
+        user.user_id, "000001.SZ", "FOCUS", "仅本人可见的复核原因"
+    )
+    current = client.get("/a/dashboard?date=2026-07-31")
+    assert current.status_code == 200
+    assert "观察对象的方法变化" in current.text
+    assert "仅本人可见的复核原因" in current.text
+    assert 'href="/a/stocks/000001.SZ?date=2026-07-31"' in current.text
+    earlier = client.get("/a/dashboard?date=2026-07-30")
+    assert "观察对象的方法变化" not in earlier.text
+    assert "查询日暂无方法事实" in earlier.text
+    anonymous = TestClient(client.app).get("/a/dashboard?date=2026-07-31")
+    other = _authenticated_client(client.app, "other-researcher").get(
+        "/a/dashboard?date=2026-07-31"
+    )
+    for response in (anonymous, other):
+        assert "仅本人可见的复核原因" not in response.text
+        assert "观察对象的方法变化" not in response.text

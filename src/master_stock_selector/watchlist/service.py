@@ -9,7 +9,6 @@ from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
 from .methods import (
-    MINERVINI_INDEX_STAGE2_POLICY_VERSION,
     MINERVINI_POLICY_VERSION,
     RESULT_PASS,
     RESULT_TRANSITION,
@@ -131,8 +130,6 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
         "unknown": 0,
         "transition": 0,
         "index_facts": 0,
-        "index_minervini_facts": 0,
-        "index_minervini_stage2": 0,
     }
     provisional_facts: list[dict[str, Any]] = []
     stock_facts = _stock_fact_stream(
@@ -157,16 +154,7 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
         stage_baselines=index_stage_baselines,
         origin=origin,
     )
-    index_minervini_facts = build_index_minervini_facts(
-        reader=reader,
-        as_of_date=as_of_date,
-        origin=origin,
-    )
     counts["index_facts"] = len(index_facts)
-    counts["index_minervini_facts"] = len(index_minervini_facts)
-    counts["index_minervini_stage2"] = sum(
-        1 for row in index_minervini_facts if row["result"] == RESULT_PASS
-    )
     finished_at = datetime.now().astimezone().isoformat(timespec="seconds")
     run_id = f"watchlist-{as_of_date}-{uuid4().hex[:12]}"
     receipt = {
@@ -188,7 +176,6 @@ def run_watchlist(config: WatchlistRunConfig) -> dict[str, Any]:
         stock_facts=stock_facts,
         provisional_facts=provisional_facts,
         index_facts=index_facts,
-        index_minervini_facts=index_minervini_facts,
         receipt=receipt,
         identities=_identity_rows(members, as_of_date, origin),
     )
@@ -527,51 +514,6 @@ def _index_facts(
                     "origin": origin,
                 }
             )
-    return result
-
-
-def build_index_minervini_facts(
-    *,
-    reader: MarketDataReader,
-    as_of_date: str,
-    origin: str,
-) -> list[dict[str, Any]]:
-    """Build a Stage 2 yes/no fact for each index from the daily price template.
-
-    The stock-only cross-sectional relative-strength percentile is deliberately
-    excluded: ranking four unlike indices would not reproduce Minervini's stock
-    selection rule.
-    """
-
-    result: list[dict[str, Any]] = []
-    for index_symbol, index_name in INDEX_UNIVERSE:
-        raw_rows = reader.index_bars(index_symbol, as_of_date)
-        bars = normalized_daily_bars(raw_rows)
-        base = minervini_base_profiles(bars, {as_of_date}).get(as_of_date)
-        if base is None:
-            profile = {
-                "result": RESULT_UNKNOWN,
-                "reason": "MISSING_BAR_FOR_AS_OF_DATE",
-                "bar_count": len(bars),
-                "metrics": {},
-                "checks": {},
-            }
-        else:
-            profile = base
-        evidence = _compact_profile("minervini", profile)
-        evidence["relative_strength_rule"] = "NOT_APPLICABLE_TO_INDEX"
-        result.append(
-            {
-                "as_of_date": as_of_date,
-                "index_symbol": index_symbol,
-                "index_name": index_name,
-                "result": str(profile.get("result") or RESULT_UNKNOWN),
-                "policy_version": MINERVINI_INDEX_STAGE2_POLICY_VERSION,
-                "evidence": evidence,
-                "source_digest": _bars_digest(index_symbol, raw_rows),
-                "origin": origin,
-            }
-        )
     return result
 
 

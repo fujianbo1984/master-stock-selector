@@ -2501,3 +2501,95 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .climax-panel p { margin: 8px 0; line-height: 1.7; }
 .climax-panel small { color: #6d716f; }
 .climax-timeline { display: flex; flex-wrap: wrap; gap: 8px 24px; padding-left: 20px; margin: 10px 0; }
+
+/* Desktop research: dense lists, one chart and a nearby observation editor. */
+.utility-menu { position: relative; display: inline-block; font-size: 13px; }
+.utility-menu > summary { cursor: pointer; padding: 6px 8px; color: var(--accent); white-space: nowrap; }
+.utility-menu > div { position: absolute; right: 0; top: 100%; min-width: 180px; max-width: 320px; padding: 10px; background: var(--panel, #fffdfa); border: 1px solid var(--line); box-shadow: 0 6px 18px #28231d18; z-index: 80; }
+.utility-menu > div > a, .utility-menu > div > button { display: block; padding: 8px; white-space: nowrap; }
+.utility-menu > div > p { font-size: 13px; margin: 4px 8px; }
+.data-status-menu { float: right; margin-top: 2px; }
+.data-status-menu > summary { font-size: 12px; }
+.data-status-menu + .research-subnav { padding-right: 95px; }
+.research-subnav .utility-menu { margin-left: auto; }
+.research-header { min-height: 66px; }
+.research-main:has(.watchlist-hero) .watchlist-hero { padding: 4px 0; }
+.watchlist-hero h1 { font-size: 24px; }
+.watchlist-hero-summary, .applied-list-filters { font-size: 13px; }
+.compact-notice { padding: 5px 10px; margin: 5px 0; font-size: 13px; }
+.weinstein-projection-entry { display: flex; gap: 14px; margin: 4px 0 8px; font-size: 13px; }
+.weinstein-projection-entry span { color: var(--muted); }
+.watchlist-section > .section-heading h2 { font-size: 18px; }
+.watchlist-section .watchlist-table th { padding: 8px 10px; }
+.watchlist-section .watchlist-table td { padding: 6px 10px; line-height: 1.4; }
+.watchlist-table .stock-primary-link { display: grid; grid-template-columns: minmax(90px, 1fr) auto; gap: 2px 6px; }
+.watchlist-table .stock-secondary-links { grid-column: 1; font-size: 12px; color: var(--muted); }
+.watchlist-table .stock-link-menu { grid-column: 2; grid-row: 1 / 3; }
+.watchlist-table small, .watchlist-table .table-subline { font-size: 12px; }
+.watchlist-table .method-stack { gap: 3px; }
+.watchlist-table .method-line { gap: 5px; }
+.watchlist-table .market-metrics-cell { min-width: 140px; }
+.watchlist-table .quote-line { flex-wrap: wrap; }
+.positive, .quote-up { color: #b33e2a; }
+.negative, .quote-down { color: #28744f; }
+.stock-research-layout { display: grid; grid-template-columns: minmax(0, 1fr) 292px; gap: 12px; align-items: start; }
+.stock-research-layout > .stock-price-workspace { min-width: 0; }
+.stock-research-sidebar { position: sticky; top: 12px; }
+.stock-research-sidebar .panel { padding: 14px; }
+.stock-research-sidebar .ledger-review-heading { display: block; }
+.stock-research-sidebar h2 { font-size: 18px; margin-bottom: 8px; }
+.stock-research-sidebar .ledger-review-form, .stock-research-sidebar .ledger-review-form.has-tags { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.stock-research-sidebar .ledger-review-form > * { width: 100%; }
+.stock-research-sidebar textarea { min-height: 140px; resize: vertical; }
+.stock-research-sidebar .observation-detail-actions { flex-wrap: wrap; gap: 6px; }
+.stock-research-sidebar .review-timestamp { font-size: 12px; }
+.stock-research-sidebar .review-timestamp br { display: none; }
+.stock-research-layout.is-expanded { grid-template-columns: minmax(0, 1fr); }
+.stock-research-layout.is-expanded .stock-research-sidebar { position: static; }
+.stock-research-layout.is-expanded .stock-price-workspace .stock-chart-stage { height: 65vh; min-height: 460px; }
+.stock-ledger-identity .stock-identity-main p { font-size: 13px; margin: 2px 0; }
+.stock-ledger-identity h1 { font-size: 23px; }
+.stock-market-ledger { margin: 0; }
+.stock-method-summary small { font-size: 12px; }
+.stock-workspace-nav { margin-top: 4px; padding: 7px 12px; }
+.stock-research-layout .chart-toolbar-main { flex-wrap: wrap; gap: 6px; }
+.stock-research-layout .chart-toolbar { gap: 6px; }
+.stock-research-layout .chart-legend { flex-wrap: wrap; }
+.chart-appearance-settings { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; }
+.kc-settings-panel { z-index: 85; }
+.market-reading-help { margin-bottom: 12px; }
+.market-reading-help > summary, .workspace-help > summary, .plan-grill-panel > summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 6px 0; }
+.workspace-welcome { padding: 12px 0; }
+.workspace-help { padding: 10px 16px; }
+.workspace-method-changes { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 13px; }
+.workspace-method-changes small { color: var(--muted); }
+[data-recent-research-list] { display: flex; gap: 12px; flex-wrap: wrap; }
+[data-recent-research-list] a { padding: 6px 12px; border: 1px solid var(--line); font-size: 13px; }
+[hidden] { display: none !important; }
+
+.candidate-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 8px 0; }
+.candidate-controls > .query-mode-switch { margin: 0; padding: 0; flex: 0 0 auto; }
+.candidate-controls > .home-summary { margin: 0 0 0 auto; }
+.research-main:has(.watchlist-hero) .watchlist-section > .section-heading { padding: 4px 4px 8px; margin: 0; }
+.stock-research-sidebar .private-login-panel { display: block; }
+.stock-research-sidebar .private-login-panel p { margin: 10px 0; }
+.stock-research-sidebar .private-login-panel h2 { margin: 8px 0; }
+.stock-research-sidebar .private-login-panel .button { display: inline-block; }
+.stock-research-sidebar { min-width: 0; }
+.stock-research-sidebar .ledger-review-heading .manual-state { display: inline-block; margin-top: 5px; }
+.stock-research-sidebar input, .stock-research-sidebar textarea { min-width: 0; box-sizing: border-box; }
+.stock-research-layout { clear: both; }
+
+.observation-state-menu > summary { cursor: pointer; font-size: 13px; color: var(--accent); margin: 8px 0; }
+.stock-research-sidebar textarea { min-height: 100px; }
+.stock-research-sidebar .ledger-review-form { gap: 8px; margin-top: 8px; }
+.stock-research-sidebar .ledger-review-heading .eyebrow { display: none; }
+.stock-research-sidebar .ledger-review-heading h2 { display: inline; margin-right: 8px; }
+.stock-research-layout .chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; }
+.stock-research-layout .chart-toolbar-main { flex: 1 1 100%; }
+.stock-research-layout .drawing-tool-group { flex: 0 0 auto; }
+.stock-research-layout .kc-settings { margin-left: auto; }
+
+.stock-research-sidebar .ledger-review-form, .stock-research-sidebar .ledger-review-form.has-tags { gap: 7px; }
+.stock-research-sidebar textarea { min-height: 88px; }
+.stock-research-sidebar .ledger-review-form > button { min-height: 32px; padding: 6px 10px; }

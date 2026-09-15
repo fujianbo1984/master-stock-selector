@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}龙场悟道 · 股票研究{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260910-climax-v1">
+  <link rel="stylesheet" href="/static/app.css?v=20260915-research-v2">
 </head>
-<body class="app-body {% block body_class %}{% endblock %}">
+<body data-research-user="{{ current_user.user_id if current_user else 'anonymous' }}" class="app-body {% block body_class %}{% endblock %}">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
   <main class="shell" id="main-content">
     {% block body %}{% endblock %}
@@ -264,6 +264,6 @@
 
   </script>
   {% block scripts %}{% endblock %}
-  <script src="/static/research-navigation.js?v=20260914-industry-members"></script>
+  <script src="/static/research-navigation.js?v=20260915-research-v3"></script>
 </body>
 </html>

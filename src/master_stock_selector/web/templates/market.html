@@ -10,15 +10,15 @@
     <strong>发现股票 · 核对证据 · 持续观察</strong>
     <span class="research-subtitle">{% block subtitle %}{% endblock %}</span>
     <div class="research-date">
-      <strong>{{ query_date or date_missing or latest_date or today }}</strong>
+      <strong>{{ query_date or date_missing or latest_date or "个人工作区" }}</strong>
       {% if not suppress_research_date_note %}
-      <span>{% if query_date or latest_date %}查询日期 {{ query_date or latest_date }} · 收盘后复盘{% else %}暂无可用事实 · 收盘后复盘{% endif %}</span>
+      <span>{% if query_date or latest_date %}查询日 · 收盘后复盘{% else %}记录与复盘{% endif %}</span>
       {% endif %}
     </div>
   </div>
   <nav class="research-nav" aria-label="龙场悟道导航">
     {% for group in a_nav_groups %}
-    <a class="{% if active_group == group.label %}active{% endif %}" {% if active_group == group.label %}aria-current="true"{% endif %} href="{{ group['items'][0][1] }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ group.label }}</a>
+    <a class="{% if active_group == group.label %}active{% endif %}" {% if active_group == group.label %}aria-current="true"{% endif %} {% if group.label == "发现股票" %}data-discovery-entry{% endif %} href="{{ group['items'][0][1] }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ group.label }}</a>
     {% endfor %}
   </nav>
 <form class="global-stock-search" action="/a/stocks" method="get" data-stock-search role="search" aria-label="查任意在库股票">
@@ -37,7 +37,7 @@
       <span class="research-account-copy"><small>个人工作区</small><strong>{{ current_user.display_name or current_user.username }}</strong></span>
     </a>
     <div class="research-account-actions">
-      <a class="text-link" href="/a/owner">站长动态</a>
+      <details class="utility-menu"><summary>更多</summary><div><a href="/a/owner">站长动态与共享</a><a href="/a/reading">阅读</a><a href="/a/plan">交易计划</a></div></details>
       <form method="post" action="/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="text-button" type="submit">退出</button>
@@ -48,13 +48,16 @@
     {% endif %}
   </div>
 </header>
+{% if query_date or research_date or latest_date %}<details class="data-status-menu utility-menu"><summary>数据状态</summary><div><p>查询日 {{ query_date or research_date or today }}；各方法有效日期以页面证据为准。</p><a href="/a/runs">查看更新与运行凭证</a></div></details>{% endif %}
 {% for group in a_nav_groups if not suppress_section_nav and group.label == active_group and group['items']|length > 1 %}
 <nav class="research-subnav" aria-label="{{ group.label }}">
-  {% for label, href in group['items'] %}<a {% if nav_active == label %}class="active" aria-current="page" {% endif %}href="{{ href }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ "使用导览" if label == "发现股票" else label }}</a>{% endfor %}
+    {% for label, href in group['items'] if label not in ['发现股票', '实验筛选', '交易计划'] %}<a {% if nav_active == label %}class="active" aria-current="page" {% endif %}href="{{ href }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ label }}</a>{% endfor %}
+  {% if group.label == '发现股票' %}<details class="utility-menu"><summary>帮助与实验{% if nav_active in ['发现股票','实验筛选'] %} · {{ nav_active }}{% endif %}</summary><div><a href="/a/discover{% if research_date %}?date={{ research_date }}{% endif %}">使用导览</a><a href="/a/experimental">早期活跃 · 实验</a></div></details>{% endif %}
+  {% if group.label == '我的研究' %}<details class="utility-menu"><summary>研究工具{% if nav_active == '交易计划' %} · 交易计划{% endif %}</summary><div><a href="/a/plan">交易计划</a><a href="/a/reading">阅读</a><a href="/a/owner">站长动态与共享</a></div></details>{% endif %}
 </nav>
 {% endfor %}
 
-<script src="/static/stock-search.js?v=20260905-workspace-v4"></script>
+<script src="/static/stock-search.js?v=20260915-list-v5"></script>
 {% if not suppress_page_intro %}
 <section class="page-intro" aria-labelledby="page-title">
   <div>

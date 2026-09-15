@@ -51,11 +51,26 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
             reverse=True,
         )
         names = repository.stock_names({str(row["symbol"]) for row in active_reviews})
+        public_rows = {
+            str(row["symbol"]): row
+            for row in context.cached_rows(query_date, include_liquidity=False)
+        } if active_reviews else {}
+        changes = [
+            {
+                "symbol": review["symbol"],
+                "name": names.get(str(review["symbol"])) or review["symbol"],
+                "method": method,
+            }
+            for review in active_reviews
+            for method in public_rows.get(str(review["symbol"]), {}).get("methods", {}).values()
+            if method.get("state") in {"ENTERED", "REENTERED", "EXITED", "DATA_GAP"}
+        ]
         recent = [
             {
                 **row,
                 "name": names.get(str(row["symbol"])) or row["symbol"],
                 "updated_label": sqlite_utc_to_shanghai(row.get("reviewed_at")),
+                "methods": public_rows.get(str(row["symbol"]), {}).get("methods", {}),
             }
             for row in active_reviews[:6]
         ]
@@ -65,7 +80,7 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
                 int(row.get("return_5d_rank") or 1000000),
                 str(row.get("industry_code") or ""),
             ),
-        )[:5]
+        )[:3]
         return context.render(
             request,
             "ashare/dashboard.html",
@@ -73,6 +88,8 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
                 "active": "工作台",
                 "query_date": query_date,
                 "recent_observations": recent,
+                "observation_changes": changes[:8],
+                "observation_change_count": len(changes),
                 "observation_count": len(active_reviews),
                 "hot_industries": hot_industries,
             },

@@ -22,21 +22,20 @@
         <span class="index-instrument-links"><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_name }}</a><a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_symbol }}</a></span>
         <div class="index-method-result"><span>Weinstein</span><strong>{{ row.stage_label }}</strong></div>
         <small>{{ row.effective_date }} · 已持续 {{ row.duration_weeks }} 周</small>
-        <div class="index-method-result index-minervini-result"><span>Minervini 第二阶段</span><b class="status-marker status-{{ row.minervini.status_class }}">{{ row.minervini.result_label }}</b></div>
       </article>{% endfor %}
     </div>{% else %}<div class="empty">所选日期暂无四指数方法事实。</div>{% endif %}
     <p class="method-boundary-copy">“两法同时符合”只是两个独立当前事实的交集，不生成跨方法总分；系统不输出核心目标、买点或交易指令。</p>
   </div>
 </details>
 </section>
-<nav class="section daily-jumpbar query-mode-switch" aria-label="观察池查看模式">
+<div class="candidate-controls"><nav class="section daily-jumpbar query-mode-switch" aria-label="观察池查看模式">
   <span>查看模式</span>
   <div class="daily-tablist">
     <a class="query-choice{% if filters.view == 'current' %} active{% endif %}" {% if filters.view == 'current' %}aria-current="page"{% endif %} href="{{ urls.current_view }}">当前观察池</a>
-    <a class="query-choice{% if filters.view == 'projection' %} active{% endif %}" {% if filters.view == 'projection' %}aria-current="page"{% endif %} href="{{ urls.projection_view }}">Weinstein 周内预变化</a>
+
     <a class="query-choice{% if filters.view == 'changes' %} active{% endif %}" {% if filters.view == 'changes' %}aria-current="page"{% endif %} href="{{ urls.changes_view }}">正式状态变化</a>
   </div>
-  <a class="text-link query-industry-link" href="/a/industries?date={{ query_date }}">查看行业观察 →</a>
+
 </nav>
 
 {% if filters.view == 'current' %}
@@ -46,6 +45,10 @@
   {% endfor %}
 </section>
 {% endif %}
+
+</div>
+{% if filters.method == 'weinstein' or filters.view == 'projection' %}<div class="weinstein-projection-entry"><a href="{{ urls.projection_view }}">Weinstein 周内预变化</a><span>临时投影 · 非正式完整周结论</span></div>{% endif %}
+{% if summary.reconstructed %}<p class="notice compact-notice" role="note">含历史重建事实，仅供历史研究；不代表当日实时保存的名单。</p>{% endif %}
 
 <section class="section">
   <form class="form-row daily-filter daily-filter-compact" method="get" action="/a/daily">
@@ -60,7 +63,7 @@
       </select>
     </label>
     <label class="filter-search">筛选当前列表 <input name="q" value="{{ filters.q }}" placeholder="代码、名称或行业"></label>
-    <button class="button filter-submit" type="submit">应用展示条件</button>
+    <button class="button filter-submit" type="submit">筛选</button>
   </form>
   <p class="muted applied-list-filters">计数按当前展示条件计算 · 市值{% if filters.min_cap %} ≥{{ filters.min_cap }}亿{% else %}不限{% endif %}{% if filters.q %} · 列表匹配“{{ filters.q }}”{% endif %} · 已排除风险警示股</p>
 </section>
@@ -107,7 +110,7 @@
   </nav>
 </details>
 <section class="section panel watchlist-section" id="daily-results">
-  <div class="section-heading"><div><p class="eyebrow">昨日投影 → 今日投影</p><h2>{{ {'CHANGE':'今日全部变化','ENTER':'今日预进入','PRE_ENTERED':'今日首次预进入','PRE_REENTERED':'今日再次预进入','PRE_EXITED':'今日预退出','PASSING':'当前投影池','PRE_CONTINUING':'持续预符合','DATA_GAP':'数据中断'}[filters.state] }} <small class="result-count">{{ summary.result_count }} 只</small></h2></div><div class="section-actions"><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="daily-results">下载代码（{{ summary.result_count }}）</button><button class="text-button" type="button" data-copy-tradingview-list="daily-results">复制代码</button></div></div>
+  <div class="section-heading"><div><p class="eyebrow">昨日投影 → 今日投影</p><h2>{{ {'CHANGE':'今日全部变化','ENTER':'今日预进入','PRE_ENTERED':'今日首次预进入','PRE_REENTERED':'今日再次预进入','PRE_EXITED':'今日预退出','PASSING':'当前投影池','PRE_CONTINUING':'持续预符合','DATA_GAP':'数据中断'}[filters.state] }} <small class="result-count">{{ summary.result_count }} 只</small></h2></div><div class="section-actions"><details class="utility-menu"><summary>外部行情</summary><div><button class="text-button" type="button" data-copy-tradingview-list="daily-results">复制代码</button><button class="text-button" type="button" data-download-tradingview-list="daily-results">下载代码列表</button></div></details></div></div>
   {% include "ashare/_weinstein_projection_table.html" %}
 </section>
 {% endif %}
@@ -116,7 +119,7 @@
 <section class="section panel watchlist-section" id="daily-results">
   <div class="section-heading">
     <div><p class="eyebrow">{{ '当前观察池' if filters.view == 'current' else '单方法状态' }}</p><h2>{% if filters.view == 'current' %}{{ {'all':'全部当前符合','weinstein':'Weinstein 当前符合','minervini':'Minervini 当前符合','both':'两法同时符合'}[filters.method] }}{% else %}{{ {'NEW':'新进入与重新进入','ENTERED':'仅新进入','REENTERED':'仅重新进入','CONTINUING':'持续符合','EXIT':'退出与数据中断','EXITED':'仅退出','DATA_GAP':'仅数据中断'}[filters.state] }}{% endif %}</h2></div>
-    <div class="section-actions"><span class="muted">显示 {{ summary.result_count }} 只</span><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="daily-results">下载外部行情代码列表（{{ summary.result_count }}）</button><button class="text-button" type="button" data-copy-tradingview-list="daily-results">复制代码</button></div>
+    <div class="section-actions"><span class="muted">显示 {{ summary.result_count }} 只</span><details class="utility-menu"><summary>外部行情</summary><div><button class="text-button" type="button" data-copy-tradingview-list="daily-results">复制代码</button><button class="text-button" type="button" data-download-tradingview-list="daily-results">下载代码列表</button></div></details></div>
   </div>
   {% set navigation_section = 'daily-results' %}{% set section_rows = rows %}{% include "ashare/_watchlist_table.html" %}
 </section>

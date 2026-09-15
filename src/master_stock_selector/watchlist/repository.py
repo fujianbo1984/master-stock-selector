@@ -3799,47 +3799,12 @@ class WatchlistRepository:
                 """,
                 (as_of_date,),
             ).fetchall()
-            minervini_rows = connection.execute(
-                """
-                SELECT f.*
-                FROM index_minervini_stage2_daily_fact AS f
-                JOIN (
-                    SELECT index_symbol, MAX(as_of_date) AS as_of_date
-                    FROM index_minervini_stage2_daily_fact
-                    WHERE as_of_date <= ?
-                    GROUP BY index_symbol
-                ) AS latest
-                  ON latest.index_symbol = f.index_symbol
-                 AND latest.as_of_date = f.as_of_date
-                """,
-                (as_of_date,),
-            ).fetchall()
-        minervini_by_symbol = {
-            str(row["index_symbol"]): {
-                **dict(row),
-                "evidence": json.loads(str(row["evidence_json"]) or "{}"),
-                "is_stage2": str(row["result"]) == "PASS",
-            }
-            for row in minervini_rows
-        }
         result: list[dict[str, Any]] = []
         for row in rows:
             item = {
                 **dict(row),
                 "evidence": json.loads(str(row["evidence_json"]) or "{}"),
             }
-            item["minervini"] = minervini_by_symbol.get(
-                str(row["index_symbol"]),
-                {
-                    "as_of_date": as_of_date,
-                    "index_symbol": str(row["index_symbol"]),
-                    "index_name": str(row["index_name"]),
-                    "result": "UNKNOWN",
-                    "policy_version": "",
-                    "evidence": {"reason": "NO_MINERVINI_INDEX_FACT"},
-                    "is_stage2": False,
-                },
-            )
             result.append(item)
         return result
 

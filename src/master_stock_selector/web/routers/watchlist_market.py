@@ -276,11 +276,6 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
                 "weinstein_policy_version": (
                     str(rows[0].get("policy_version") or "") if rows else "weinstein-stage-30w-v1"
                 ),
-                "minervini_policy_version": (
-                    str(rows[0].get("minervini", {}).get("policy_version") or "")
-                    if rows
-                    else "minervini-index-stage2-price-template-v1"
-                ),
             },
         )
 
@@ -353,7 +348,6 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
             "query_date": query_date,
             "methods": {
                 "weinstein": "full_stage",
-                "minervini": "stage2_only",
             },
             "rows": [_decorate_index(row) for row in repository.index_facts(query_date)],
         }

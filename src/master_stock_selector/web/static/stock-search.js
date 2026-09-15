@@ -5,6 +5,11 @@
   const list = form.querySelector('[role=listbox]');
   const status = form.querySelector('[role=status]');
   let timer, controller, rows = [], active = -1, revision = 0;
+  const openResult = index => {
+    const source = `/a/stocks?${new URLSearchParams(new FormData(form))}`;
+    if (window.researchNavigation) window.researchNavigation.search(rows, index, source);
+    else window.location.assign(rows[index].url);
+  };
   const close = () => {
     revision += 1;
     clearTimeout(timer);
@@ -51,7 +56,7 @@
           const info = document.createElement('small');
           info.textContent = `${row.industry || '行业待补'} · ${row.data_status}${row.is_st ? ' · 风险警示' : ''}${row.is_suspended ? ' · 停牌' : ''}`;
           option.append(name, info);
-          option.addEventListener('pointerdown', event => { event.preventDefault(); window.location.assign(row.url); });
+          option.addEventListener('pointerdown', event => { event.preventDefault(); openResult(i); });
           list.append(option);
         });
         list.hidden = !rows.length;
@@ -72,7 +77,7 @@
         select(active < 0 ? (event.key === 'ArrowDown' ? 0 : rows.length - 1) : (active + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
       } else if (event.key === 'Enter' && active >= 0) {
         event.preventDefault();
-        window.location.assign(rows[active].url);
+        openResult(active);
       }
     }
   });
