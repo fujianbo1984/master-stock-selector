@@ -86,7 +86,7 @@
     </div>
   {% if rows %}
   <div class="table-wrap brooks-table-wrap">
-    <table class="watchlist-table brooks-table" data-sortable="true"{% if rows|length > 40 %} data-page-size="40"{% endif %}>
+    <table class="watchlist-table brooks-table" data-sortable="true">
       <thead><tr><th>事件 / 股票</th><th>触发 / Leg1</th><th>触发窗口质量</th><th>周期回调</th><th>H1 证据</th><th>失效距离</th><th>事实日期</th></tr></thead>
       <tbody>
       {% for row in rows %}
