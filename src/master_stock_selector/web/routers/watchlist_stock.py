@@ -325,7 +325,6 @@ def build_stock_router(context: WatchlistRouteContext) -> APIRouter:
         payload["anomaly_evidence"] = _stock_anomaly_evidence(
             repository, market_reader, payload, query_date, symbol
         )
-        payload["chart_ready"] = len(market_reader.safe_stock_chart_bars(symbol, query_date, limit=30)) >= 2
         payload["external_urls"] = _stock_external_urls(symbol)
         return render(
             request,

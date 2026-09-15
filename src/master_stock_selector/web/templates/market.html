@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ stock.identity.name or stock.symbol if stock is defined else nav_active or "股票研究" }} · 龙场悟道{% endblock %}
 {% block body %}
+{% if not chart_only %}
 <header class="research-header">
   <a class="research-brand" href="/" aria-label="返回龙场悟道首页">
     <span class="research-brand-name">龙场悟道</span>
@@ -37,7 +38,7 @@
       <span class="research-account-copy"><small>个人工作区</small><strong>{{ current_user.display_name or current_user.username }}</strong></span>
     </a>
     <div class="research-account-actions">
-      <details class="utility-menu"><summary>更多</summary><div><a href="/a/owner">站长动态与共享</a><a href="/a/reading">阅读</a><a href="/a/plan">交易计划</a></div></details>
+      <details class="utility-menu"><summary>更多</summary><div><a href="/a/review">交易复盘</a><a href="/a/experimental">早期活跃 · 实验</a><a href="/a/owner">分享</a><a href="/a/reading">阅读</a><a href="/a/plan">交易计划</a></div></details>
       <form method="post" action="/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="text-button" type="submit">退出</button>
@@ -53,11 +54,12 @@
 <nav class="research-subnav" aria-label="{{ group.label }}">
     {% for label, href in group['items'] if label not in ['发现股票', '实验筛选', '交易计划'] %}<a {% if nav_active == label %}class="active" aria-current="page" {% endif %}href="{{ href }}{% if research_date %}?date={{ research_date }}{% endif %}">{{ label }}</a>{% endfor %}
   {% if group.label == '发现股票' %}<details class="utility-menu"><summary>帮助与实验{% if nav_active in ['发现股票','实验筛选'] %} · {{ nav_active }}{% endif %}</summary><div><a href="/a/discover{% if research_date %}?date={{ research_date }}{% endif %}">使用导览</a><a href="/a/experimental">早期活跃 · 实验</a></div></details>{% endif %}
-  {% if group.label == '我的研究' %}<details class="utility-menu"><summary>研究工具{% if nav_active == '交易计划' %} · 交易计划{% endif %}</summary><div><a href="/a/plan">交易计划</a><a href="/a/reading">阅读</a><a href="/a/owner">站长动态与共享</a></div></details>{% endif %}
+
 </nav>
 {% endfor %}
 
-<script src="/static/stock-search.js?v=20260915-list-v5"></script>
+<script src="/static/stock-search.js?v=20260915-simple-v1"></script>
+{% endif %}
 {% if not suppress_page_intro %}
 <section class="page-intro" aria-labelledby="page-title">
   <div>

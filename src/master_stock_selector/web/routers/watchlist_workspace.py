@@ -177,6 +177,7 @@ def build_workspace_router(context: WatchlistRouteContext) -> APIRouter:
         date: CalendarDate | None = None,
         state: str = "WATCH",
         tag: str = "",
+        changes: bool = False,
     ) -> Response:
         user = current_user(request)
         if user is None:
@@ -234,7 +235,14 @@ def build_workspace_router(context: WatchlistRouteContext) -> APIRouter:
                 if selected_tag.casefold()
                 in {str(item_tag).casefold() for item_tag in item["manual"].get("tags", [])}
             ]
+        if changes:
+            visible_items = [item for item in visible_items if any(
+                method.get("state") in {"ENTERED", "REENTERED", "EXITED", "DATA_GAP"}
+                for method in (item.get("public") or {}).get("methods", {}).values()
+            )]
         observation_query = {"state": selected_state, "date": query_date}
+        if changes:
+            observation_query["changes"] = "true"
         if selected_state == "WATCH" and selected_tag:
             observation_query["tag"] = selected_tag
         return render(
@@ -246,6 +254,7 @@ def build_workspace_router(context: WatchlistRouteContext) -> APIRouter:
                 "latest_date": repository.latest_fact_date(),
                 "selected_state": selected_state,
                 "selected_tag": selected_tag,
+                "changes_only": changes,
                 "watch_tags": [
                     {"label": label, "count": count} for label, count in sorted(watch_tags.items())
                 ],

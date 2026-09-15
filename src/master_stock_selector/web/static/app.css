@@ -2352,9 +2352,6 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .stock-method-summary strong { font-size: 18px; margin: 6px 0; }
 .stock-workspace-nav { position: sticky; top: 0; z-index: 15; display: flex; gap: 24px; padding: 13px 16px; margin-top: 12px; background: var(--panel, #fff); border: 1px solid var(--line); }
 .stock-workspace-nav a { color: inherit; font-weight: 700; }
-.stock-price-workspace, #method-evidence, #brooks-evidence, #personal-research, #method-history { scroll-margin-top: 64px; }
-.stock-price-workspace .chart-workbench { margin: 0; border: 0; }
-.stock-price-workspace { padding: 12px; }
 .stock-search-results .form-row { margin: 20px 0; }
 .stock-search-results table { width: 100%; }
 .watchlist-table thead th { position: sticky; top: 0; z-index: 2; background: var(--panel, #fff); }
@@ -2367,7 +2364,6 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .brooks-filter-bar { grid-template-columns: 136px 150px minmax(120px, 1fr) 140px minmax(170px, 1.4fr) 100px; }
 .brooks-filter-bar:has([name="lookback"]) { grid-template-columns: 136px 150px 145px minmax(120px, 1fr) 140px; }
 .brooks-filter-bar:has([name="lookback"]) .brooks-filter-search { grid-column: 1 / 5; }
-.stock-price-workspace .stock-chart-stage { height: 520px; }
 .global-stock-status { position: absolute; top: calc(100% + 4px); right: 0; z-index: 81; max-width: 480px; font-size: 12px; background: var(--panel, #fff); }
 .global-stock-status:empty { display: none; }
 .global-stock-status:not(:empty) { padding: 5px 10px; border: 1px solid var(--line); }
@@ -2378,9 +2374,6 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .research-subnav { display:flex; align-items:center; gap:24px; padding:12px 4px; border-bottom:1px solid var(--line); font-size:13px; }
 .research-subnav strong { color:var(--muted); font-size:12px; }
 .research-subnav a.active { color:var(--accent); font-weight:700; }
-.workspace-welcome { display:flex; justify-content:space-between; align-items:center; gap:40px; padding:30px 0; }
-.workspace-welcome h1 { font-family:"Songti SC",serif; font-size:34px; margin:10px 0 18px; }
-.workspace-welcome p { max-width:720px; line-height:1.8; }
 .workspace-start { display:grid; gap:12px; min-width:210px; }
 .workspace-start .button { justify-content:center; }
 .research-route { display:grid; grid-template-columns:repeat(3,1fr); gap:32px; padding:12px 0; list-style:none; counter-reset:route; }
@@ -2420,9 +2413,6 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .research-subnav { gap: 22px; padding: 8px 4px; }
 .page-intro { min-height: 0; padding: 14px 0; margin-bottom: 12px; }
 .page-intro h1 { font-size: 26px; }
-.workspace-welcome { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 24px; padding: 14px 0; }
-.workspace-welcome h1 { font-size: 28px; margin: 0 0 8px; }
-.workspace-welcome p { margin: 0; }
 .workspace-start { display: flex; gap: 10px; }
 .workspace-direct-routes { display: flex; gap: 24px; grid-column: 1 / -1; font-size: 13px; }
 .workspace-returning { padding: 8px 0; }
@@ -2475,10 +2465,6 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .stock-method-summary strong { font-size: 15px; margin: 0; text-align: right; }
 .stock-method-summary small { grid-column: 1 / -1; font-size: 11px; }
 .stock-workspace-nav { gap: 24px; padding: 9px 12px; margin-top: 8px; font-size: 13px; }
-.stock-price-workspace { padding: 8px; }
-.stock-price-workspace > .section-heading { margin: 0 0 6px; padding: 0; }
-.stock-price-workspace > .section-heading h2 { font-size: 17px; margin: 0; }
-.stock-price-workspace .stock-chart-stage { height: 400px; }
 .brooks-page-hero { min-height: 0; padding: 12px 0; border: 0; background: none; box-shadow: none; }
 .brooks-page-heading h1 { font-size: 26px; margin: 0 0 6px; }
 .brooks-stage { min-height: 64px; padding-top: 10px; padding-bottom: 10px; }
@@ -2491,7 +2477,6 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .watchlist-section > .section-heading h2 { margin: 0; font-size: 22px; }
 .watchlist-table .stock-primary-link { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .watchlist-table .stock-secondary-links { flex-basis: 100%; }
-.stock-price-workspace .stock-chart-stage { min-height: 360px; }
 
 /* Optional daily expansion facts; shares the existing KC. */
 .climax-panel { margin: 10px 0; padding: 12px 16px; border: 1px solid #d8d0c3; border-left: 3px solid #b97720; background: #fffdfa; font-size: 13px; }
@@ -2532,37 +2517,16 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .watchlist-table .quote-line { flex-wrap: wrap; }
 .positive, .quote-up { color: #b33e2a; }
 .negative, .quote-down { color: #28744f; }
-.stock-research-layout { display: grid; grid-template-columns: minmax(0, 1fr) 292px; gap: 12px; align-items: start; }
-.stock-research-layout > .stock-price-workspace { min-width: 0; }
-.stock-research-sidebar { position: sticky; top: 12px; }
-.stock-research-sidebar .panel { padding: 14px; }
-.stock-research-sidebar .ledger-review-heading { display: block; }
-.stock-research-sidebar h2 { font-size: 18px; margin-bottom: 8px; }
-.stock-research-sidebar .ledger-review-form, .stock-research-sidebar .ledger-review-form.has-tags { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
-.stock-research-sidebar .ledger-review-form > * { width: 100%; }
-.stock-research-sidebar textarea { min-height: 140px; resize: vertical; }
-.stock-research-sidebar .observation-detail-actions { flex-wrap: wrap; gap: 6px; }
-.stock-research-sidebar .review-timestamp { font-size: 12px; }
-.stock-research-sidebar .review-timestamp br { display: none; }
-.stock-research-layout.is-expanded { grid-template-columns: minmax(0, 1fr); }
-.stock-research-layout.is-expanded .stock-research-sidebar { position: static; }
-.stock-research-layout.is-expanded .stock-price-workspace .stock-chart-stage { height: 65vh; min-height: 460px; }
 .stock-ledger-identity .stock-identity-main p { font-size: 13px; margin: 2px 0; }
 .stock-ledger-identity h1 { font-size: 23px; }
 .stock-market-ledger { margin: 0; }
 .stock-method-summary small { font-size: 12px; }
 .stock-workspace-nav { margin-top: 4px; padding: 7px 12px; }
-.stock-research-layout .chart-toolbar-main { flex-wrap: wrap; gap: 6px; }
-.stock-research-layout .chart-toolbar { gap: 6px; }
-.stock-research-layout .chart-legend { flex-wrap: wrap; }
 .chart-appearance-settings { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; }
 .kc-settings-panel { z-index: 85; }
 .market-reading-help { margin-bottom: 12px; }
 .market-reading-help > summary, .workspace-help > summary, .plan-grill-panel > summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 6px 0; }
-.workspace-welcome { padding: 12px 0; }
 .workspace-help { padding: 10px 16px; }
-.workspace-method-changes { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 13px; }
-.workspace-method-changes small { color: var(--muted); }
 [data-recent-research-list] { display: flex; gap: 12px; flex-wrap: wrap; }
 [data-recent-research-list] a { padding: 6px 12px; border: 1px solid var(--line); font-size: 13px; }
 [hidden] { display: none !important; }
@@ -2571,25 +2535,15 @@ a.reading-pagination-item:hover { border-color: var(--accent); background: var(-
 .candidate-controls > .query-mode-switch { margin: 0; padding: 0; flex: 0 0 auto; }
 .candidate-controls > .home-summary { margin: 0 0 0 auto; }
 .research-main:has(.watchlist-hero) .watchlist-section > .section-heading { padding: 4px 4px 8px; margin: 0; }
-.stock-research-sidebar .private-login-panel { display: block; }
-.stock-research-sidebar .private-login-panel p { margin: 10px 0; }
-.stock-research-sidebar .private-login-panel h2 { margin: 8px 0; }
-.stock-research-sidebar .private-login-panel .button { display: inline-block; }
-.stock-research-sidebar { min-width: 0; }
-.stock-research-sidebar .ledger-review-heading .manual-state { display: inline-block; margin-top: 5px; }
-.stock-research-sidebar input, .stock-research-sidebar textarea { min-width: 0; box-sizing: border-box; }
-.stock-research-layout { clear: both; }
 
 .observation-state-menu > summary { cursor: pointer; font-size: 13px; color: var(--accent); margin: 8px 0; }
-.stock-research-sidebar textarea { min-height: 100px; }
-.stock-research-sidebar .ledger-review-form { gap: 8px; margin-top: 8px; }
-.stock-research-sidebar .ledger-review-heading .eyebrow { display: none; }
-.stock-research-sidebar .ledger-review-heading h2 { display: inline; margin-right: 8px; }
-.stock-research-layout .chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; }
-.stock-research-layout .chart-toolbar-main { flex: 1 1 100%; }
-.stock-research-layout .drawing-tool-group { flex: 0 0 auto; }
-.stock-research-layout .kc-settings { margin-left: auto; }
 
-.stock-research-sidebar .ledger-review-form, .stock-research-sidebar .ledger-review-form.has-tags { gap: 7px; }
-.stock-research-sidebar textarea { min-height: 88px; }
-.stock-research-sidebar .ledger-review-form > button { min-height: 32px; padding: 6px 10px; }
+
+/* Dedicated desktop chart pages: no global navigation or research panels. */
+.stock-chart-body { padding: 0; }
+.stock-chart-body .research-main { max-width: none; padding: 8px 16px; margin: 0; }
+.stock-chart-body .chart-workbench { margin: 0; }
+.stock-chart-body .chart-workbench-header { padding: 4px 0 8px; }
+.stock-chart-body .stock-chart-stage { height: calc(100vh - 205px); min-height: 480px; }
+.stock-chart-body .industry-tradingview-chart { height: calc(100vh - 250px); min-height: 480px; }
+.recent-research > summary, .review-panel > summary { cursor: pointer; font-weight: 600; padding: 8px 0; }

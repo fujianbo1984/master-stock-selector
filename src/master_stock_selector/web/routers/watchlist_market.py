@@ -124,6 +124,7 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
             },
         )
 
+    @router.get("/a/industries/{industry_code}", response_class=HTMLResponse)
     @router.get("/a/industries/{industry_code}/chart", response_class=HTMLResponse)
     def industry_chart(
         request: Request,
@@ -178,6 +179,7 @@ def build_market_router(context: WatchlistRouteContext) -> APIRouter:
             "ashare/watchlist_industry_chart.html",
             {
                 "active": "行业观察",
+                "chart_only": request.url.path.endswith("/chart"),
                 "query_date": query_date,
                 "latest_date": repository.latest_fact_date(),
                 "observation": observation,

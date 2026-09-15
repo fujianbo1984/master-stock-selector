@@ -44,7 +44,7 @@
         if (!response.ok) throw new Error('search');
         const data = await response.json();
         if (current !== revision) return;
-        rows = data.rows;
+        rows = data.rows.map(row => ({...row, url: row.url.replace('?date=', '/chart?date=')}));
         list.replaceChildren();
         rows.forEach((row, i) => {
           const option = document.createElement('li');

@@ -10,7 +10,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from ...watchlist.experimental import MODELS, read_snapshot
-from ..display_time import sqlite_utc_to_shanghai
 from .auth import current_user
 from .watchlist import _selected_date
 from .watchlist_context import WatchlistRouteContext
@@ -46,54 +45,12 @@ def build_core_router(context: WatchlistRouteContext) -> APIRouter:
         user = current_user(request)
         reviews = users.reviews_for_user(user.user_id) if user else []
         active_reviews = [row for row in reviews if row["manual_state"] in {"WATCH", "FOCUS"}]
-        active_reviews.sort(
-            key=lambda row: (row["manual_state"] == "FOCUS", str(row.get("reviewed_at") or "")),
-            reverse=True,
-        )
-        names = repository.stock_names({str(row["symbol"]) for row in active_reviews})
-        public_rows = {
-            str(row["symbol"]): row
-            for row in context.cached_rows(query_date, include_liquidity=False)
-        } if active_reviews else {}
-        changes = [
-            {
-                "symbol": review["symbol"],
-                "name": names.get(str(review["symbol"])) or review["symbol"],
-                "method": method,
-            }
-            for review in active_reviews
-            for method in public_rows.get(str(review["symbol"]), {}).get("methods", {}).values()
-            if method.get("state") in {"ENTERED", "REENTERED", "EXITED", "DATA_GAP"}
-        ]
-        recent = [
-            {
-                **row,
-                "name": names.get(str(row["symbol"])) or row["symbol"],
-                "updated_label": sqlite_utc_to_shanghai(row.get("reviewed_at")),
-                "methods": public_rows.get(str(row["symbol"]), {}).get("methods", {}),
-            }
-            for row in active_reviews[:6]
-        ]
-        hot_industries = sorted(
-            [row for row in context.cached_industry_heat(query_date) if bool(row.get("is_hot"))],
-            key=lambda row: (
-                int(row.get("return_5d_rank") or 1000000),
-                str(row.get("industry_code") or ""),
-            ),
-        )[:3]
-        return context.render(
-            request,
-            "ashare/dashboard.html",
-            {
-                "active": "工作台",
-                "query_date": query_date,
-                "recent_observations": recent,
-                "observation_changes": changes[:8],
-                "observation_change_count": len(changes),
-                "observation_count": len(active_reviews),
-                "hot_industries": hot_industries,
-            },
-        )
+        target = "/a/observations" if active_reviews else "/a/daily"
+        state = "FOCUS" if any(row["manual_state"] == "FOCUS" for row in active_reviews) else "WATCH"
+        query = {"date": query_date}
+        if active_reviews:
+            query["state"] = state
+        return RedirectResponse(f"{target}?{urlencode(query)}", status_code=307)
 
     @router.get("/a/discover", response_class=HTMLResponse)
     def discover(request: Request, date: CalendarDate | None = None) -> Response:

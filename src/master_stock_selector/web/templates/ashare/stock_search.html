@@ -11,7 +11,7 @@
   </form>
   {% if rows %}<p class="muted">截至 {{ query_date }} · 显示前 {{ rows|length }} 个匹配结果</p>
   <table class="watchlist-table"><thead><tr><th>股票</th><th>行业</th><th>数据状态</th><th>行情日期</th><th>方法事实日期</th></tr></thead><tbody>
-  {% for row in rows %}<tr><td><a class="stock-detail-link" href="{{ row.url }}"><strong>{{ row.name or row.symbol }}</strong> {{ row.symbol }}</a>{% if row.is_st %}<span class="tag tag-caution">风险警示</span>{% endif %}{% if row.is_suspended %}<span class="tag tag-muted">停牌</span>{% endif %}</td><td>{{ row.industry or '暂无行业资料' }}</td><td>{{ row.data_status }}</td><td>{{ row.market_date or '暂无' }}</td><td>{{ row.fact_date or '暂无' }}</td></tr>{% endfor %}
+  {% for row in rows %}<tr><td><a class="stock-detail-link" href="{{ row.url|replace('?date=', '/chart?date=') }}"><strong>{{ row.name or row.symbol }}</strong> {{ row.symbol }}</a>{% if row.is_st %}<span class="tag tag-caution">风险警示</span>{% endif %}{% if row.is_suspended %}<span class="tag tag-muted">停牌</span>{% endif %}</td><td>{{ row.industry or '暂无行业资料' }}</td><td>{{ row.data_status }}</td><td>{{ row.market_date or '暂无' }}</td><td>{{ row.fact_date or '暂无' }}</td></tr>{% endfor %}
   </tbody></table>
   {% elif q %}<div class="empty" role="status">截至 {{ query_date }}，库内未找到匹配股票。请检查代码、名称或查询日期。</div>
   {% else %}<div class="empty">输入代码或名称，查询已在库的沪深股票。</div>{% endif %}

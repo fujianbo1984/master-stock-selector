@@ -1,5 +1,7 @@
 {% extends "market.html" %}
 {% set suppress_page_intro = true %}
+{% set suppress_investment_notice = chart_only %}
+{% block body_class %}{{ "stock-chart-body" if chart_only else "" }}{% endblock %}
 {% block heading %}{{ observation.industry_name }} 行业日线{% endblock %}
 {% block subtitle %}{{ observation.industry_code }} · 申万2021三级 · 数据截至 {{ query_date }}{% endblock %}
 {% block content %}
@@ -17,6 +19,7 @@
       {% if navigation.next %}<a class="button button-secondary button-compact chart-navigation-button" data-industry-next href="/a/industries/{{ navigation.next.industry_code }}/chart?date={{ query_date }}" aria-label="下一行业：{{ navigation.next.industry_name }}" title="下一行业：{{ navigation.next.industry_name }}"><img src="/static/vendor/lucide-chevron-right.svg" alt="" aria-hidden="true"></a>{% else %}<span class="button button-secondary button-compact chart-navigation-button is-disabled" aria-label="已是最后一个行业" title="已是最后一个行业" aria-disabled="true"><img src="/static/vendor/lucide-chevron-right.svg" alt="" aria-hidden="true"></span>{% endif %}
     </nav>
     {% endif %}
+    {% if chart_only %}<a class="button button-secondary" href="/a/industries/{{ observation.industry_code }}?date={{ query_date }}">行业信息与成分股</a>{% else %}<a class="button" href="/a/industries/{{ observation.industry_code }}/chart?date={{ query_date }}">打开独立K线</a>{% endif %}
     <a class="button button-secondary" href="/a/daily?date={{ query_date }}&industry={{ observation.industry_code }}">查看本行业入选股</a>
     <a class="text-link" href="/a/industries?date={{ query_date }}">返回行业观察 →</a>
   </div>
@@ -24,13 +27,9 @@
 
 <div class="notice industry-proxy-notice" role="note"><strong>口径边界：</strong>这是用于人工观察行业趋势的成分股等权代理日线，<strong>不是申万官方行业指数</strong>，也不参与 Weinstein 或 Minervini 个股判定。</div>
 
+{% if chart_only %}
 {% if chart %}
-<section class="section grid industry-chart-kpis">
-  <div class="kpi kpi-accent"><span>最新代理点位</span><strong>{{ chart.latest.close }}</strong></div>
-  <div class="kpi"><span>当日开 / 高 / 低</span><strong class="kpi-compact">{{ chart.latest.open }} / {{ chart.latest.high }} / {{ chart.latest.low }}</strong></div>
-  <div class="kpi"><span>全部区间变化</span><strong class="{{ 'positive' if chart.latest.period_return_pct >= 0 else 'negative' }}">{{ '+' if chart.latest.period_return_pct >= 0 else '' }}{{ chart.latest.period_return_pct }}%</strong></div>
-  <div class="kpi"><span>最新有效成员</span><strong>{{ chart.latest.member_count }}</strong></div>
-</section>
+
 
 <section class="section panel industry-kline-panel" data-industry-chart>
   <div class="section-heading">
@@ -47,6 +46,7 @@
 <section class="section panel"><div class="empty">当前市场库没有足够的该行业成分股开盘、最高、最低、收盘日线，不生成代理日线。</div></section>
 {% endif %}
 
+{% else %}
 {% if heat %}
 <section class="section panel industry-heat-evidence">
   <div class="section-heading"><div><p class="eyebrow">近期热度证据</p><h2>价格、广度与独立方法动态</h2></div><span class="status-marker status-{{ 'pass' if heat.is_hot else 'unknown' }}">{{ '近期热点候选' if heat.is_hot else '未进入热点候选' }}</span></div>
@@ -74,10 +74,10 @@
 </section>
 
 <section id="industry-members" class="section panel">
-  <div class="section-heading"><div><p class="eyebrow">行业成员</p><h2>当期成员与入选事实</h2></div><span class="muted">{{ members|length }} 只 · 点名称进入外部行情网站，点代码进入同花顺</span></div>
+  <div class="section-heading"><div><p class="eyebrow">行业成员</p><h2>当期成员与入选事实</h2></div><span class="muted">{{ members|length }} 只 · 点名称看独立K线，点详情核对证据</span></div>
   <div class="table-wrap"><table data-sortable="true" data-research-source-label="行业成员"><thead><tr><th>股票</th><th>Brooks</th><th>Weinstein</th><th>Minervini</th><th>站内分析</th></tr></thead><tbody>
     {% for row in members %}<tr>
-      <td data-sort="{{ row.symbol }}"><div class="stock-primary-link">{% if row.tradingview_url %}<a class="instrument-name-link" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer"><strong>{{ row.name or '名称待补' }}</strong></a>{% else %}<strong>{{ row.name or '名称待补' }}</strong>{% endif %}<span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a></span></div></td>
+      <td data-sort="{{ row.symbol }}"><div class="stock-primary-link"><a class="instrument-name-link" href="/a/stocks/{{ row.symbol }}/chart?date={{ query_date }}&amp;industry={{ observation.industry_code|urlencode }}&amp;section=industry-members"><strong>{{ row.name or '名称待补' }}</strong></a><span class="stock-secondary-links"><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.symbol }}</a></span></div></td>
       <td data-sort="{{ 2 if row.brooks_phase in ['h1','cycle_h1','new'] else 1 if row.brooks_phase else 0 }}"><span class="status-marker status-{{ 'pass' if row.brooks_phase in ['h1','cycle_h1','new'] else 'unknown' }}">{{ row.brooks_phase_label }}</span></td>
       <td><span class="status-marker status-{{ 'pass' if row.weinstein_result == 'PASS' else 'fail' if row.weinstein_result == 'FAIL' else 'unknown' }}">{{ row.weinstein_result_label }}</span>{% if row.weinstein_state_label %}<small class="table-subline">{{ row.weinstein_state_label }}</small>{% endif %}</td>
       <td><span class="status-marker status-{{ 'pass' if row.minervini_result == 'PASS' else 'fail' if row.minervini_result == 'FAIL' else 'unknown' }}">{{ row.minervini_result_label }}</span>{% if row.minervini_state_label %}<small class="table-subline">{{ row.minervini_state_label }}</small>{% endif %}</td>
@@ -85,4 +85,5 @@
     </tr>{% endfor %}
   </tbody></table></div>
 </section>
+{% endif %}
 {% endblock %}

@@ -1542,7 +1542,7 @@ def _stock_navigation(
         navigation = {
             **empty,
             "section_label": "行业成员",
-            "list_url": f"/a/industries/{quote(industry, safe='')}/chart?"
+            "list_url": f"/a/industries/{quote(industry, safe='')}?"
             + urlencode({"date": query_date}) + "#industry-members",
         }
         symbols = [str(row["symbol"]).upper() for row in members]

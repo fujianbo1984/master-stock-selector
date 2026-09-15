@@ -25,6 +25,11 @@
   };
   const token = new URL(location.href).searchParams.get('research_context');
   const context = token && /^[a-z0-9-]{1,60}$/.test(token) ? readContext(token) : null;
+  if (token && !context && stockURL(location.href)) {
+    const message = document.createElement('small');
+    message.textContent = '来源列表已过期，请返回列表重新打开。';
+    document.querySelector('.chart-hero-actions')?.append(message);
+  }
   if (context && Array.isArray(context.entries)) {
     const current = stockURL(location.href);
     const selectedIndex = Number(new URL(location.href).searchParams.get('research_index'));
@@ -105,8 +110,8 @@
       location.assign(target.href);
     }
   };
-  const containers = '.watchlist-table, .observation-list, .workspace-recent-list, #industry-members table, [data-research-list]';
-  const rowSelector = 'tbody tr, .observation-item, .workspace-recent-list > article, [data-research-row]';
+  const containers = '.watchlist-table, .observation-list, #industry-members table, [data-research-list]';
+  const rowSelector = 'tbody tr, .observation-item, [data-research-row]';
   const listRows = table => {
     const rows = Array.from(table.querySelectorAll(rowSelector));
     return (rows.length ? rows : Array.from(table.children)).filter(row => !row.hidden && !row.closest('[hidden]'));
@@ -172,6 +177,7 @@
       const url = stockURL(item?.url);
       if (!url) return;
       const a = document.createElement('a');
+      url.pathname += '/chart';
       a.href = url.href;
       a.textContent = `${item.label || url.pathname.split('/').pop()} · ${url.searchParams.get('date') || '最新可用日'}`;
       list.append(a);
@@ -193,15 +199,6 @@
       requestAnimationFrame(() => window.scrollTo(0, context.scroll || 0));
     }
   }
-  document.querySelectorAll('[data-workspace-expand]').forEach(button => {
-    const workspace = button.closest('[data-research-workspace]');
-    button.addEventListener('click', () => {
-      const expanded = workspace.classList.toggle('is-expanded');
-      button.setAttribute('aria-expanded', String(expanded));
-      button.textContent = expanded ? '恢复研究布局' : '放大图表';
-      window.dispatchEvent(new Event('resize'));
-    });
-  });
   document.querySelectorAll('[data-persist-disclosure]').forEach(details => {
     const key = `research-help:${details.dataset.persistDisclosure}`;
     details.open = read(key) === true;

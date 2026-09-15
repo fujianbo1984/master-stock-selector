@@ -25,7 +25,7 @@
   <div class="table-wrap"><table class="watchlist-table">
     <thead><tr><th>排名 / 股票</th><th>活跃度<br>0–12分</th><th>换手率</th><th>5/20日<br>均量比</th><th>20日涨/跌<br>成交额比</th><th>20日相对<br>大盘收益</th><th>前60日<br>涨停次数</th><th>20日<br>高低区间</th><th>观察记录</th></tr></thead>
     <tbody>{% for row in rows %}<tr>
-      <td><strong>{{ row.rank }} · <a href="/a/stocks/{{ row.symbol }}?date={{ query_date }}">{{ row.name or row.symbol }}</a></strong><small class="table-subline">{{ row.symbol }} · <a href="/a/stocks/{{ row.symbol }}/chart?date={{ query_date }}">K线</a></small></td>
+      <td><strong>{{ row.rank }} · <a href="/a/stocks/{{ row.symbol }}/chart?date={{ query_date }}">{{ row.name or row.symbol }}</a></strong><small class="table-subline">{{ row.symbol }} · <a href="/a/stocks/{{ row.symbol }}?date={{ query_date }}">信息</a></small></td>
       <td>{{ '%.3f'|format(row.score) }}</td>
       <td>{{ '%.2f%%'|format(row.turnover) }}</td>
       <td>{{ '%.2f'|format(row.volume_dry) }}倍</td>

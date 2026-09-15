@@ -98,7 +98,7 @@
             </div>
             <div class="owner-activity-body">
               <header>
-                <a class="owner-activity-subject" href="{{ item.href }}{% if item.href.startswith('/a/stocks/') %}?date={{ item.day }}{% endif %}">
+                <a class="owner-activity-subject" href="{{ item.href }}{% if item.href.startswith('/a/stocks/') %}/chart?date={{ item.day }}{% endif %}">
                   <strong>{{ item.subject }}</strong>{% if item.symbol %}<small>{{ item.symbol }}</small>{% endif %}
                 </a>
                 <strong class="owner-activity-summary">{{ item.summary }}</strong>
@@ -143,7 +143,7 @@
         {% if positions %}
         <div class="owner-rail-positions" data-research-list data-research-source-label="站主持仓">
           {% for item in positions[:4] %}
-          <a href="/a/stocks/{{ item.symbol }}">
+          <a href="/a/stocks/{{ item.symbol }}/chart">
             <div class="owner-position-title"><span><strong>{{ item.stock_name }}</strong><small>{{ item.symbol }}</small></span><b>{{ item.remaining_percent }}%<small>剩余仓位</small></b></div>
             <dl>
               <div><dt>持仓均价</dt><dd>{{ item.average_price or '—' }}</dd></div>

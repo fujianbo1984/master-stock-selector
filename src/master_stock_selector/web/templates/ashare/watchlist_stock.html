@@ -38,15 +38,8 @@
   <a href="#method-evidence"><span>Minervini · 日线</span><strong>{{ minervini.result_label if minervini else '暂无事实' }}</strong><small>{{ minervini.as_of_date if minervini else '历史不足或尚未计算' }}</small></a>
   <a href="#brooks-evidence"><span>Brooks · 独立事件</span><strong>{{ brooks.state_label if brooks else '暂无事件事实' }}</strong><small>{{ brooks.as_of_date if brooks else '没有事件不等于方法不符合' }}</small></a>
 </section>
-<nav class="stock-workspace-nav" aria-label="个股研究区域"><a href="#stock-price-workspace">价格图</a><a href="#method-evidence">两法证据</a><a href="#brooks-evidence">Brooks 事件</a>{% if private_workspace %}<a href="#personal-research">我的观察</a>{% endif %}<a href="#method-history">方法历史</a></nav>
-<div class="stock-research-layout" data-research-workspace>
-<section id="stock-price-workspace" class="section panel stock-price-workspace">
-  <div class="section-heading"><h2>价格与方法</h2><div class="section-actions"><button class="text-button" type="button" data-workspace-expand aria-expanded="false">放大图表</button><details class="utility-menu"><summary>更多视图</summary><div><a href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.entry_query }}" target="_blank" rel="noopener noreferrer">独立图表窗口</a></div></details></div></div>
-  {% if stock.chart_ready %}{% set compact_chart = true %}{% include "ashare/_stock_chart_workspace.html" %}
-  {% else %}<div class="empty" role="status">截至 {{ query_date }}，可追溯复权行情不足，暂不能绘制价格图。已有资料与方法事实仍可在本页查看。</div>{% endif %}
-</section>
-
-<aside class="stock-research-sidebar">{% if private_workspace %}<section id="personal-research" class="section panel manual-review-panel ledger-review-panel">
+<nav class="stock-workspace-nav" aria-label="个股研究区域"><a href="/a/stocks/{{ stock.symbol }}/chart?{{ navigation.entry_query }}">打开独立K线</a><a href="#method-evidence">两法证据</a><a href="#brooks-evidence">Brooks 事件</a>{% if private_workspace %}<a href="#personal-research">我的观察</a>{% endif %}<a href="#method-history">方法历史</a></nav>
+{% if private_workspace %}<section id="personal-research" class="section panel manual-review-panel ledger-review-panel">
   <div class="ledger-review-heading"><div><p class="eyebrow">个人观察</p><h2>我的判断与观察</h2></div><span class="manual-state manual-{{ stock.manual.manual_state|lower }}">{{ stock.manual_label }}</span></div>
 <details class="observation-state-menu"><summary>调整观察状态</summary>  <div class="observation-detail-actions" aria-label="更改我的观察状态">
     {% if stock.manual.manual_state == 'UNREVIEWED' %}{% set observation_actions = [('WATCH','加入观察'),('FOCUS','设为重点')] %}
@@ -65,8 +58,7 @@
   </form>
   {% if is_site_owner and stock.manual.manual_state == 'FOCUS' %}<p class="reading-note observation-share-note">当前为重点观察，此备注将在“站长动态”中向已登录用户展示。</p>{% endif %}
 </section>
-{% else %}<section id="personal-research" class="section panel private-login-panel"><p class="eyebrow">个人工作区</p><h2>登录后记录个人观察</h2><p class="muted">观察状态、备注、价格图绘制、买卖点、成交和复盘仅你本人可见。</p><a class="button" href="/login?next={{ (request.url.path ~ ("?" ~ request.url.query if request.url.query else "") ~ "#personal-research")|urlencode }}">登录</a></section>{% endif %}</aside>
-</div>
+{% else %}<section id="personal-research" class="section panel private-login-panel"><p class="eyebrow">个人工作区</p><h2>登录后记录个人观察</h2><p class="muted">观察状态、备注、价格图绘制、买卖点、成交和复盘仅你本人可见。</p><a class="button" href="/login?next={{ (request.url.path ~ ("?" ~ request.url.query if request.url.query else "") ~ "#personal-research")|urlencode }}">登录</a></section>{% endif %}
 
 <details id="brooks-evidence" class="section stock-disclosure methodology-context"{% if brooks and (brooks.state == 'S2_H1' or navigation.section_label == 'Brooks 事件观察') %} open{% endif %}>
   <summary><span><strong>Brooks 强势股与 H1 独立证据</strong><small>{% if brooks %}{{ brooks.state_label }} · 事件 {{ brooks.signal_date }}{% else %}截至 {{ query_date }} 暂无事件{% endif %}</small></span><span class="disclosure-action">展开</span></summary>
@@ -244,7 +236,7 @@
 <details class="section stock-disclosure industry-stock-context">
   <summary><span><strong>行业背景（仅人工参考）</strong><small>{{ stock.industry.industry_name }} · 需要时进入行业页计算技术确认</small></span><span class="disclosure-action">展开</span></summary>
   <div class="stock-disclosure-body">
-    <div class="section-heading"><div><p class="eyebrow">行业背景</p><h2>行业确认详情</h2></div><a class="text-link" href="/a/industries/{{ stock.industry.industry_code }}/chart?date={{ query_date }}">查看行业确认 →</a></div>
+    <div class="section-heading"><div><p class="eyebrow">行业背景</p><h2>行业确认详情</h2></div><a class="text-link" href="/a/industries/{{ stock.industry.industry_code }}?date={{ query_date }}">查看行业确认 →</a></div>
     <p class="reading-note">所属 {{ stock.industry.industry_name }}（{{ stock.industry.industry_code }}）。行业等权代理与技术确认只在行业页按需计算。</p>
     <p class="muted">行业代理不参与 {{ stock.symbol }} 的 Weinstein 或 Minervini 结论。</p>
   </div>

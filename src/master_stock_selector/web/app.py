@@ -174,7 +174,6 @@ def create_app(
     ) -> HTMLResponse:
         user = current_user(request)
         nav_groups = [
-            {"label": "工作台", "items": [("工作台", "/a/dashboard")]},
             {
                 "label": "发现股票",
                 "items": [
@@ -185,11 +184,9 @@ def create_app(
                 ],
             },
             {
-                "label": "我的研究",
+                "label": "我的观察",
                 "items": [
                     ("我的观察", "/a/observations"),
-                    ("交易计划", "/a/plan"),
-                    ("交易复盘", "/a/review"),
                 ],
             },
             {

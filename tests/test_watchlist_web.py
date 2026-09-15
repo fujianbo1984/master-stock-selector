@@ -1071,7 +1071,7 @@ def test_daily_query_preserves_filters_and_discloses_fallbacks(tmp_path):
         "&amp;state=NEW&amp;q=%E5%B9%B3%E5%AE%89"
     ) in page.text
     assert (
-        "/a/stocks/000001.SZ?date=2026-07-31&amp;view=changes"
+        "/a/stocks/000001.SZ/chart?date=2026-07-31&amp;view=changes"
         "&amp;method=minervini&amp;min_cap=0&amp;state=NEW"
         "&amp;industry=851911.SI&amp;q=%E5%B9%B3%E5%AE%89&amp;section=daily-results"
     ) in page.text
@@ -1128,7 +1128,7 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in response.text
     assert "https://stockpage.10jqka.com.cn/000001/" in response.text
     assert (
-        'href="/a/stocks/000001.SZ?date=2026-07-31&amp;view=current&amp;method=all'
+        'href="/a/stocks/000001.SZ/chart?date=2026-07-31&amp;view=current&amp;method=all'
         "&amp;min_cap=0&amp;section=daily-results"
     ) in response.text
     assert response.text.count("kpi-link") == 4
@@ -1152,7 +1152,7 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
         "/a/observations?date=2026-07-31&min_cap=0&state=FOCUS"
     )
     focus = client.get("/a/focus", follow_redirects=True)
-    assert 'aria-current="page" href="/a/observations?date=2026-07-31">我的观察</a>' in focus.text
+    assert 'href="/a/observations?date=2026-07-31">我的观察</a>' in focus.text
     assert "个人工作区 · 测试用户" in focus.text
     assert "这一类还是空的" in focus.text
     assert "仅当前账号可见" in focus.text
@@ -1552,7 +1552,7 @@ def test_watch_observation_tags_can_be_added_filtered_and_edited(tmp_path):
     chart_before = client.get("/a/stocks/000001.SZ/chart?date=2026-07-31")
     assert '观察标签<input name="tags"' in detail_before.text
     assert "标签（可选）" in daily_before.text
-    assert 'class="chart-review-tag-input" name="tags"' in chart_before.text
+    assert 'name="tags"' not in chart_before.text
 
     added = client.post(
         "/a/stocks/000001.SZ/review",
@@ -1683,9 +1683,9 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert chart.status_code == 200
     assert "我的观察 <b>1 / 2</b>" in chart.text
     assert 'href="/a/observations?state=FOCUS&amp;date=2026-07-31"' in chart.text
-    assert "当日观察池内" in chart.text
-    assert "Minervini：符合" in chart.text
-    assert "Weinstein：符合" in chart.text
+    assert "当日观察池内" not in chart.text
+    assert "Minervini：符合" not in chart.text
+    assert "Weinstein：符合" not in chart.text
     assert "/a/stocks/000006.SZ/chart?date=2026-07-31" in chart.text
     assert "data-chart-next" in chart.text
     assert "data-chart-next href=" in chart.text
@@ -1701,9 +1701,9 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert "data-chart-status" not in chart.text
     assert 'class="app-body stock-chart-body"' in chart.text
     assert "不构成投资建议或自动买卖指令" not in chart.text
-    assert chart.text.index("stock-chart-stage") < chart.text.index("chart-anomaly-strip")
-    assert 'aria-label="我的观察"' in chart.text
-    assert "归档" in chart.text
+    assert "chart-anomaly-strip" not in chart.text
+    assert 'aria-label="我的观察"' not in chart.text
+    assert "归档" not in chart.text
     assert ">保存</button>" not in chart.text
 
     next_chart = client.get(
@@ -1746,7 +1746,7 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert updated.headers["location"].endswith("#stock-chart")
     assert "nav_next=000006.SZ" in updated.headers["location"]
     revised_chart = client.get(updated.headers["location"])
-    assert 'manual-archived">已归档' in revised_chart.text
+    assert 'manual-archived">已归档' in client.get("/a/stocks/000001.SZ").text
     assert "data-chart-next" in revised_chart.text
     assert "/a/stocks/000006.SZ/chart?date=2026-07-31" in revised_chart.text
     assert "保留既有备注" in client.get("/a/stocks/000001.SZ").text
@@ -1823,7 +1823,7 @@ def test_chart_review_keeps_position_when_manual_state_changes_sort_order(tmp_pa
 
     assert updated.status_code == 303
     after = client.get(updated.headers["location"])
-    assert 'manual-focus">重点' in after.text
+    assert 'manual-focus">重点' in client.get("/a/stocks/000001.SZ").text
     assert "新进 / 重进 <b>2 / 2</b>" in after.text
     assert 'aria-label="上一只：小盘示例"' in after.text
 
@@ -1832,7 +1832,7 @@ def test_industry_members_keep_detail_and_chart_navigation(tmp_path):
     _seed_chart_market(tmp_path / "market.sqlite3")
     client = _client(tmp_path)
     _seed_filter_cases(tmp_path / "master_watchlist.sqlite3")
-    industry_url = "/a/industries/851911.SI/chart?date=2026-07-31"
+    industry_url = "/a/industries/851911.SI?date=2026-07-31"
     listing = client.get(industry_url)
     links = re.findall(r'class="stock-detail-link" href="([^"]+)"', listing.text)
     assert len(links) == 2
@@ -1840,7 +1840,7 @@ def test_industry_members_keep_detail_and_chart_navigation(tmp_path):
     assert 'data-research-source-label="行业成员"' in listing.text
     detail = client.get(unescape(links[0]))
     assert detail.status_code == 200
-    assert "data-workspace-expand" in detail.text
+    assert "data-workspace-expand" not in detail.text
     chart_url = unescape(links[0]).replace("?", "/chart?", 1)
     chart = client.get(chart_url)
     assert chart.status_code == 200
@@ -1864,6 +1864,9 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
 
     page = client.get("/a/industries?date=2026-07-31&view=all")
     chart = client.get("/a/industries/851911.SI/chart?date=2026-07-31")
+    info = client.get("/a/industries/851911.SI?date=2026-07-31")
+    assert "data-industry-chart-canvas" not in info.text
+    assert "industry-members" not in chart.text
     payload = client.get("/api/a/industries/2026-07-31").json()
     detail = client.get("/api/a/industries/2026-07-31/851911.SI").json()
 
@@ -1871,9 +1874,9 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert chart.status_code == 200
     assert "成分股等权代理日线" in chart.text
     assert "不是申万官方行业指数" in chart.text
-    assert "行业技术确认" in chart.text
-    assert "行业确认数据不足，不作趋势判断。" in chart.text
-    assert "industry-weinstein-confirmation-v1" in chart.text
+    assert "行业技术确认" in info.text
+    assert "行业确认数据不足，不作趋势判断。" in info.text
+    assert "industry-weinstein-confirmation-v1" in info.text
     assert 'href="/a/daily?date=2026-07-31&industry=851911.SI"' in chart.text
     assert "lightweight-charts-5.1.0.js" in chart.text
     assert "industry-chart.js?v=20260826-monochrome-candles-v1" in chart.text
@@ -1889,16 +1892,14 @@ def test_industry_observation_page_and_api_are_fact_only(tmp_path):
     assert "已是最后一个行业" in chart.text
     assert '<svg class="industry-kline"' not in chart.text
     assert "全部 30 个交易日" in chart.text
-    assert chart.text.index("industry-kline-panel") < chart.text.index(
-        "industry-confirmation-panel"
-    )
+    assert "industry-confirmation-panel" in info.text
     assert "不计分、不判定“主线”" in page.text
     assert "不构成投资建议或自动买卖指令" in page.text
     assert "industry-observation-table-compact" in page.text
     assert '<th colspan="4">热度表现</th>' in page.text
     assert '<th colspan="3">方法事实</th>' in page.text
     assert 'data-sort-column="6">Brooks Leg1</th>' in page.text
-    assert "app.css?v=20260915-research-v2" in page.text
+    assert "app.css?v=20260915-simple-v1" in page.text
     assert "<th>Weinstein 新入/重进</th>" not in page.text
     assert "新/重" in page.text
     assert "小样本，仅看数量" in page.text
@@ -2294,7 +2295,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert page.status_code == 200
     assert "站内K线图" in page.text
     assert "000001.SZ 站内K线图 · 龙场悟道" in page.text  # 此日期尚无可用名称证据
-    assert "行业：股份制银行III" in page.text
+    assert "行业：股份制银行III" not in page.text
     assert "lightweight-charts-5.1.0.js" in page.text
     assert 'class="chart-workbench-title"' in page.text
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in page.text
@@ -2302,7 +2303,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert "data-chart-source=" not in page.text
     assert "data-chart-pane=" not in page.text
-    assert "stock-chart.js?v=20260915-research-v3" in page.text
+    assert "stock-chart.js?v=20260915-simple-v1" in page.text
     assert "stock-chart-source.js" not in page.text
     assert "data-chart-period-change" in page.text
     assert "data-chart-ohlcv" in page.text
@@ -2321,7 +2322,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "lucide-minus.svg" in page.text
     assert "lucide-type.svg" in page.text
     assert "data-drawing-text-editor hidden" in page.text
-    assert "当日观察池" in page.text
+    assert "当日观察池" not in page.text
     assert "当日涨跌幅" in page.text
     assert "data-kc-source" in page.text
     assert 'data-chart-limit="all"' in page.text
@@ -2339,8 +2340,8 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert 'data-framework-layer="minervini"' in page.text
     assert 'data-framework-layer="weinstein" checked' in page.text
     assert "data-keltner checked" in page.text
-    assert "data-b1 checked" in page.text
-    assert "data-trade-info checked" in page.text
+    assert "data-b1 checked" not in page.text
+    assert "data-trade-info checked" not in page.text
     assert "> 成交信息</label>" in page.text
     assert "A股日线校准：20 / 20 / 2.35" in page.text
     assert "Adam原始参考：20 / 20 / 2.25" in page.text
@@ -2349,7 +2350,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
         'data-kc-multiplier type="number" min="0.1" max="20" step="0.01" value="2.35"' in page.text
     )
     assert "data-method-layer=" not in page.text
-    assert "data-chart-framework-panel" in page.text
+    assert "data-chart-framework-panel" not in page.text
     assert page.text.count("> 均线</label>") == 2
     assert "M大师均线与RS" not in page.text
     assert "W大师均线" not in page.text
@@ -2358,13 +2359,13 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "双框架摘要" not in page.text
     assert "data-chart-record" not in page.text
     assert "录入成交" not in page.text
-    assert "data-chart-method-timeline" in page.text
-    assert "data-chart-anomaly-evidence" in page.text
-    assert "异常交易复核" in page.text
-    assert 'data-anomaly-url="/api/a/stocks/000001.SZ/anomaly?date=2026-06-30"' in page.text
+    assert "data-chart-method-timeline" not in page.text
+    assert "data-chart-anomaly-evidence" not in page.text
+    assert "异常交易复核" not in page.text
+    assert 'data-anomaly-url="/api/a/stocks/000001.SZ/anomaly?date=2026-06-30"' not in page.text
     assert "daily-anomaly-review-v1" not in page.text
-    assert "异常证据将在图表首屏之后独立加载" in page.text
-    assert "只提供复核证据，不改变 Weinstein 或 Minervini 结论" in page.text
+    assert "异常证据将在图表首屏之后独立加载" not in page.text
+    assert "只提供复核证据，不改变 Weinstein 或 Minervini 结论" not in page.text
     assert "状态事件可用区间" not in page.text
     assert "W/M 标志只表示规则观察状态变化" not in page.text
     assert "画线仅保存为个人观察标注" not in page.text
@@ -3018,7 +3019,7 @@ def test_stored_stock_search_includes_market_only_and_is_read_only(tmp_path):
     assert page.status_code == 200
     assert "暂无计算事实" in page.text
     assert "返回搜索结果" in page.text
-    assert "可追溯复权行情不足" in page.text
+    assert "data-stock-chart " not in page.text
     assert client.get("/a/stocks/600999/chart?date=2026-07-31").status_code == 200
     assert [path.read_bytes() for path in paths] == before
     assert client.get("/a/stocks/999999.SH").status_code == 404
@@ -3054,26 +3055,26 @@ def test_stock_detail_cutoff_excludes_future_facts_and_identity(tmp_path):
     assert 'value="2026-01-01"' in page.text
 
 
-def test_detail_reuses_chart_workspace_without_relaxing_framing_policy(tmp_path):
+def test_only_dedicated_chart_page_renders_chart_without_relaxing_framing_policy(tmp_path):
     client = _client(tmp_path)
     _seed_chart_market(tmp_path / "market.sqlite3")
     page = client.get("/a/stocks/000001.SZ?date=2026-07-31")
     assert page.status_code == 200
-    assert "data-stock-chart " in page.text
+    assert "data-stock-chart " not in page.text
     assert "<iframe" not in page.text
     assert page.headers["X-Frame-Options"] == "DENY"
     chart = client.get("/a/stocks/000001.SZ/chart?date=2026-07-31")
     assert chart.headers["X-Frame-Options"] == "DENY"
-    assert "data-stock-search" in chart.text
+    assert "data-stock-search" not in chart.text
+    assert "data-stock-chart " in chart.text
 
 
 def test_research_routes_guest_and_private_observation_return(tmp_path):
     client = _client(tmp_path)
     guest = TestClient(client.app)
     home = guest.get("/")
-    assert home.url.path == "/a/dashboard"
-    assert "从一只股票，开始有依据的观察" in home.text
-    assert "寻找研究对象" in home.text and "查询指定股票" in home.text
+    assert home.url.path == "/a/daily"
+    assert "趋势候选" in home.text
     for route in ("/a/dashboard", "/a/discover", "/a/observations"):
         page = client.get(route + "?date=2026-07-30")
         assert 'value="2026-07-30"' in page.text
@@ -3101,12 +3102,12 @@ def test_research_routes_guest_and_private_observation_return(tmp_path):
     )
     assert saved.headers["location"] == path + "#personal-research"
     dashboard = client.get("/a/dashboard")
-    assert "继续你的研究" in dashboard.text and note in dashboard.text
+    assert "我的观察" in dashboard.text and note in dashboard.text
     assert dashboard.headers["cache-control"] == "private, no-store"
     assert note not in guest.get("/a/dashboard").text
     assert note not in _authenticated_client(client.app, "second-reader").get("/a/dashboard").text
     observations = client.get("/a/observations?state=FOCUS")
-    assert note in observations.text and "继续研究 / 更新判断" in observations.text
+    assert note in observations.text and "信息 / 更新判断" in observations.text
     client.post(
         "/a/stocks/000001.SZ/review",
         data={
@@ -3128,12 +3129,13 @@ def test_dashboard_changes_are_date_scoped_and_private(tmp_path):
     )
     current = client.get("/a/dashboard?date=2026-07-31")
     assert current.status_code == 200
-    assert "观察对象的方法变化" in current.text
+    assert current.url.path == "/a/observations"
+    assert "仅看方法变化" in current.text
     assert "仅本人可见的复核原因" in current.text
-    assert 'href="/a/stocks/000001.SZ?date=2026-07-31"' in current.text
+    assert 'href="/a/stocks/000001.SZ/chart?date=2026-07-31' in current.text
     earlier = client.get("/a/dashboard?date=2026-07-30")
     assert "观察对象的方法变化" not in earlier.text
-    assert "查询日暂无方法事实" in earlier.text
+    assert "当前日期不在公开观察池" in earlier.text
     anonymous = TestClient(client.app).get("/a/dashboard?date=2026-07-31")
     other = _authenticated_client(client.app, "other-researcher").get(
         "/a/dashboard?date=2026-07-31"
@@ -3141,3 +3143,14 @@ def test_dashboard_changes_are_date_scoped_and_private(tmp_path):
     for response in (anonymous, other):
         assert "仅本人可见的复核原因" not in response.text
         assert "观察对象的方法变化" not in response.text
+
+
+def test_observation_changes_filter_keeps_historical_cutoff(tmp_path):
+    client = _client(tmp_path)
+    user = client.app.state.user_repository.session_user(client.cookies.get(SESSION_COOKIE))
+    client.app.state.user_repository.save_review(user.user_id, "000001.SZ", "FOCUS", "变化筛选私有备注")
+    current = client.get("/a/observations?date=2026-07-31&state=FOCUS&changes=true")
+    assert "变化筛选私有备注" in current.text
+    earlier = client.get("/a/observations?date=2026-07-30&state=FOCUS&changes=true")
+    assert "变化筛选私有备注" not in earlier.text
+    assert 'name="changes" value="true" onchange="this.form.submit()" checked' in earlier.text

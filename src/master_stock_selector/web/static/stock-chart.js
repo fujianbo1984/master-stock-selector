@@ -329,6 +329,7 @@
     }
   };
   const renderMethodEventDetail = (event) => {
+    if (!methodEventDetail) return;
     if (!event) { methodEventDetail.hidden = true; methodEventDetail.replaceChildren(); return; }
     const title = document.createElement("strong");
     const methodName = event.method === "weinstein" ? "Weinstein" : "Minervini";
