@@ -2295,7 +2295,9 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert page.status_code == 200
     assert "站内K线图" in page.text
     assert "000001.SZ 站内K线图 · 龙场悟道" in page.text  # 此日期尚无可用名称证据
-    assert "行业：股份制银行III" not in page.text
+    assert "行业：股份制银行III" in page.text
+    assert "总市值：" in page.text
+    assert "流通市值：" in page.text
     assert "lightweight-charts-5.1.0.js" in page.text
     assert 'class="chart-workbench-title"' in page.text
     assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in page.text
