@@ -821,7 +821,7 @@ def test_brooks_page_is_independent_and_does_not_claim_a_buy_signal(tmp_path: Pa
     assert "Leg1：8 个交易日" in page.text
     assert "峰值扩展跨度" not in page.text
     assert "最大连续收涨：6 日" in page.text
-    assert "data-download-tradingview-list=\"brooks-results\"" in page.text
+    assert "data-download-tradingview-list=\"brooks-results\"" not in page.text
 
     later_cycle = TestClient(app).get(
         "/a/brooks-second-leg?date=2026-07-31&state=cycle_h1"

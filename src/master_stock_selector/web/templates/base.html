@@ -188,40 +188,6 @@
       window.addEventListener("hashchange", () => activate(window.location.hash.slice(1)));
     });
 
-    const tradingViewSymbols = (groupId) => {
-      const group = document.getElementById(groupId);
-      return group
-        ? Array.from(group.querySelectorAll("[data-tradingview-symbol]"), link => link.dataset.tradingviewSymbol)
-            .filter(Boolean)
-        : [];
-    };
-
-    document.querySelectorAll("[data-download-tradingview-list]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const symbols = tradingViewSymbols(button.dataset.downloadTradingviewList);
-        if (!symbols.length) { button.textContent = "本组没有可导出的代码"; return; }
-        const file = new Blob([symbols.join(",")], { type: "text/plain;charset=utf-8" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(file);
-        link.download = "tradingview-watchlist.txt";
-        link.click();
-        URL.revokeObjectURL(link.href);
-      });
-    });
-
-    document.querySelectorAll("[data-copy-tradingview-list]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const symbols = tradingViewSymbols(button.dataset.copyTradingviewList);
-        if (!symbols.length || !navigator.clipboard) { button.textContent = "复制不可用"; return; }
-        try {
-          await navigator.clipboard.writeText(symbols.join(","));
-          button.textContent = `已复制 ${symbols.length} 个代码`;
-        } catch (_) {
-          button.textContent = "复制被浏览器阻止";
-        }
-      });
-    });
-
   </script>
   {% block scripts %}{% endblock %}
   <script src="/static/research-navigation.js?v=20260915-simple-v1"></script>

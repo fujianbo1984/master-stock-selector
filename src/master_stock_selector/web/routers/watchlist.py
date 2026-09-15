@@ -863,22 +863,10 @@ def _plain_code(symbol: str) -> str:
 def _stock_external_urls(symbol: str) -> dict[str, str]:
     value = str(symbol or "").strip().upper()
     code = _plain_code(value)
-    suffix = value.split(".", 1)[1] if "." in value else ""
-    exchange = {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}.get(suffix, "")
-    tradingview_symbol = (
-        f"{exchange}:{code}" if exchange and len(code) == 6 and code.isdigit() else ""
-    )
-    tradingview_url = (
-        f"https://cn.tradingview.com/chart/?symbol={quote(tradingview_symbol, safe='')}"
-        if tradingview_symbol
-        else ""
-    )
     tonghuashun_url = (
         f"https://stockpage.10jqka.com.cn/{code}/" if len(code) == 6 and code.isdigit() else ""
     )
     return {
-        "tradingview_url": tradingview_url,
-        "tradingview_symbol": tradingview_symbol,
         "tonghuashun_url": tonghuashun_url,
     }
 

@@ -82,7 +82,7 @@
 
     <div class="brooks-results-heading">
       <div><p class="eyebrow">当前结果</p><h2>{% if state == 'priority' %}优先观察{% elif state == 'watch' %}H1重点观察{% elif state == 'immature' %}回调未成熟{% elif state == 'deep' %}深回调/老化{% elif state == 'cycle_done' %}本轮H1已过{% elif state == 'h1' %}今日Leg1首次H1 <small>重点 {{ counts.h1_watch if facts_available else '—' }} · 未成熟 {{ counts.h1_immature if facts_available else '—' }} · 深回调 {{ counts.h1_deep if facts_available else '—' }}</small>{% elif state == 'cycle_h1' %}今日后续周期H1 <small>重点 {{ counts.cycle_h1_watch if facts_available else '—' }} · 未成熟 {{ counts.cycle_h1_immature if facts_available else '—' }} · 深回调 {{ counts.cycle_h1_deep if facts_available else '—' }}</small>{% else %}独立候选{% endif %} <small class="result-count">{{ (rows|length ~ ' 个事件') if facts_available else '未计算' }}</small></h2></div>
-      {% if rows %}<div class="section-actions"><button class="button button-secondary button-compact" type="button" data-download-tradingview-list="brooks-results">下载代码（{{ rows|length }}）</button><button class="text-button" type="button" data-copy-tradingview-list="brooks-results">复制代码</button></div>{% endif %}
+
     </div>
   {% if rows %}
   <div class="table-wrap brooks-table-wrap">
@@ -98,7 +98,7 @@
           <span class="status-marker status-{{ 'pass' if row.state_rank <= 2 else 'unknown' if row.state == 'PAUSED' else 'fail' if row.state in ['INVALIDATED','STALE'] else 'transition' }}">{{ row.state_label }}</span>
           <div class="stock-primary-link">
             <a class="instrument-name-link" href="{{ detail_url|replace('?date=', '/chart?date=') }}"><strong>{{ row.name or '名称待补' }}</strong></a>
-            <span class="stock-secondary-links"><span class="instrument-code-link">{{ row.symbol }}</span><a class="stock-detail-link" data-tradingview-symbol="{{ row.tradingview_symbol }}" href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">外部行情</a><a class="stock-detail-link" href="{{ detail_url }}">详情</a></span>
+            <span class="stock-secondary-links"><span class="instrument-code-link">{{ row.symbol }}</span><a class="stock-detail-link" href="{{ detail_url }}">详情</a></span>
           </div>
           <small class="table-subline">{{ row.industry or '行业待补' }}</small>
         </td>

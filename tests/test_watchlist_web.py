@@ -1125,7 +1125,7 @@ def test_new_site_exposes_formal_and_intraweek_watchlist_surfaces(tmp_path):
     assert "正式状态变化" in response.text
     assert 'id="daily-results"' in response.text
     assert 'id="continuing-candidates"' not in response.text
-    assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in response.text
+    assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" not in response.text
     assert "https://stockpage.10jqka.com.cn/000001/" in response.text
     assert (
         'href="/a/stocks/000001.SZ/chart?date=2026-07-31&amp;view=current&amp;method=all'
@@ -1702,8 +1702,8 @@ def test_chart_navigation_keeps_the_originating_watchlist_section_and_filters(tm
     assert 'class="app-body stock-chart-body"' in chart.text
     assert "不构成投资建议或自动买卖指令" not in chart.text
     assert "chart-anomaly-strip" not in chart.text
-    assert 'aria-label="我的观察"' not in chart.text
-    assert "归档" not in chart.text
+    assert 'aria-label="我的观察"' in chart.text
+    assert "归档" in chart.text
     assert ">保存</button>" not in chart.text
 
     next_chart = client.get(
@@ -2201,9 +2201,9 @@ def test_watchlist_excludes_st_and_includes_small_cap_by_default(tmp_path):
     assert "收 12.5" in default_page.text
     assert "+0.500 / +4.17%" in default_page.text
     assert "20日成交中位" in stock_page.text
-    assert 'data-download-tradingview-list="daily-results"' in default_page.text
-    assert 'data-copy-tradingview-list="daily-results"' in default_page.text
-    assert 'data-tradingview-symbol="SZSE:000001"' in default_page.text
+    assert 'data-download-tradingview-list="daily-results"' not in default_page.text
+    assert 'data-copy-tradingview-list="daily-results"' not in default_page.text
+    assert 'data-tradingview-symbol="SZSE:000001"' not in default_page.text
     assert "小盘示例" not in filtered_page.text
     default_payload = client.get("/api/a/watchlist/2026-07-31").json()
     assert default_payload["min_cap"] == 0
@@ -2300,7 +2300,7 @@ def test_stock_chart_uses_local_qfq_bars_keltner_and_persists_drawings(tmp_path)
     assert "流通市值：" in page.text
     assert "lightweight-charts-5.1.0.js" in page.text
     assert 'class="chart-workbench-title"' in page.text
-    assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" in page.text
+    assert "https://cn.tradingview.com/chart/?symbol=SZSE%3A000001" not in page.text
     assert "https://stockpage.10jqka.com.cn/000001/" in page.text
     assert "/a/stocks/000001.SZ/realtime?date=2026-06-30" in page.text
     assert "data-chart-source=" not in page.text

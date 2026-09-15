@@ -34,7 +34,7 @@
 <section class="section panel industry-kline-panel" data-industry-chart>
   <div class="section-heading">
     <div><p class="eyebrow">日线价格</p><h2>全部 {{ bars|length }} 个交易日</h2></div>
-    <span class="chart-legend"><i class="legend-up"></i>阳线空心 <i class="legend-down"></i>阴线实心 <i class="legend-ma20"></i>20日均线 <i class="legend-ma50"></i>50日均线 <span>图表由<a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">开源图表组件</a>提供</span></span>
+    <span class="chart-legend"><i class="legend-up"></i>阳线空心 <i class="legend-down"></i>阴线实心 <i class="legend-ma20"></i>20日均线 <i class="legend-ma50"></i>50日均线 <span>图表由开源图表组件提供</span></span>
   </div>
   <div class="industry-chart-readout" data-industry-chart-readout aria-live="polite">{{ chart.last_date }} · 开 {{ chart.latest.open }} · 高 {{ chart.latest.high }} · 低 {{ chart.latest.low }} · 收 {{ chart.latest.close }} · 有效成员 {{ chart.latest.member_count }}</div>
   <div class="industry-tradingview-chart" data-industry-chart-canvas role="img" aria-label="{{ observation.industry_name }}成分股等权代理日线，{{ chart.first_date }}至{{ chart.last_date }}"></div>

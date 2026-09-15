@@ -10,7 +10,7 @@
 
 {% if indices %}<section class="section index-stage-grid index-overview-grid" aria-label="四指数阶段摘要">
   {% for row in indices %}<article class="index-stage-card stage-{{ row.stage|lower }}">
-    <span class="index-instrument-links"><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_name }}</a><a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_symbol }}</a></span>
+    <span class="index-instrument-links">{{ row.index_name }}<a href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer">{{ row.index_symbol }}</a></span>
     <div class="index-method-result"><span>Weinstein</span><strong>{{ row.stage_label }}</strong></div>
   </article>{% endfor %}
 </section>{% endif %}
@@ -22,7 +22,7 @@
   <div class="index-detail-grid">
     {% for row in indices %}
     <article class="panel index-detail-card stage-{{ row.stage|lower }}">
-      <div class="section-heading"><div><h3><a href="{{ row.tradingview_url }}" target="_blank" rel="noopener noreferrer" title="在外部行情网站打开 {{ row.index_name }} 价格图">{{ row.index_name }}</a></h3><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.index_symbol }}">{{ row.index_symbol }}</a></div><div class="index-stage-status"><small>Weinstein</small><span class="status-marker status-{{ 'pass' if row.stage == 'STAGE_2' else 'unknown' if row.stage in ['UNKNOWN','TRANSITION'] else 'fail' }}">{{ row.stage_label }}</span></div></div>
+      <div class="section-heading"><div><h3>{{ row.index_name }}</h3><a class="instrument-code-link" href="{{ row.tonghuashun_url }}" target="_blank" rel="noopener noreferrer" title="在同花顺打开 {{ row.index_symbol }}">{{ row.index_symbol }}</a></div><div class="index-stage-status"><small>Weinstein</small><span class="status-marker status-{{ 'pass' if row.stage == 'STAGE_2' else 'unknown' if row.stage in ['UNKNOWN','TRANSITION'] else 'fail' }}">{{ row.stage_label }}</span></div></div>
       <dl class="evidence-grid">
         <div><dt>有效周结束</dt><dd>{{ row.effective_date }}</dd></div>
         <div><dt>阶段开始</dt><dd>{{ row.stage_started_on }}</dd></div>
